@@ -1,27 +1,24 @@
 #include "renderer.h"
 
-#include <QChildEvent>
+#include "camera.h"
+
+#include <QColor>
 #include <QFile>
-#include <QMatrix4x4>
-#include <QMouseEvent>
-#include <QWheelEvent>
-#include <QtMath>
 #include <rhi/qrhi.h>
 
 #include <cstring>
 
 namespace
 {
-constexpr int kMaxGlassRects = 16;  // must match MAX_RECTS in composite.frag
-constexpr int kBlurDownscale = 4;   // blur resolution = target / 4
+constexpr int kBlurDownscale = 4; // blur resolution = target / 4
 constexpr int kGridUbufSize = 64 + 8 * 16;
-constexpr int kCompositeUbufSize = 2 * 16 + kMaxGlassRects * 16;
+constexpr int kCompositeUbufSize = 2 * 16 + Renderer::MaxGlassRects * 16;
 
 QShader loadShader(const QString &name)
 {
     QFile f(QStringLiteral(":/shaders/") + name + QStringLiteral(".qsb"));
     if (!f.open(QIODevice::ReadOnly)) {
-        qWarning("Viewport: missing shader %s", qPrintable(name));
+        qWarning("Renderer: missing shader %s", qPrintable(name));
         return {};
     }
     return QShader::fromSerialized(f.readAll());
@@ -36,38 +33,25 @@ void putVec4(float *dst, const QColor &c, float w)
 }
 } // namespace
 
-Viewport::Viewport(QWidget *parent)
-    : QRhiWidget(parent)
-{
-}
+Renderer::Renderer() = default;
 
-Viewport::~Viewport() = default;
+Renderer::~Renderer() = default;
 
-void Viewport::resize(int x, int y)
+void Renderer::setGlassRects(const QList<QRectF> &rects, float cornerRadius)
 {
-    QRhiWidget::resize(x, y);
-}
-
-void Viewport::update(std::function<void()> f)
-{
-    if (f)
-    {
-        f();
-    }
-    QRhiWidget::update();
+    m_glassRects = rects.mid(0, MaxGlassRects);
+    m_glassRadius = cornerRadius;
 }
 
 // ---------------------------------------------------------------------------
 // Resources
 // ---------------------------------------------------------------------------
 
-void Viewport::initialize(QRhiCommandBuffer *)
+void Renderer::initialize(QRhi *rhi, QRhiRenderTarget *target)
 {
-    // Called on the first frame and whenever the render target changes (resize)
-    // or the QRhi itself changes (e.g. the widget moved to another window).
-    if (m_rhi != rhi()) {
-        releaseResources();
-        m_rhi = rhi();
+    if (m_rhi != rhi) {
+        release();
+        m_rhi = rhi;
 
         m_sampler.reset(m_rhi->newSampler(QRhiSampler::Linear, QRhiSampler::Linear, QRhiSampler::None,
                                           QRhiSampler::ClampToEdge, QRhiSampler::ClampToEdge));
@@ -85,16 +69,16 @@ void Viewport::initialize(QRhiCommandBuffer *)
         m_compositeUbuf = ubuf(kCompositeUbufSize);
     }
 
-    const QSize size = renderTarget()->pixelSize();
+    const QSize size = target->pixelSize();
     if (size != m_pixelSize || !m_sceneTex) {
         m_pixelSize = size;
         createSizeDependentResources();
     }
 
-    createPipelines();
+    createPipelines(target);
 }
 
-void Viewport::createSizeDependentResources()
+void Renderer::createSizeDependentResources()
 {
     const QSize blurSize = (m_pixelSize / kBlurDownscale).expandedTo(QSize(1, 1));
 
@@ -107,7 +91,7 @@ void Viewport::createSizeDependentResources()
     m_blurA = texture(blurSize);
     m_blurB = texture(blurSize);
 
-    auto target = [this](QRhiTexture *t) {
+    auto renderTarget = [this](QRhiTexture *t) {
         std::unique_ptr<QRhiTextureRenderTarget> rt(m_rhi->newTextureRenderTarget({ QRhiColorAttachment(t) }));
         // All offscreen targets have the same format: one render pass descriptor (and the
         // pipelines built with it) works for all of them, also after a resize.
@@ -117,9 +101,9 @@ void Viewport::createSizeDependentResources()
         rt->create();
         return rt;
     };
-    m_sceneRt = target(m_sceneTex.get());
-    m_blurARt = target(m_blurA.get());
-    m_blurBRt = target(m_blurB.get());
+    m_sceneRt = renderTarget(m_sceneTex.get());
+    m_blurARt = renderTarget(m_blurA.get());
+    m_blurBRt = renderTarget(m_blurB.get());
 
     using B = QRhiShaderResourceBinding;
     const auto stages = B::VertexStage | B::FragmentStage;
@@ -144,7 +128,7 @@ void Viewport::createSizeDependentResources()
                            B::sampledTexture(2, B::FragmentStage, m_blurA.get(), m_sampler.get()) });
 }
 
-void Viewport::createPipelines()
+void Renderer::createPipelines(QRhiRenderTarget *target)
 {
     // Backends where clip-space "up" and texture "up" disagree (D3D, Metal) need the
     // flipped fullscreen triangle so that texture (0,0) is the same corner everywhere.
@@ -163,16 +147,16 @@ void Viewport::createPipelines()
         return p;
     };
 
-    // Rebuilt on every initialize(): they reference the SRBs and the widget's render pass,
+    // Rebuilt on every initialize(): they reference the SRBs and the target's render pass,
     // both of which can be recreated on resize. Cheap enough at this scale.
     m_gridPipe = pipeline(QStringLiteral("grid.frag"), m_gridSrb.get(), m_offscreenRp.get(), 1);
     m_downPipe = pipeline(QStringLiteral("downsample.frag"), m_downSrb.get(), m_offscreenRp.get(), 1);
     m_blurPipe = pipeline(QStringLiteral("blur.frag"), m_blurSrbs[0].get(), m_offscreenRp.get(), 1);
     m_compositePipe = pipeline(QStringLiteral("composite.frag"), m_compositeSrb.get(),
-                               renderTarget()->renderPassDescriptor(), renderTarget()->sampleCount());
+                               target->renderPassDescriptor(), target->sampleCount());
 }
 
-void Viewport::releaseResources()
+void Renderer::release()
 {
     m_gridPipe.reset();
     m_downPipe.reset();
@@ -204,27 +188,16 @@ void Viewport::releaseResources()
 // Frame
 // ---------------------------------------------------------------------------
 
-QVector3D Viewport::cameraEye() const
-{
-    const float yaw = qDegreesToRadians(m_yaw);
-    const float pitch = qDegreesToRadians(m_pitch);
-    const QVector3D offset(qCos(pitch) * qSin(yaw), qSin(pitch), qCos(pitch) * qCos(yaw));
-    return m_target + offset * m_distance;
-}
-
-void Viewport::render(QRhiCommandBuffer *cb)
+void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const OrbitCamera &camera)
 {
     QRhiResourceUpdateBatch *rub = m_rhi->nextResourceUpdateBatch();
     const QSize blurSize = m_blurA->pixelSize();
 
     // --- Grid uniforms ---
     {
-        const QVector3D eye = cameraEye();
-        QMatrix4x4 proj;
-        proj.perspective(50.0f, float(m_pixelSize.width()) / qMax(1, m_pixelSize.height()), 0.1f, 1000.0f);
-        QMatrix4x4 view;
-        view.lookAt(eye, m_target, QVector3D(0, 1, 0));
-        const QMatrix4x4 invViewProj = (proj * view).inverted();
+        const QVector3D eye = camera.eye();
+        const float aspect = float(m_pixelSize.width()) / qMax(1, m_pixelSize.height());
+        const QMatrix4x4 invViewProj = (camera.projection(aspect) * camera.view()).inverted();
 
         float data[kGridUbufSize / 4] = {};
         std::memcpy(data, invViewProj.constData(), 64);
@@ -233,7 +206,7 @@ void Viewport::render(QRhiCommandBuffer *cb)
         v += 4;
         // NDC y sign (Vulkan has y down in clip space), fade distance, minor/major cell size
         v[0] = m_rhi->isYUpInNDC() ? 1.0f : -1.0f;
-        v[1] = qMax(60.0f, m_distance * 8.0f);
+        v[1] = qMax(60.0f, camera.distance * 8.0f);
         v[2] = 1.0f;
         v[3] = 10.0f;
         v += 4;
@@ -258,29 +231,19 @@ void Viewport::render(QRhiCommandBuffer *cb)
         }
     }
 
-    // --- Composite uniforms: glass rectangles from the child widgets ---
+    // --- Composite uniforms: glass rectangles ---
     {
         float data[kCompositeUbufSize / 4] = {};
-        const qreal dpr = devicePixelRatio();
-        int count = 0;
-        float radius = 12.0f;
-        for (QObject *o : children()) {
-            auto *w = qobject_cast<QWidget *>(o);
-            if (!w || !w->isVisible() || !w->property("glass").toBool() || count >= kMaxGlassRects)
-                continue;
-            const QVariant r = w->property("glassRadius");
-            if (r.isValid())
-                radius = r.toFloat();
-            const QRect g = w->geometry();
-            float *rect = data + 8 + count * 4;
-            rect[0] = float(g.x() * dpr);
-            rect[1] = float(g.y() * dpr);
-            rect[2] = float(g.width() * dpr);
-            rect[3] = float(g.height() * dpr);
-            ++count;
+        for (int i = 0; i < m_glassRects.size(); ++i) {
+            const QRectF &r = m_glassRects[i];
+            float *rect = data + 8 + i * 4;
+            rect[0] = float(r.x());
+            rect[1] = float(r.y());
+            rect[2] = float(r.width());
+            rect[3] = float(r.height());
         }
-        data[0] = float(count);
-        data[1] = float(radius * dpr);
+        data[0] = float(m_glassRects.size());
+        data[1] = m_glassRadius;
         data[2] = m_rhi->isYUpInFramebuffer() ? 1.0f : 0.0f;
         data[4] = float(m_pixelSize.width());
         data[5] = float(m_pixelSize.height());
@@ -311,95 +274,7 @@ void Viewport::render(QRhiCommandBuffer *cb)
     }
 
     // 3. Final image
-    cb->beginPass(renderTarget(), black, { 1.0f, 0 });
+    cb->beginPass(target, black, { 1.0f, 0 });
     fullscreen(m_compositePipe.get(), m_compositeSrb.get(), m_pixelSize);
     cb->endPass();
-}
-
-// ---------------------------------------------------------------------------
-// Glass widgets
-// ---------------------------------------------------------------------------
-
-void Viewport::childEvent(QChildEvent *event)
-{
-    if (event->added() && event->child()->isWidgetType())
-        event->child()->installEventFilter(this);
-    else if (event->removed())
-        QRhiWidget::update();
-    QRhiWidget::childEvent(event);
-}
-
-bool Viewport::eventFilter(QObject *watched, QEvent *event)
-{
-    switch (event->type()) {
-    case QEvent::Move:
-    case QEvent::Resize:
-    case QEvent::Show:
-    case QEvent::Hide:
-    case QEvent::DynamicPropertyChange:
-        if (watched->parent() == this)
-            QRhiWidget::update(); // glass rectangles changed
-        break;
-    default:
-        break;
-    }
-    return QRhiWidget::eventFilter(watched, event);
-}
-
-// ---------------------------------------------------------------------------
-// Camera
-// ---------------------------------------------------------------------------
-
-void Viewport::mousePressEvent(QMouseEvent *event)
-{
-    if (event->button() == Qt::RightButton || event->button() == Qt::MiddleButton) {
-        m_dragButton = event->button();
-        m_lastMouse = event->position().toPoint();
-        event->accept();
-        return;
-    }
-    QRhiWidget::mousePressEvent(event);
-}
-
-void Viewport::mouseMoveEvent(QMouseEvent *event)
-{
-    if (m_dragButton == Qt::NoButton) {
-        QRhiWidget::mouseMoveEvent(event);
-        return;
-    }
-    const QPoint pos = event->position().toPoint();
-    const QPoint d = pos - m_lastMouse;
-    m_lastMouse = pos;
-
-    if (m_dragButton == Qt::RightButton) {
-        m_yaw -= d.x() * 0.3f;
-        m_pitch = qBound(-89.0f, m_pitch + d.y() * 0.3f, 89.0f);
-    } else {
-        // Pan on the camera plane; speed proportional to the distance so it feels constant.
-        const QVector3D forward = (m_target - cameraEye()).normalized();
-        const QVector3D right = QVector3D::crossProduct(forward, QVector3D(0, 1, 0)).normalized();
-        const QVector3D up = QVector3D::crossProduct(right, forward);
-        const float k = m_distance * 0.0015f;
-        m_target += (-right * d.x() + up * d.y()) * k;
-    }
-    QRhiWidget::update();
-    event->accept();
-}
-
-void Viewport::mouseReleaseEvent(QMouseEvent *event)
-{
-    if (event->button() == m_dragButton) {
-        m_dragButton = Qt::NoButton;
-        event->accept();
-        return;
-    }
-    QRhiWidget::mouseReleaseEvent(event);
-}
-
-void Viewport::wheelEvent(QWheelEvent *event)
-{
-    const float steps = event->angleDelta().y() / 120.0f;
-    m_distance = qBound(0.5f, m_distance * qPow(0.88f, steps), 500.0f);
-    QRhiWidget::update();
-    event->accept();
 }

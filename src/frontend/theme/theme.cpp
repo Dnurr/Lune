@@ -164,6 +164,8 @@ Panel {
 QLabel#PanelTitle { color: @onSurfaceVariant; font-weight: 600; background: transparent; }
 /* Nested panels: a light tint on top of the host's glass */
 Panel Panel { background-color: @glassNested; border-radius: 10px; }
+/* Lists inside a panel sit directly on the glass */
+Panel QAbstractItemView { background: transparent; border: none; padding: 0; }
 
 QSplitter::handle { background-color: @outlineVariant; }
 QSplitter::handle:horizontal { width: 1px; }

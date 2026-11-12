@@ -8,13 +8,26 @@ set(CMAKE_AUTOMOC ON)
 find_package(Qt6 REQUIRED COMPONENTS Gui Widgets ShaderTools)
 
 add_executable(Lune
-    src/frontend/components/renderer/renderer.cpp
+    # Engine: scene data and rendering, no Qt Widgets
+    src/engine/scene/scene.cpp
+    src/engine/render/camera.cpp
+    src/engine/render/renderer.cpp
+
+    # Frontend: editor UI
+    src/frontend/core/selection.cpp
+    src/frontend/core/commands.cpp
+    src/frontend/components/viewport/viewport.cpp
+    src/frontend/components/widgets/draglabel.cpp
+    src/frontend/components/widgets/vector3.cpp
     src/frontend/components/panel/panel.cpp
     src/frontend/components/panel/transform/transform.cpp
+    src/frontend/components/panel/outliner/outliner.cpp
     src/frontend/editor.cpp
     src/frontend/theme/theme.cpp
     src/main.cpp
 )
+# Includes are relative to src/: "engine/scene/scene.h", "frontend/core/selection.h"
+target_include_directories(Lune PRIVATE src)
 # QRhi headers (<rhi/qrhi.h>) are semi-public and ship with the GuiPrivate target
 target_link_libraries(Lune PRIVATE Qt6::Widgets Qt6::GuiPrivate)
 
@@ -22,17 +35,17 @@ target_link_libraries(Lune PRIVATE Qt6::Widgets Qt6::GuiPrivate)
 # embedded as resources at :/shaders/<name>.qsb
 qt6_add_shaders(Lune "shaders"
     PREFIX "/shaders"
-    BASE "src/frontend/components/renderer/shaders"
+    BASE "src/engine/render/shaders"
     GLSL "300es,330"
     HLSL 50
     MSL 12
     FILES
-        src/frontend/components/renderer/shaders/fullscreen.vert
-        src/frontend/components/renderer/shaders/fullscreen_flipped.vert
-        src/frontend/components/renderer/shaders/grid.frag
-        src/frontend/components/renderer/shaders/downsample.frag
-        src/frontend/components/renderer/shaders/blur.frag
-        src/frontend/components/renderer/shaders/composite.frag
+        src/engine/render/shaders/fullscreen.vert
+        src/engine/render/shaders/fullscreen_flipped.vert
+        src/engine/render/shaders/grid.frag
+        src/engine/render/shaders/downsample.frag
+        src/engine/render/shaders/blur.frag
+        src/engine/render/shaders/composite.frag
 )
 
 if(WIN32)
