@@ -143,5 +143,9 @@ file formats, tests, stats overlay and this documentation. The rendering and VFX
 
 ## Third-party
 
-- [Qt 6](https://www.qt.io/) (LGPLv3): UI, QRhi rendering, shader tools.
+- [Qt 6](https://www.qt.io/) (LGPLv3, linked dynamically): UI, QRhi rendering, shader tools.
 - [cgltf](https://github.com/jkuhlmann/cgltf) (MIT): glTF 2.0 parsing.
+
+## License
+
+Lune is released under the [MIT License](LICENSE). Copyright (c) 2026 Stefano Russo.
