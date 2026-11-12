@@ -1,0 +1,13 @@
+# Build output (CMake/Ninja, windeployqt)
+build/
+out/
+
+# IDE / editor
+.vs/
+.vscode/
+.idea/
+*.user
+CMakeUserPresets.json
+
+# Logs
+*.log
