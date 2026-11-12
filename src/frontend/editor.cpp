@@ -121,6 +121,13 @@ void Editor::createMenus()
     connect(palette, &QAction::triggered, this, [this] { m_palette->open(); });
     edit->addAction(palette);
 
+    // View
+    auto *stats = new QAction("Stats Overlay", this);
+    stats->setShortcut(QKeySequence(Qt::Key_F12));
+    stats->setCheckable(true);
+    connect(stats, &QAction::toggled, m_viewport, &Viewport::setStatsVisible);
+    menuBar()->addMenu("View")->addAction(stats);
+
     // Add: also opens at the mouse cursor with Shift+A
     m_addMenu = menuBar()->addMenu("Add");
     m_addMenu->addAction("Empty", this, [this] { addEntity(QStringLiteral("Empty"), nullptr); });

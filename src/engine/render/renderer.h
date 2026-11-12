@@ -33,6 +33,15 @@ struct OverlayVertex
     float r, g, b, a;
 };
 
+// What the last frame did (for the stats overlay).
+struct FrameStats
+{
+    int drawCalls = 0;      // every draw, fullscreen passes included
+    quint64 triangles = 0;  // mesh triangles (selection outline included)
+    int meshes = 0;         // visible entities with a mesh
+    int renderPasses = 0;
+};
+
 // Scene renderer, independent from any widget: it only needs a QRhi and a render target
 // (an editor viewport today, an offline render target tomorrow).
 //
@@ -66,6 +75,9 @@ public:
     // to target pixels (the widget's device pixel ratio).
     void setOverlay(std::vector<OverlayVertex> vertices, float pixelScale);
 
+    const FrameStats &lastFrameStats() const { return m_stats; }
+    const char *backendName() const;
+
 private:
     struct GpuMesh
     {
@@ -89,6 +101,7 @@ private:
 
     QList<QRectF> m_glassRects;
     float m_glassRadius = 0.0f;
+    FrameStats m_stats;
     std::vector<OverlayVertex> m_overlay;
     float m_overlayScale = 1.0f;
 

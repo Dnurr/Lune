@@ -1,6 +1,8 @@
 #include "viewport.h"
 
 #include <QChildEvent>
+#include <QElapsedTimer>
+#include <rhi/qrhi.h>
 #include <QMouseEvent>
 #include <QUndoStack>
 #include <QWheelEvent>
@@ -9,6 +11,7 @@
 #include "engine/scene/scene.h"
 #include "frontend/core/commands.h"
 #include "frontend/core/selection.h"
+#include "statsoverlay.h"
 
 Viewport::Viewport(QWidget *parent)
     : QRhiWidget(parent)
@@ -17,6 +20,8 @@ Viewport::Viewport(QWidget *parent)
     // Clicking the viewport takes the keyboard focus away from text fields
     // (so Ctrl+Z undoes the scene, and the command palette closes).
     setFocusPolicy(Qt::ClickFocus);
+
+    m_stats = new StatsOverlay(this);
 }
 
 Viewport::~Viewport() = default;
@@ -65,6 +70,19 @@ void Viewport::setCamera(const OrbitCamera &camera)
     redraw();
 }
 
+void Viewport::setStatsVisible(bool visible)
+{
+    m_stats->setVisible(visible);
+    if (visible)
+        m_stats->raise();
+    redraw(); // starts the continuous rendering (see render())
+}
+
+bool Viewport::isStatsVisible() const
+{
+    return m_stats->isVisible();
+}
+
 void Viewport::setGizmoMode(Gizmo::Mode mode)
 {
     if (m_gizmo.isDragging())
@@ -86,6 +104,8 @@ void Viewport::initialize(QRhiCommandBuffer *)
 
 void Viewport::render(QRhiCommandBuffer *cb)
 {
+    QElapsedTimer cpu;
+    cpu.start();
     updateGlassRects();
 
     std::vector<OverlayVertex> overlay;
@@ -95,6 +115,15 @@ void Viewport::render(QRhiCommandBuffer *cb)
 
     const EntityId selected = m_selection ? m_selection->current() : InvalidEntity;
     m_renderer.render(cb, renderTarget(), m_camera, m_scene, selected);
+
+    if (m_stats->isVisible()) {
+        // CPU time to prepare and record this frame (the GPU work happens later).
+        const double cpuMs = double(cpu.nsecsElapsed()) / 1e6;
+        const int entities = m_scene ? int(m_scene->entities().size()) : 0;
+        m_stats->frameRendered(cpuMs, m_renderer.lastFrameStats(), m_renderer.backendName(),
+                               renderTarget()->pixelSize(), entities);
+        QRhiWidget::update(); // keep rendering: FPS only means something with continuous frames
+    }
 }
 
 void Viewport::releaseResources()

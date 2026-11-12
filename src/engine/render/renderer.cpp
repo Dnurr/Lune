@@ -77,6 +77,11 @@ void Renderer::setGlassRects(const QList<QRectF> &rects, float cornerRadius)
     m_glassRadius = cornerRadius;
 }
 
+const char *Renderer::backendName() const
+{
+    return m_rhi ? m_rhi->backendName() : "none";
+}
+
 void Renderer::setOverlay(std::vector<OverlayVertex> vertices, float pixelScale)
 {
     m_overlay = std::move(vertices);
@@ -466,6 +471,17 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         cb->drawIndexed(d.mesh->indexCount);
     };
     const QColor black(Qt::black);
+
+    // Stats: grid + downsample + 4 blur + composite = 7 fullscreen draws in 7 passes.
+    m_stats = {};
+    m_stats.meshes = int(draws.size());
+    m_stats.renderPasses = 7;
+    m_stats.drawCalls = 7 + (overlayCount > 0 ? 1 : 0);
+    for (const Draw &d : draws) {
+        const int times = d.selected ? 2 : 1; // the outline draws the mesh again
+        m_stats.drawCalls += times;
+        m_stats.triangles += quint64(d.mesh->indexCount / 3) * quint64(times);
+    }
 
     // 1. Scene: grid as background (no depth), meshes, selection outline, overlay on top
     cb->beginPass(m_sceneRt.get(), black, { 1.0f, 0 }, rub);

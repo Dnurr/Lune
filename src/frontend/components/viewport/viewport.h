@@ -9,6 +9,7 @@
 #include "gizmo.h"
 
 class QUndoStack;
+class StatsOverlay;
 class Scene;
 class Selection;
 
@@ -43,6 +44,10 @@ public:
     void setGizmoMode(Gizmo::Mode mode);
     Gizmo::Mode gizmoMode() const { return m_gizmo.mode(); }
 
+    // Frame statistics panel; while visible the viewport renders continuously.
+    void setStatsVisible(bool visible);
+    bool isStatsVisible() const;
+
     const OrbitCamera &camera() const { return m_camera; }
     void setCamera(const OrbitCamera &camera);
 
@@ -69,6 +74,7 @@ private:
     Renderer m_renderer;
     OrbitCamera m_camera;
     Gizmo m_gizmo;
+    StatsOverlay *m_stats = nullptr;
 
     Scene *m_scene = nullptr;
     Selection *m_selection = nullptr;

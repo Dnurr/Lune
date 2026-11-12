@@ -181,6 +181,13 @@ QFrame#CommandPalette QAbstractItemView::item:selected {
     background-color: @primaryContainer; color: @onPrimaryContainer;
 }
 
+/* Frame statistics over the viewport (components/viewport/statsoverlay) */
+QLabel#StatsOverlay {
+    background-color: @glassStrong; color: @onSurfaceVariant;
+    border: 1px solid @glassBorder; border-radius: 10px; padding: 8px 12px;
+    font-family: "Cascadia Mono", "Consolas", monospace; font-size: 9pt;
+}
+
 /* Lists inside a panel sit directly on the glass */
 Panel QAbstractItemView { background: transparent; border: none; padding: 0; }
 
