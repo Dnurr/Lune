@@ -13,6 +13,7 @@
 namespace
 {
 constexpr int kBlurDownscale = 4; // blur resolution = target / 4
+constexpr float BlurRadius = 2;
 constexpr int kGridUbufSize = 64 + 8 * 16;
 constexpr int kCompositeUbufSize = 2 * 16 + Renderer::MaxGlassRects * 16;
 constexpr int kEntityUbufSize = 3 * 64 + 4 * 16; // see mesh.vert
@@ -139,7 +140,7 @@ void Renderer::createSizeDependentResources()
     const QSize blurSize = (m_pixelSize / kBlurDownscale).expandedTo(QSize(1, 1));
 
     auto texture = [this](const QSize &s) {
-        std::unique_ptr<QRhiTexture> t(m_rhi->newTexture(QRhiTexture::RGBA8, s, 1, QRhiTexture::RenderTarget));
+        std::unique_ptr<QRhiTexture> t(m_rhi->newTexture(m_rhi->isTextureFormatSupported(QRhiTexture::RGBA16F) ? QRhiTexture::RGBA16F : QRhiTexture::RGBA8, s, 1, QRhiTexture::RenderTarget));
         t->create();
         return t;
     };
@@ -431,7 +432,7 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         const float tx = 1.0f / blurSize.width();
         const float ty = 1.0f / blurSize.height();
         for (int i = 0; i < 4; ++i) {
-            const float p[4] = { (i % 2 == 0) ? tx : 0.0f, (i % 2 == 0) ? 0.0f : ty, 0, 0 };
+            const float p[4] = { (i % 2 == 0) ? tx : 0.0f, (i % 2 == 0) ? 0.0f : ty, BlurRadius, 0 };
             rub->updateDynamicBuffer(m_blurUbufs[i].get(), 0, 16, p);
         }
     }
