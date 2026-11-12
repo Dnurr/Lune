@@ -1,7 +1,9 @@
 #include "outliner.h"
 
 #include <QBoxLayout>
+#include <QEvent>
 #include <QListWidget>
+#include <QTimer>
 
 #include "engine/scene/scene.h"
 #include "frontend/core/selection.h"
@@ -58,9 +60,17 @@ OutlinerPanel::OutlinerPanel(Scene *scene, Selection *selection, QWidget *parent
 
     // List -> editor
     connect(m_list, &QListWidget::currentItemChanged, this, [this](QListWidgetItem *current) {
-        if (!m_syncing)
-            m_selection->select(idOf(current));
+        if (m_syncing)
+            return;
+        if (m_focusing) {
+            syncSelection(); // Qt picked an item on its own: show the real selection instead
+            return;
+        }
+        m_selection->select(idOf(current));
     });
+    // When a list view gets the focus with no current item (e.g. back from a dialog),
+    // Qt makes the first item current. That's not the user selecting it: ignore it.
+    m_list->installEventFilter(this);
     connect(m_list, &QListWidget::itemChanged, this, [this](QListWidgetItem *item) {
         if (m_syncing)
             return;
@@ -94,6 +104,16 @@ QListWidgetItem *OutlinerPanel::itemFor(EntityId id) const
             return m_list->item(i);
     }
     return nullptr;
+}
+
+bool OutlinerPanel::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == m_list && event->type() == QEvent::FocusIn) {
+        // The list's focusInEvent runs right after this filter: flag it until it's done.
+        m_focusing = true;
+        QTimer::singleShot(0, this, [this] { m_focusing = false; });
+    }
+    return Panel::eventFilter(watched, event);
 }
 
 void OutlinerPanel::syncSelection()

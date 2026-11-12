@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Gui Widgets ShaderTools)
+include(cmake/dependencies.cmake)
 
 add_executable(Lune
     # Engine: scene data and rendering, no Qt Widgets
@@ -14,6 +15,9 @@ add_executable(Lune
     src/engine/scene/primitives.cpp
     src/engine/scene/picking.cpp
     src/engine/io/objloader.cpp
+    src/engine/io/gltfloader.cpp
+    src/engine/io/meshimport.cpp
+    src/engine/io/sceneio.cpp
     src/engine/render/camera.cpp
     src/engine/render/renderer.cpp
 
@@ -35,7 +39,7 @@ add_executable(Lune
 # Includes are relative to src/: "engine/scene/scene.h", "frontend/core/selection.h"
 target_include_directories(Lune PRIVATE src)
 # QRhi headers (<rhi/qrhi.h>) are semi-public and ship with the GuiPrivate target
-target_link_libraries(Lune PRIVATE Qt6::Widgets Qt6::GuiPrivate)
+target_link_libraries(Lune PRIVATE Qt6::Widgets Qt6::GuiPrivate cgltf)
 
 # Shaders: compiled at build time by qsb (Qt Shader Tools) for every QRhi backend,
 # embedded as resources at :/shaders/<name>.qsb

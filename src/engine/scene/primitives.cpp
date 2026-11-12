@@ -20,6 +20,7 @@ MeshPtr makeCube()
 {
     auto m = std::make_shared<Mesh>();
     m->name = QStringLiteral("Cube");
+    m->source = QStringLiteral("primitive:cube");
     const QVector3D X(0.5f, 0, 0), Y(0, 0.5f, 0), Z(0, 0, 0.5f);
     addQuad(*m, X, Y, Z, X.normalized());
     addQuad(*m, -X, Z, Y, -X.normalized());
@@ -35,6 +36,7 @@ MeshPtr makeSphere()
 {
     auto m = std::make_shared<Mesh>();
     m->name = QStringLiteral("Sphere");
+    m->source = QStringLiteral("primitive:sphere");
     const int segments = 48;
     const int rings = 24;
     for (int i = 0; i <= rings; ++i) {
@@ -61,6 +63,7 @@ MeshPtr makePlane()
 {
     auto m = std::make_shared<Mesh>();
     m->name = QStringLiteral("Plane");
+    m->source = QStringLiteral("primitive:plane");
     addQuad(*m, QVector3D(), QVector3D(0, 0, 0.5f), QVector3D(0.5f, 0, 0), QVector3D(0, 1, 0));
     m->computeBounds();
     return m;
@@ -85,5 +88,14 @@ MeshPtr plane()
 {
     static const MeshPtr m = makePlane();
     return m;
+}
+
+MeshPtr fromSource(const QString &source)
+{
+    for (const MeshPtr &m : { cube(), sphere(), plane() }) {
+        if (m->source == source)
+            return m;
+    }
+    return nullptr;
 }
 } // namespace Primitives

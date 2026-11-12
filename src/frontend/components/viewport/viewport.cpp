@@ -59,6 +59,12 @@ void Viewport::setEditorContext(Scene *scene, Selection *selection, QUndoStack *
     });
 }
 
+void Viewport::setCamera(const OrbitCamera &camera)
+{
+    m_camera = camera;
+    redraw();
+}
+
 void Viewport::setGizmoMode(Gizmo::Mode mode)
 {
     if (m_gizmo.isDragging())

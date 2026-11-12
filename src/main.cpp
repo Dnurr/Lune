@@ -51,5 +51,10 @@ int main(int argc, char *argv[]) {
     Editor editor;
     editor.show();
 
+    // "Lune.exe scene.lune" (or double-clicking an associated .lune file) opens it.
+    const QStringList args = QApplication::arguments();
+    if (args.size() > 1)
+        editor.loadScene(args.at(1));
+
     return app.exec();
 }

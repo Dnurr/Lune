@@ -23,6 +23,8 @@ public:
     // Puts back an entity with its own id (e.g. undoing a delete). `index` -1 = at the end.
     void insertEntity(const Entity &entity, int index = -1);
     bool removeEntity(EntityId id);
+    // Removes every entity (entityRemoved for each) and restarts the ids.
+    void clear();
 
     const std::vector<Entity> &entities() const { return m_entities; }
     const Entity *entity(EntityId id) const;

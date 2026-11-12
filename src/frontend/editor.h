@@ -5,6 +5,8 @@
 #include "engine/scene/mesh.h"
 
 class CommandPalette;
+class QCloseEvent;
+class QJsonObject;
 class QMenu;
 class QUndoStack;
 class Scene;
@@ -29,13 +31,34 @@ public:
     Selection *selection() const { return m_selection; }
     QUndoStack *undoStack() const { return m_undo; }
 
+    // Opens a scene file (no "save changes?" question). Used by File > Open.
+    bool loadScene(const QString &path);
+
+protected:
+    void closeEvent(QCloseEvent *event) override;
+
 private:
     void createMenus();
     void createPanels();
 
     void addEntity(const QString &name, const MeshPtr &mesh);
-    void importObj();
+    void importMeshFile();
     void deleteSelected();
+
+    // Scene files
+    void createDefaultScene();
+    void resetDocument(const QString &path);
+    void newScene();
+    void openScene();
+    bool saveScene();
+    bool saveSceneAs();
+    bool writeScene(const QString &path);
+    bool maybeSave(); // asks to save unsaved changes; false = the user cancelled
+    QString documentName() const;
+    QString lastDirectory() const;
+    void updateTitle();
+    QJsonObject editorState() const; // camera etc., stored in the scene file
+    void applyEditorState(const QJsonObject &state);
 
     Scene *m_scene = nullptr;
     Selection *m_selection = nullptr;
@@ -44,4 +67,5 @@ private:
     Viewport *m_viewport = nullptr; // owned by Qt (central widget)
     CommandPalette *m_palette = nullptr;
     QMenu *m_addMenu = nullptr;
+    QString m_scenePath; // empty = never saved
 };

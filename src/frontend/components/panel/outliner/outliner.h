@@ -21,6 +21,9 @@ public:
 signals:
     void renameRequested(EntityId id, const QString &name);
 
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
 private:
     QListWidgetItem *itemFor(EntityId id) const;
     QListWidgetItem *makeItem(const Entity &entity) const;
@@ -29,5 +32,6 @@ private:
     Scene *m_scene;
     Selection *m_selection;
     QListWidget *m_list = nullptr;
-    bool m_syncing = false; // true while the list is updated from the model
+    bool m_syncing = false;  // true while the list is updated from the model
+    bool m_focusing = false; // true while the list handles a FocusIn
 };

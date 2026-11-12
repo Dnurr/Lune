@@ -19,6 +19,9 @@ static_assert(sizeof(MeshVertex) == 6 * sizeof(float), "MeshVertex is uploaded t
 struct Mesh
 {
     QString name;
+    // Where the mesh comes from, so a saved scene can find it again:
+    // "primitive:<name>" for built-in meshes, otherwise the absolute path of the imported file.
+    QString source;
     std::vector<MeshVertex> vertices;
     std::vector<quint32> indices; // 3 per triangle
     QVector3D boundsMin, boundsMax;

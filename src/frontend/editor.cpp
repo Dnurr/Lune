@@ -7,7 +7,10 @@
 #include <QFileInfo>
 #include <QMessageBox>
 #include <QBoxLayout>
+#include <QCloseEvent>
 #include <QIcon>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QMenuBar>
 #include <QUndoStack>
 
@@ -17,7 +20,8 @@
 #include "components/viewport/viewport.h"
 #include "core/commands.h"
 #include "core/selection.h"
-#include "engine/io/objloader.h"
+#include "engine/io/meshimport.h"
+#include "engine/io/sceneio.h"
 #include "engine/scene/primitives.h"
 #include "engine/scene/scene.h"
 
@@ -28,20 +32,13 @@ Editor::Editor(QWidget *parent)
     , m_undo(new QUndoStack(this))
     , m_viewport(new Viewport(this))
 {
-    setWindowTitle("Lune");
     resize(1280, 720);
 
     // m_viewport->setApi(QRhiWidget::Api::Vulkan); // optional: pick a backend (default: Direct3D 11 on Windows)
     setCentralWidget(m_viewport);
 
-    // Starting content: created directly (not a command), so it isn't in the undo history.
-    Entity cube;
-    cube.name = QStringLiteral("Cube");
-    cube.transform.position = QVector3D(0.0f, 0.5f, 0.0f); // resting on the grid
-    cube.mesh = Primitives::cube();
-    m_selection->select(m_scene->createEntity(cube));
-
     m_viewport->setEditorContext(m_scene, m_selection, m_undo);
+    createDefaultScene();
 
     createMenus();
     createPanels();
@@ -51,26 +48,32 @@ Editor::Editor(QWidget *parent)
         if (m_selection->current() == id)
             m_selection->clear();
     });
+
+    // "Modified" = the undo history moved away from the last save.
+    connect(m_undo, &QUndoStack::cleanChanged, this, &Editor::updateTitle);
+    updateTitle();
 }
 
 Editor::~Editor() = default;
 
 void Editor::createMenus()
 {
-    // File (not connected yet: saving/loading the scene comes later)
+    // File
     auto *newFile = new QAction(QIcon::fromTheme("document-new"), "New", this);
     newFile->setShortcut(QKeySequence::New);
-    auto *openFile = new QAction(QIcon::fromTheme("document-open"), "Open", this);
+    connect(newFile, &QAction::triggered, this, &Editor::newScene);
+    auto *openFile = new QAction(QIcon::fromTheme("document-open"), "Open...", this);
     openFile->setShortcut(QKeySequence::Open);
+    connect(openFile, &QAction::triggered, this, &Editor::openScene);
     auto *saveFile = new QAction(QIcon::fromTheme("document-save"), "Save", this);
     saveFile->setShortcut(QKeySequence::Save);
-    auto *saveAs = new QAction(QIcon::fromTheme("document-save-as"), "Save as", this);
+    connect(saveFile, &QAction::triggered, this, &Editor::saveScene);
+    auto *saveAs = new QAction(QIcon::fromTheme("document-save-as"), "Save As...", this);
     saveAs->setShortcut(QKeySequence::SaveAs);
-    for (QAction *a : { newFile, openFile, saveFile, saveAs })
-        a->setEnabled(false); // until scene saving exists (also keeps them out of the command palette)
-    auto *importAction = new QAction("Import OBJ...", this);
+    connect(saveAs, &QAction::triggered, this, &Editor::saveSceneAs);
+    auto *importAction = new QAction("Import Mesh...", this);
     importAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_I));
-    connect(importAction, &QAction::triggered, this, &Editor::importObj);
+    connect(importAction, &QAction::triggered, this, &Editor::importMeshFile);
     QMenu *file = menuBar()->addMenu("File");
     file->addActions({ newFile, openFile, saveFile, saveAs });
     file->addSeparator();
@@ -166,18 +169,172 @@ void Editor::addEntity(const QString &name, const MeshPtr &mesh)
     m_undo->push(new AddEntityCommand(m_scene, m_selection, e));
 }
 
-void Editor::importObj()
+void Editor::importMeshFile()
 {
-    const QString path = QFileDialog::getOpenFileName(this, "Import OBJ", QString(), "Wavefront OBJ (*.obj)");
+    const QString path = QFileDialog::getOpenFileName(this, "Import Mesh", lastDirectory(), meshFileFilter());
     if (path.isEmpty())
         return;
     QString error;
-    const MeshPtr mesh = loadObj(path, &error);
+    const MeshPtr mesh = importMesh(path, &error);
     if (!mesh) {
-        QMessageBox::warning(this, "Import OBJ", error);
+        QMessageBox::warning(this, "Import Mesh", error);
         return;
     }
     addEntity(mesh->name.isEmpty() ? QFileInfo(path).completeBaseName() : mesh->name, mesh);
+}
+
+// ---------------------------------------------------------------------------
+// Scene files
+// ---------------------------------------------------------------------------
+
+void Editor::createDefaultScene()
+{
+    // Created directly (not a command), so it isn't in the undo history.
+    Entity cube;
+    cube.name = QStringLiteral("Cube");
+    cube.transform.position = QVector3D(0.0f, 0.5f, 0.0f); // resting on the grid
+    cube.mesh = Primitives::cube();
+    m_selection->select(m_scene->createEntity(cube));
+}
+
+void Editor::resetDocument(const QString &path)
+{
+    // The history refers to the previous scene: it can't be undone into the new one.
+    m_undo->clear();
+    m_undo->setClean();
+    m_scenePath = path;
+    updateTitle();
+}
+
+void Editor::newScene()
+{
+    if (!maybeSave())
+        return;
+    m_selection->clear();
+    m_scene->clear();
+    createDefaultScene();
+    m_viewport->setCamera(OrbitCamera {});
+    resetDocument(QString());
+}
+
+void Editor::openScene()
+{
+    if (!maybeSave())
+        return;
+    const QString path = QFileDialog::getOpenFileName(this, "Open Scene", lastDirectory(), SceneIO::FileFilter);
+    if (!path.isEmpty())
+        loadScene(path);
+}
+
+bool Editor::loadScene(const QString &path)
+{
+    QJsonObject editorState;
+    QStringList warnings;
+    QString error;
+    m_selection->clear();
+    if (!SceneIO::load(*m_scene, path, &editorState, &warnings, &error)) {
+        QMessageBox::warning(this, "Open Scene", error);
+        return false;
+    }
+    applyEditorState(editorState);
+    resetDocument(path);
+    if (!warnings.isEmpty())
+        QMessageBox::warning(this, "Open Scene", "The scene was opened with some problems:\n\n" + warnings.join('\n'));
+    return true;
+}
+
+bool Editor::saveScene()
+{
+    if (m_scenePath.isEmpty())
+        return saveSceneAs();
+    return writeScene(m_scenePath);
+}
+
+bool Editor::saveSceneAs()
+{
+    const QString suggested = m_scenePath.isEmpty() ? QStringLiteral("untitled.lune") : m_scenePath;
+    QString path = QFileDialog::getSaveFileName(this, "Save Scene", suggested, SceneIO::FileFilter);
+    if (path.isEmpty())
+        return false;
+    if (QFileInfo(path).suffix().isEmpty())
+        path += ".lune";
+    return writeScene(path);
+}
+
+bool Editor::writeScene(const QString &path)
+{
+    QString error;
+    if (!SceneIO::save(*m_scene, path, editorState(), &error)) {
+        QMessageBox::warning(this, "Save Scene", error);
+        return false;
+    }
+    m_scenePath = path;
+    m_undo->setClean();
+    updateTitle();
+    return true;
+}
+
+bool Editor::maybeSave()
+{
+    if (m_undo->isClean())
+        return true;
+    const auto answer = QMessageBox::question(
+        this, "Lune", QStringLiteral("Save changes to %1?").arg(documentName()),
+        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
+    if (answer == QMessageBox::Save)
+        return saveScene();
+    return answer == QMessageBox::Discard;
+}
+
+QString Editor::documentName() const
+{
+    return m_scenePath.isEmpty() ? QStringLiteral("Untitled") : QFileInfo(m_scenePath).fileName();
+}
+
+QString Editor::lastDirectory() const
+{
+    return m_scenePath.isEmpty() ? QString() : QFileInfo(m_scenePath).absolutePath();
+}
+
+void Editor::updateTitle()
+{
+    // [*] is replaced by "*" while the window is marked as modified.
+    setWindowTitle(documentName() + QStringLiteral("[*] - Lune"));
+    setWindowModified(!m_undo->isClean());
+}
+
+QJsonObject Editor::editorState() const
+{
+    const OrbitCamera &c = m_viewport->camera();
+    QJsonObject camera;
+    camera["target"] = QJsonArray { c.target.x(), c.target.y(), c.target.z() };
+    camera["yaw"] = c.yaw;
+    camera["pitch"] = c.pitch;
+    camera["distance"] = c.distance;
+    QJsonObject state;
+    state["camera"] = camera;
+    return state;
+}
+
+void Editor::applyEditorState(const QJsonObject &state)
+{
+    OrbitCamera c;
+    const QJsonObject camera = state["camera"].toObject();
+    const QJsonArray t = camera["target"].toArray();
+    if (t.size() == 3)
+        c.target = QVector3D(float(t[0].toDouble()), float(t[1].toDouble()), float(t[2].toDouble()));
+    c.yaw = float(camera["yaw"].toDouble(c.yaw));
+    c.pitch = qBound(-89.0f, float(camera["pitch"].toDouble(c.pitch)), 89.0f);
+    c.distance = qBound(0.5f, float(camera["distance"].toDouble(c.distance)), 500.0f);
+    m_viewport->setCamera(c);
+}
+
+void Editor::closeEvent(QCloseEvent *event)
+{
+    if (maybeSave())
+        event->accept();
+    else
+        event->ignore();
 }
 
 void Editor::deleteSelected()

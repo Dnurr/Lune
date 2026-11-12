@@ -43,6 +43,7 @@ MeshPtr loadObj(const QString &path, QString *error)
     std::vector<QVector3D> normals;
     auto mesh = std::make_shared<Mesh>();
     mesh->name = QFileInfo(path).completeBaseName();
+    mesh->source = QFileInfo(path).absoluteFilePath();
 
     // Corners with a normal are shared between faces; key = (position, normal).
     QHash<quint64, quint32> shared;

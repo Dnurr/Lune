@@ -42,6 +42,13 @@ bool Scene::removeEntity(EntityId id)
     return true;
 }
 
+void Scene::clear()
+{
+    while (!m_entities.empty())
+        removeEntity(m_entities.back().id);
+    m_nextId = 1;
+}
+
 const Entity *Scene::entity(EntityId id) const
 {
     const int i = indexOf(id);

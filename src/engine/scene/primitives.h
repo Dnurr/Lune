@@ -9,4 +9,7 @@ namespace Primitives
 MeshPtr cube();
 MeshPtr sphere();
 MeshPtr plane(); // on the XZ plane, facing +Y
+
+// Built-in mesh from a Mesh::source string ("primitive:cube"), nullptr if unknown.
+MeshPtr fromSource(const QString &source);
 } // namespace Primitives

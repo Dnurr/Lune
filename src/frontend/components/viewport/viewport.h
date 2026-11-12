@@ -43,7 +43,8 @@ public:
     void setGizmoMode(Gizmo::Mode mode);
     Gizmo::Mode gizmoMode() const { return m_gizmo.mode(); }
 
-    OrbitCamera &camera() { return m_camera; }
+    const OrbitCamera &camera() const { return m_camera; }
+    void setCamera(const OrbitCamera &camera);
 
 protected:
     void initialize(QRhiCommandBuffer *cb) override;
