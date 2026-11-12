@@ -10,6 +10,9 @@ find_package(Qt6 REQUIRED COMPONENTS Gui Widgets ShaderTools)
 add_executable(Lune
     # Engine: scene data and rendering, no Qt Widgets
     src/engine/scene/scene.cpp
+    src/engine/scene/primitives.cpp
+    src/engine/scene/picking.cpp
+    src/engine/io/objloader.cpp
     src/engine/render/camera.cpp
     src/engine/render/renderer.cpp
 
@@ -17,6 +20,7 @@ add_executable(Lune
     src/frontend/core/selection.cpp
     src/frontend/core/commands.cpp
     src/frontend/components/viewport/viewport.cpp
+    src/frontend/components/viewport/gizmo.cpp
     src/frontend/components/widgets/draglabel.cpp
     src/frontend/components/widgets/vector3.cpp
     src/frontend/components/panel/panel.cpp
@@ -46,6 +50,12 @@ qt6_add_shaders(Lune "shaders"
         src/engine/render/shaders/downsample.frag
         src/engine/render/shaders/blur.frag
         src/engine/render/shaders/composite.frag
+        src/engine/render/shaders/mesh.vert
+        src/engine/render/shaders/mesh.frag
+        src/engine/render/shaders/outline.vert
+        src/engine/render/shaders/outline.frag
+        src/engine/render/shaders/overlay.vert
+        src/engine/render/shaders/overlay.frag
 )
 
 if(WIN32)

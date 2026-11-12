@@ -3,6 +3,7 @@
 #include <QString>
 #include <QtGlobal>
 
+#include "mesh.h"
 #include "transform.h"
 
 // Stable identifier of an entity: never reused within a Scene, so it stays valid
@@ -15,4 +16,5 @@ struct Entity
     EntityId id = InvalidEntity;
     QString name;
     Transform transform;
+    MeshPtr mesh; // nullptr = empty entity (just a transform)
 };

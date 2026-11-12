@@ -24,6 +24,35 @@ QMatrix4x4 OrbitCamera::projection(float aspect) const
     return m;
 }
 
+QPointF OrbitCamera::project(const QVector3D &world, const QSizeF &viewSize, bool *inFront) const
+{
+    const float aspect = float(viewSize.width() / qMax(1.0, viewSize.height()));
+    const QVector4D clip = projection(aspect) * view() * QVector4D(world, 1.0f);
+    if (inFront)
+        *inFront = clip.w() > 1e-4f;
+    const float w = qAbs(clip.w()) > 1e-6f ? clip.w() : 1e-6f;
+    const float x = clip.x() / w;
+    const float y = clip.y() / w;
+    return QPointF((x + 1.0f) * 0.5f * viewSize.width(), (1.0f - y) * 0.5f * viewSize.height());
+}
+
+void OrbitCamera::screenRay(const QPointF &point, const QSizeF &viewSize, QVector3D *origin, QVector3D *direction) const
+{
+    const float aspect = float(viewSize.width() / qMax(1.0, viewSize.height()));
+    const QMatrix4x4 inv = (projection(aspect) * view()).inverted();
+    const float x = float(point.x() / viewSize.width() * 2.0 - 1.0);
+    const float y = float(1.0 - point.y() / viewSize.height() * 2.0);
+    const QVector3D nearP = inv.map(QVector3D(x, y, -1.0f));
+    const QVector3D farP = inv.map(QVector3D(x, y, 1.0f));
+    *origin = nearP;
+    *direction = farP - nearP;
+}
+
+float OrbitCamera::worldPerPixel(float distanceFromEye, float viewHeight) const
+{
+    return 2.0f * distanceFromEye * qTan(qDegreesToRadians(fieldOfView) * 0.5f) / qMax(1.0f, viewHeight);
+}
+
 void OrbitCamera::orbit(float deltaYaw, float deltaPitch)
 {
     yaw += deltaYaw;

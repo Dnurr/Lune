@@ -16,6 +16,8 @@ public:
     explicit Scene(QObject *parent = nullptr);
 
     // New entity with a fresh id, appended at the end (or at `index`). Returns its id.
+    // The prototype's id is ignored.
+    EntityId createEntity(Entity prototype, int index = -1);
     EntityId createEntity(const QString &name, const Transform &transform = {}, int index = -1);
     // Puts back an entity with its own id (e.g. undoing a delete). `index` -1 = at the end.
     void insertEntity(const Entity &entity, int index = -1);

@@ -2,7 +2,10 @@
 
 #include <QMainWindow>
 
+#include "engine/scene/mesh.h"
+
 class Panel;
+class QMenu;
 class QUndoStack;
 class Scene;
 class Selection;
@@ -32,7 +35,8 @@ private:
     void createPanels();
     void refreshInspector();
 
-    void addEntity();
+    void addEntity(const QString &name, const MeshPtr &mesh);
+    void importObj();
     void deleteSelected();
 
     Scene *m_scene = nullptr;
@@ -42,4 +46,5 @@ private:
     Viewport *m_viewport = nullptr; // owned by Qt (central widget)
     Panel *m_inspector = nullptr;
     TransformPanel *m_transformPanel = nullptr;
+    QMenu *m_addMenu = nullptr;
 };

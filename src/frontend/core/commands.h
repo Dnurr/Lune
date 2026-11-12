@@ -15,7 +15,8 @@ class Selection;
 class AddEntityCommand : public QUndoCommand
 {
 public:
-    AddEntityCommand(Scene *scene, Selection *selection, const QString &name, const Transform &transform = {});
+    // `prototype`: name, transform, mesh of the new entity (its id is assigned on the first redo).
+    AddEntityCommand(Scene *scene, Selection *selection, const Entity &prototype);
 
     void redo() override;
     void undo() override;
@@ -59,13 +60,16 @@ private:
     QString m_before, m_after;
 };
 
-// Transform edit. Consecutive edits of the same field of the same entity that arrive
-// close together (e.g. the many small steps of a drag on a label) merge into a single
-// undo step.
+// Transform edit.
+// From the Inspector: consecutive edits of the same field of the same entity that arrive
+// close together (e.g. the many small steps of a drag on a label) merge into one undo step.
+// From a gizmo drag: the scene is previewed live during the drag, then one command with the
+// explicit `before` state is pushed on release (never merged).
 class SetTransformCommand : public QUndoCommand
 {
 public:
     SetTransformCommand(Scene *scene, EntityId id, const Transform &after, TransformField field);
+    SetTransformCommand(Scene *scene, EntityId id, const Transform &before, const Transform &after, TransformField field);
 
     void redo() override;
     void undo() override;
@@ -78,5 +82,6 @@ private:
     EntityId m_entity;
     Transform m_before, m_after;
     TransformField m_field;
+    bool m_mergeable = true;
     QElapsedTimer m_lastEdit;
 };

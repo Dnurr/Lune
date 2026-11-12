@@ -26,20 +26,20 @@ QString fieldName(TransformField f)
 // Add
 // ---------------------------------------------------------------------------
 
-AddEntityCommand::AddEntityCommand(Scene *scene, Selection *selection, const QString &name, const Transform &transform)
+AddEntityCommand::AddEntityCommand(Scene *scene, Selection *selection, const Entity &prototype)
     : m_scene(scene)
     , m_selection(selection)
+    , m_entity(prototype)
 {
-    m_entity.name = name;
-    m_entity.transform = transform;
-    setText(QStringLiteral("Add %1").arg(name));
+    m_entity.id = InvalidEntity;
+    setText(QStringLiteral("Add %1").arg(m_entity.name));
 }
 
 void AddEntityCommand::redo()
 {
     m_previousSelection = m_selection->current();
     if (m_entity.id == InvalidEntity)
-        m_entity.id = m_scene->createEntity(m_entity.name, m_entity.transform);
+        m_entity.id = m_scene->createEntity(m_entity);
     else
         m_scene->insertEntity(m_entity); // redo after undo: same id
     m_selection->select(m_entity.id);
@@ -127,6 +127,18 @@ SetTransformCommand::SetTransformCommand(Scene *scene, EntityId id, const Transf
     setText(QStringLiteral("Change %1").arg(fieldName(field)));
 }
 
+SetTransformCommand::SetTransformCommand(Scene *scene, EntityId id, const Transform &before, const Transform &after,
+                                         TransformField field)
+    : m_scene(scene)
+    , m_entity(id)
+    , m_before(before)
+    , m_after(after)
+    , m_field(field)
+    , m_mergeable(false)
+{
+    setText(QStringLiteral("Change %1").arg(fieldName(field)));
+}
+
 void SetTransformCommand::redo()
 {
     m_scene->setTransform(m_entity, m_after);
@@ -140,7 +152,8 @@ void SetTransformCommand::undo()
 bool SetTransformCommand::mergeWith(const QUndoCommand *other)
 {
     const auto *o = static_cast<const SetTransformCommand *>(other); // same id() = same type
-    if (o->m_entity != m_entity || o->m_field != m_field || m_lastEdit.elapsed() > kMergeWindowMs)
+    if (!m_mergeable || !o->m_mergeable || o->m_entity != m_entity || o->m_field != m_field
+        || m_lastEdit.elapsed() > kMergeWindowMs)
         return false;
     m_after = o->m_after;
     m_lastEdit.restart();

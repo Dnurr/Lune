@@ -7,14 +7,19 @@ Scene::Scene(QObject *parent)
 {
 }
 
+EntityId Scene::createEntity(Entity prototype, int index)
+{
+    prototype.id = m_nextId; // insertEntity advances m_nextId
+    insertEntity(prototype, index);
+    return prototype.id;
+}
+
 EntityId Scene::createEntity(const QString &name, const Transform &transform, int index)
 {
     Entity e;
-    e.id = m_nextId; // insertEntity advances m_nextId
     e.name = name;
     e.transform = transform;
-    insertEntity(e, index);
-    return e.id;
+    return createEntity(e, index);
 }
 
 void Scene::insertEntity(const Entity &entity, int index)
