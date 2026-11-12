@@ -118,6 +118,7 @@ void Renderer::initialize(QRhi *rhi, QRhiRenderTarget *target)
         for (auto &b : m_blurUbufs)
             b = ubuf(16);
         m_compositeUbuf = ubuf(kCompositeUbufSize);
+        m_displayUbuf = ubuf(16);
         m_overlayUbuf = ubuf(16);
         m_layoutUbuf = ubuf(kEntityUbufSize);
 
@@ -144,14 +145,16 @@ void Renderer::createSizeDependentResources()
 {
     const QSize blurSize = (m_pixelSize / kBlurDownscale).expandedTo(QSize(1, 1));
 
-    auto texture = [this](const QSize &s) {
-        std::unique_ptr<QRhiTexture> t(m_rhi->newTexture(m_rhi->isTextureFormatSupported(QRhiTexture::RGBA16F, QRhiTexture::RenderTarget) ? QRhiTexture::RGBA16F : QRhiTexture::RGBA8, s, 1, QRhiTexture::RenderTarget));
+    auto texture = [this](const QSize &s, QRhiTexture::Format format) {
+        std::unique_ptr<QRhiTexture> t(m_rhi->newTexture(format, s, 1, QRhiTexture::RenderTarget));
         t->create();
         return t;
     };
-    m_sceneTex = texture(m_pixelSize);
-    m_blurA = texture(blurSize);
-    m_blurB = texture(blurSize);
+    m_sceneTex = texture(m_pixelSize, m_rhi->isTextureFormatSupported(QRhiTexture::RGBA16F, QRhiTexture::RenderTarget) ? QRhiTexture::RGBA16F : QRhiTexture::RGBA8);
+    // After the display pass the values are already for the screen (0..1, sRGB): 8 bits are enough.
+    m_displayTex = texture(m_pixelSize, QRhiTexture::RGBA8);
+    m_blurA = texture(blurSize, QRhiTexture::RGBA8);
+    m_blurB = texture(blurSize, QRhiTexture::RGBA8);
 
     m_sceneDepth.reset(m_rhi->newRenderBuffer(QRhiRenderBuffer::DepthStencil, m_pixelSize));
     m_sceneDepth->create();
@@ -166,16 +169,18 @@ void Renderer::createSizeDependentResources()
     m_sceneRt->setRenderPassDescriptor(m_sceneRp.get());
     m_sceneRt->create();
 
-    auto blurTarget = [this](QRhiTexture *t) {
+    // Display and blur targets have the same format: one render pass descriptor for all three.
+    auto ldrTarget = [this](QRhiTexture *t) {
         std::unique_ptr<QRhiTextureRenderTarget> rt(m_rhi->newTextureRenderTarget({ QRhiColorAttachment(t) }));
-        if (!m_blurRp)
-            m_blurRp.reset(rt->newCompatibleRenderPassDescriptor());
-        rt->setRenderPassDescriptor(m_blurRp.get());
+        if (!m_ldrRp)
+            m_ldrRp.reset(rt->newCompatibleRenderPassDescriptor());
+        rt->setRenderPassDescriptor(m_ldrRp.get());
         rt->create();
         return rt;
     };
-    m_blurARt = blurTarget(m_blurA.get());
-    m_blurBRt = blurTarget(m_blurB.get());
+    m_displayRt = ldrTarget(m_displayTex.get());
+    m_blurARt = ldrTarget(m_blurA.get());
+    m_blurBRt = ldrTarget(m_blurB.get());
 
     using B = QRhiShaderResourceBinding;
     const auto stages = B::VertexStage | B::FragmentStage;
@@ -187,8 +192,11 @@ void Renderer::createSizeDependentResources()
     };
 
     m_gridSrb = srb({ B::uniformBuffer(0, stages, m_gridUbuf.get()) });
+    m_displaySrb = srb({ B::uniformBuffer(0, stages, m_displayUbuf.get()),
+                         B::sampledTexture(1, B::FragmentStage, m_sceneTex.get(), m_sampler.get()) });
+    // The blur and the final image read the display image (gizmo included), not the HDR scene.
     m_downSrb = srb({ B::uniformBuffer(0, stages, m_downUbuf.get()),
-                      B::sampledTexture(1, B::FragmentStage, m_sceneTex.get(), m_sampler.get()) });
+                      B::sampledTexture(1, B::FragmentStage, m_displayTex.get(), m_sampler.get()) });
     // Ping-pong: H reads A writes B, V reads B writes A (twice).
     for (int i = 0; i < 4; ++i) {
         QRhiTexture *src = (i % 2 == 0) ? m_blurA.get() : m_blurB.get();
@@ -196,7 +204,7 @@ void Renderer::createSizeDependentResources()
                               B::sampledTexture(1, B::FragmentStage, src, m_sampler.get()) });
     }
     m_compositeSrb = srb({ B::uniformBuffer(0, stages, m_compositeUbuf.get()),
-                           B::sampledTexture(1, B::FragmentStage, m_sceneTex.get(), m_sampler.get()),
+                           B::sampledTexture(1, B::FragmentStage, m_displayTex.get(), m_sampler.get()),
                            B::sampledTexture(2, B::FragmentStage, m_blurA.get(), m_sampler.get()) });
 }
 
@@ -257,10 +265,13 @@ void Renderer::createPipelines(QRhiRenderTarget *target)
                           m_sceneRp.get(), 1, mesh);
     m_outlinePipe = pipeline(loadShader(QStringLiteral("outline.vert")), QStringLiteral("outline.frag"),
                              m_meshLayoutSrb.get(), m_sceneRp.get(), 1, outline);
+    m_displayPipe = pipeline(fullscreen, QStringLiteral("display.frag"), m_displaySrb.get(), m_ldrRp.get(), 1);
+    // The overlay is interface, not scene: drawn after the display conversion, in display colors,
+    // so exposure/tonemapping never touch it. It's still before the blur, so panels blur it too.
     m_overlayPipe = pipeline(loadShader(QStringLiteral("overlay.vert")), QStringLiteral("overlay.frag"),
-                             m_overlaySrb.get(), m_sceneRp.get(), 1, overlay);
-    m_downPipe = pipeline(fullscreen, QStringLiteral("downsample.frag"), m_downSrb.get(), m_blurRp.get(), 1);
-    m_blurPipe = pipeline(fullscreen, QStringLiteral("blur.frag"), m_blurSrbs[0].get(), m_blurRp.get(), 1);
+                             m_overlaySrb.get(), m_ldrRp.get(), 1, overlay);
+    m_downPipe = pipeline(fullscreen, QStringLiteral("downsample.frag"), m_downSrb.get(), m_ldrRp.get(), 1);
+    m_blurPipe = pipeline(fullscreen, QStringLiteral("blur.frag"), m_blurSrbs[0].get(), m_ldrRp.get(), 1);
     m_compositePipe = pipeline(fullscreen, QStringLiteral("composite.frag"), m_compositeSrb.get(),
                                target->renderPassDescriptor(), target->sampleCount());
 }
@@ -273,10 +284,12 @@ void Renderer::release()
     m_meshPipe.reset();
     m_outlinePipe.reset();
     m_overlayPipe.reset();
+    m_displayPipe.reset();
     m_downPipe.reset();
     m_blurPipe.reset();
     m_compositePipe.reset();
     m_gridSrb.reset();
+    m_displaySrb.reset();
     m_downSrb.reset();
     m_compositeSrb.reset();
     m_overlaySrb.reset();
@@ -284,12 +297,14 @@ void Renderer::release()
     for (auto &s : m_blurSrbs)
         s.reset();
     m_sceneRt.reset();
+    m_displayRt.reset();
     m_blurARt.reset();
     m_blurBRt.reset();
     m_sceneRp.reset();
-    m_blurRp.reset();
+    m_ldrRp.reset();
     m_sceneDepth.reset();
     m_sceneTex.reset();
+    m_displayTex.reset();
     m_blurA.reset();
     m_blurB.reset();
     m_gridUbuf.reset();
@@ -297,6 +312,7 @@ void Renderer::release()
     for (auto &b : m_blurUbufs)
         b.reset();
     m_compositeUbuf.reset();
+    m_displayUbuf.reset();
     m_overlayUbuf.reset();
     m_overlayVbuf.reset();
     m_layoutUbuf.reset();
@@ -430,6 +446,12 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         rub->updateDynamicBuffer(m_overlayUbuf.get(), 0, 16, p);
     }
 
+    // --- Display uniforms: free for now (exposure, tonemapping operator... in step 2) ---
+    {
+        const float p[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+        rub->updateDynamicBuffer(m_displayUbuf.get(), 0, 16, p);
+    }
+
     // --- Blur uniforms ---
     {
         const float down[4] = { 1.0f / m_pixelSize.width(), 1.0f / m_pixelSize.height(), 0, 0 };
@@ -478,18 +500,18 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
     };
     const QColor black(Qt::black);
 
-    // Stats: grid + downsample + 4 blur + composite = 7 fullscreen draws in 7 passes.
+    // Stats: grid + display + downsample + 4 blur + composite = 8 fullscreen draws in 8 passes.
     m_stats = {};
     m_stats.meshes = int(draws.size());
-    m_stats.renderPasses = 7;
-    m_stats.drawCalls = 7 + (overlayCount > 0 ? 1 : 0);
+    m_stats.renderPasses = 8;
+    m_stats.drawCalls = 8 + (overlayCount > 0 ? 1 : 0);
     for (const Draw &d : draws) {
         const int times = d.selected ? 2 : 1; // the outline draws the mesh again
         m_stats.drawCalls += times;
         m_stats.triangles += quint64(d.mesh->indexCount / 3) * quint64(times);
     }
 
-    // 1. Scene: grid as background (no depth), meshes, selection outline, overlay on top
+    // 1. Scene (HDR, linear): grid as background (no depth), meshes, selection outline
     cb->beginPass(m_sceneRt.get(), black, { 1.0f, 0 }, rub);
     fullscreen(m_gridPipe.get(), m_gridSrb.get(), m_pixelSize);
     for (const Draw &d : draws)
@@ -498,6 +520,11 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         if (d.selected)
             drawMesh(m_outlinePipe.get(), d);
     }
+    cb->endPass();
+
+    // 2. Display (8 bit, sRGB): scene converted for the screen, then the overlay (gizmo) on top
+    cb->beginPass(m_displayRt.get(), black, { 1.0f, 0 });
+    fullscreen(m_displayPipe.get(), m_displaySrb.get(), m_pixelSize);
     if (overlayCount > 0) {
         cb->setGraphicsPipeline(m_overlayPipe.get());
         cb->setViewport(fullViewport);
@@ -508,7 +535,7 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
     }
     cb->endPass();
 
-    // 2. Blur: downsample into A, then H (A->B), V (B->A), twice
+    // 3. Blur of the display image: downsample into A, then H (A->B), V (B->A), twice
     cb->beginPass(m_blurARt.get(), black, { 1.0f, 0 });
     fullscreen(m_downPipe.get(), m_downSrb.get(), blurSize);
     cb->endPass();
@@ -518,7 +545,7 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         cb->endPass();
     }
 
-    // 3. Final image
+    // 4. Final image: display image + blurred copy inside the glass rectangles
     cb->beginPass(target, black, { 1.0f, 0 });
     fullscreen(m_compositePipe.get(), m_compositeSrb.get(), m_pixelSize);
     cb->endPass();

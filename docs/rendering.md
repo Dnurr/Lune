@@ -17,28 +17,37 @@ renderer.release();                 // when the QRhi goes away
 
 ```mermaid
 flowchart LR
-    subgraph P1["1 &middot; Scene (full res, color + depth)"]
-        grid[World grid] --> meshes[Meshes] --> outline[Selection outline] --> overlay[2D overlay: gizmo]
+    subgraph P1["1 &middot; Scene (HDR, linear, color + depth)"]
+        grid[World grid] --> meshes[Meshes] --> outline[Selection outline]
     end
-    subgraph P2["2 &middot; Blur (1/4 res)"]
+    subgraph P2["2 &middot; Display (8 bit, sRGB)"]
+        disp[Linear to sRGB<br/>future tonemapping] --> overlay[2D overlay: gizmo]
+    end
+    subgraph P3["3 &middot; Blur (reduced res)"]
         down[Downsample] --> h1[Blur H] --> v1[Blur V] --> h2[Blur H] --> v2[Blur V]
     end
-    subgraph P3["3 &middot; Final (widget target)"]
-        comp[Composite: scene, blurred copy inside glass rects]
+    subgraph P4["4 &middot; Final (widget target)"]
+        comp[Composite: display image, blurred copy inside glass rects]
     end
-    P1 --> P2 --> P3
-    P1 --> P3
+    P1 --> P2 --> P3 --> P4
+    P2 --> P4
 ```
 
 | Pass | Target | Shaders | Notes |
 |---|---|---|---|
-| Grid | scene texture | `fullscreen.vert` + `grid.frag` | Fullscreen triangle; each pixel intersects its view ray with y = 0. No depth write: it's the background. |
-| Meshes | scene texture | `mesh.vert` + `mesh.frag` | Depth tested, two-sided, key + fill light with a sky/ground ambient. Colors are converted to linear before lighting and gamma-encoded at the end. |
-| Outline | scene texture | `outline.vert` + `outline.frag` | Selected entity only. "Inverted hull": back faces pushed outwards in screen space, front faces culled. |
-| Overlay | scene texture | `overlay.vert` + `overlay.frag` | Triangles in widget pixels with premultiplied alpha (the gizmo). Drawn into the scene so it's blurred behind panels too. |
-| Downsample | blur A (1/4) | `downsample.frag` | Average of 4 bilinear taps (16 texels). |
-| Blur ×4 | B, A, B, A | `blur.frag` | Separable 9-tap Gaussian with 5 bilinear fetches; two H+V iterations. |
-| Composite | widget target | `composite.frag` | Scene everywhere; the blurred texture inside the glass rectangles (rounded-box SDF, anti-aliased edge). |
+| Grid | scene (RGBA16F) | `fullscreen.vert` + `grid.frag` | Fullscreen triangle; each pixel intersects its view ray with y = 0. No depth write: it's the background. Colors converted to linear on the CPU. |
+| Meshes | scene | `mesh.vert` + `mesh.frag` | Depth tested, two-sided, key + fill light with a sky/ground ambient. Writes linear values (can exceed 1). |
+| Outline | scene | `outline.vert` + `outline.frag` | Selected entity only. "Inverted hull": back faces pushed outwards in screen space, front faces culled. |
+| Display | display (RGBA8) | `fullscreen.vert` + `display.frag` | Converts the linear HDR scene to sRGB for the screen. Exposure and tonemapping go here. |
+| Overlay | display | `overlay.vert` + `overlay.frag` | Triangles in widget pixels with premultiplied alpha (the gizmo), in display colors: interface, so exposure/tonemapping never touch it; still blurred behind panels. |
+| Downsample | blur A | `downsample.frag` | Average of 4 bilinear taps (16 texels) of the display image. |
+| Blur ×4 | B, A, B, A | `blur.frag` | Separable 9-tap Gaussian with 5 bilinear fetches; two H+V iterations; `params.z` scales the sample spacing. |
+| Composite | widget target | `composite.frag` | Display image everywhere; the blurred texture inside the glass rectangles (rounded-box SDF, anti-aliased edge). No color conversion. |
+
+Color spaces: everything up to the display pass is **linear** (16-bit float, values above
+1 allowed); from the display pass on it's **display sRGB** (8 bit, 0..1). Blurring after
+the display conversion keeps the glass consistent with what's on screen and lets the blur
+textures stay 8-bit.
 
 Resources:
 
@@ -57,7 +66,7 @@ meshes), shown by the stats overlay (F12).
 Every direct child widget of the viewport with the dynamic property `glass = true` (the
 floating panels, the command palette, the stats overlay) is a *glass rectangle*. Each
 frame the viewport collects their geometry (in device pixels) and hands it to the
-renderer with `setGlassRects()`; the composite pass shows the blurred scene inside them,
+renderer with `setGlassRects()`; the composite pass shows the blurred display image inside them,
 with corners of radius `glassRadius` (default 12). The widget itself is then drawn by Qt
 on top, with a translucent background from the stylesheet.
 
@@ -105,6 +114,7 @@ several shaders must be declared identically in each (see `mesh.vert`, `mesh.fra
 - No anti-aliasing on mesh edges (no MSAA yet).
 - The grid doesn't hide the parts of meshes below the ground plane.
 - The outline is designed for convex meshes centered on their origin.
-- 8-bit color targets: the HDR pipeline is on the roadmap.
+- No tonemapping yet: values above 1 are clipped in the display pass.
+- The selection outline is drawn in the HDR scene, so it will follow exposure.
 - GPU timings aren't available: `QRhiWidget` doesn't expose the flag that enables GPU
   timestamps on its `QRhi`.

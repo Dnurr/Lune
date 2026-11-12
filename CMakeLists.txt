@@ -72,6 +72,7 @@ qt6_add_shaders(Lune "shaders"
         src/engine/render/shaders/fullscreen.vert
         src/engine/render/shaders/fullscreen_flipped.vert
         src/engine/render/shaders/grid.frag
+        src/engine/render/shaders/display.frag
         src/engine/render/shaders/downsample.frag
         src/engine/render/shaders/blur.frag
         src/engine/render/shaders/composite.frag

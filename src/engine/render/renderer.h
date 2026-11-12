@@ -46,9 +46,11 @@ struct FrameStats
 // (an editor viewport today, an offline render target tomorrow).
 //
 // Frame:
-//   1. scene  -> world grid, meshes (depth tested), selection outline, 2D overlay
-//   2. blur   -> scene downsampled to 1/4 and blurred (Gaussian, 2 iterations)
-//   3. final  -> scene, with the blurred copy inside the "glass" rectangles
+//   1. scene   -> world grid, meshes (depth tested), selection outline       [HDR, linear]
+//   2. display -> scene converted for the screen (future tonemapping), then
+//                 the 2D overlay (gizmo) on top, in display colors            [8 bit, sRGB]
+//   3. blur    -> display image downsampled and blurred (Gaussian, 2 iterations)
+//   4. final   -> display image, with the blurred copy inside the "glass" rectangles
 //
 // Usage:
 //   initialize(rhi, target)              on the first frame and whenever the target/QRhi changes
@@ -110,23 +112,27 @@ private:
     std::unique_ptr<QRhiBuffer> m_downUbuf;
     std::array<std::unique_ptr<QRhiBuffer>, 4> m_blurUbufs; // H, V, H, V
     std::unique_ptr<QRhiBuffer> m_compositeUbuf;
+    std::unique_ptr<QRhiBuffer> m_displayUbuf; // free parameters for the display pass (exposure, tonemapping...)
     std::unique_ptr<QRhiBuffer> m_overlayUbuf;
     std::unique_ptr<QRhiBuffer> m_overlayVbuf;
     std::unique_ptr<QRhiBuffer> m_layoutUbuf; // only gives m_meshLayoutSrb a buffer to point to
 
-    // Offscreen targets: full-size scene (+ depth), two 1/4-size ping-pong textures for the blur.
-    std::unique_ptr<QRhiTexture> m_sceneTex, m_blurA, m_blurB;
+    // Offscreen targets:
+    //   scene   full size, HDR (RGBA16F) + depth, linear values
+    //   display full size, RGBA8, display (sRGB) values: what ends up on screen
+    //   blur    two reduced-size RGBA8 ping-pong textures
+    std::unique_ptr<QRhiTexture> m_sceneTex, m_displayTex, m_blurA, m_blurB;
     std::unique_ptr<QRhiRenderBuffer> m_sceneDepth;
-    std::unique_ptr<QRhiTextureRenderTarget> m_sceneRt, m_blurARt, m_blurBRt;
+    std::unique_ptr<QRhiTextureRenderTarget> m_sceneRt, m_displayRt, m_blurARt, m_blurBRt;
     std::unique_ptr<QRhiRenderPassDescriptor> m_sceneRp; // color + depth
-    std::unique_ptr<QRhiRenderPassDescriptor> m_blurRp;  // color only, shared by both blur targets
+    std::unique_ptr<QRhiRenderPassDescriptor> m_ldrRp;   // RGBA8 color only: display and blur targets
 
-    std::unique_ptr<QRhiShaderResourceBindings> m_gridSrb, m_downSrb, m_compositeSrb, m_overlaySrb;
+    std::unique_ptr<QRhiShaderResourceBindings> m_gridSrb, m_displaySrb, m_downSrb, m_compositeSrb, m_overlaySrb;
     std::unique_ptr<QRhiShaderResourceBindings> m_meshLayoutSrb; // layout of the per-entity SRBs
     std::array<std::unique_ptr<QRhiShaderResourceBindings>, 4> m_blurSrbs;
 
     std::unique_ptr<QRhiGraphicsPipeline> m_gridPipe, m_meshPipe, m_outlinePipe, m_overlayPipe;
-    std::unique_ptr<QRhiGraphicsPipeline> m_downPipe, m_blurPipe, m_compositePipe;
+    std::unique_ptr<QRhiGraphicsPipeline> m_displayPipe, m_downPipe, m_blurPipe, m_compositePipe;
 
     std::unordered_map<const Mesh *, GpuMesh> m_meshes;
     std::unordered_map<EntityId, GpuEntity> m_entities;
