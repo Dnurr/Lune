@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.22) # 3.22: ENVIRONMENT_MODIFICATION in tests
 project(Lune LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
