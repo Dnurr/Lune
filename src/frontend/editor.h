@@ -4,12 +4,11 @@
 
 #include "engine/scene/mesh.h"
 
-class Panel;
+class CommandPalette;
 class QMenu;
 class QUndoStack;
 class Scene;
 class Selection;
-class TransformPanel;
 class Viewport;
 
 // Main window. Owns the editor state (scene, selection, undo history) and connects
@@ -33,7 +32,6 @@ public:
 private:
     void createMenus();
     void createPanels();
-    void refreshInspector();
 
     void addEntity(const QString &name, const MeshPtr &mesh);
     void importObj();
@@ -44,7 +42,6 @@ private:
     QUndoStack *m_undo = nullptr;
 
     Viewport *m_viewport = nullptr; // owned by Qt (central widget)
-    Panel *m_inspector = nullptr;
-    TransformPanel *m_transformPanel = nullptr;
+    CommandPalette *m_palette = nullptr;
     QMenu *m_addMenu = nullptr;
 };

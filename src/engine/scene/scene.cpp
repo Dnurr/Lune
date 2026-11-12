@@ -81,6 +81,16 @@ void Scene::setTransform(EntityId id, const Transform &transform)
     emit entityChanged(id);
 }
 
+void Scene::modifyEntity(EntityId id, const std::function<void(Entity &)> &change)
+{
+    Entity *e = find(id);
+    if (!e)
+        return;
+    change(*e);
+    Q_ASSERT(e->id == id);
+    emit entityChanged(id);
+}
+
 QString Scene::uniqueName(const QString &base) const
 {
     auto taken = [this](const QString &n) {

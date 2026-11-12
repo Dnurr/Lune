@@ -7,6 +7,7 @@
 #include <QFile>
 #include <rhi/qrhi.h>
 
+#include <cmath>
 #include <cstring>
 
 namespace
@@ -18,7 +19,6 @@ constexpr int kEntityUbufSize = 3 * 64 + 4 * 16; // see mesh.vert
 constexpr int kOverlayVertexSize = int(sizeof(OverlayVertex));
 
 // Editor look of meshes.
-const QColor kMeshColor("#B9BBC4");
 const QColor kOutlineColor("#8FB0F2"); // palette primary (navy accent)
 constexpr float kOutlineWidth = 2.0f;  // logical pixels
 
@@ -38,6 +38,16 @@ float *putVec4(float *dst, const QColor &c, float w)
     dst[1] = float(c.greenF());
     dst[2] = float(c.blueF());
     dst[3] = w;
+    return dst + 4;
+}
+
+// Colors picked in the UI are display (sRGB) values; mesh lighting happens in linear space.
+float *putLinearColor(float *dst, const QColor &c)
+{
+    dst[0] = std::pow(float(c.redF()), 2.2f);
+    dst[1] = std::pow(float(c.greenF()), 2.2f);
+    dst[2] = std::pow(float(c.blueF()), 2.2f);
+    dst[3] = 1.0f;
     return dst + 4;
 }
 
@@ -367,7 +377,7 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         std::unordered_map<EntityId, bool> seen;
         if (scene) {
             for (const Entity &e : scene->entities()) {
-                if (!e.mesh || e.mesh->indices.empty())
+                if (!e.mesh || e.mesh->indices.empty() || !e.visible)
                     continue;
                 GpuMesh &gm = gpuMesh(e.mesh, rub);
                 GpuEntity &ge = gpuEntity(e.id);
@@ -378,7 +388,7 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
                 float *v = putMat4(data, clipViewProj * model);
                 v = putMat4(v, model);
                 v = putMat4(v, QMatrix4x4(model.normalMatrix()));
-                v = putVec4(v, kMeshColor, 1.0f);
+                v = putLinearColor(v, e.displayColor);
                 v = putVec4(v, kOutlineColor, kOutlineWidth * m_overlayScale);
                 v[0] = float(m_pixelSize.width());
                 v[1] = float(m_pixelSize.height());

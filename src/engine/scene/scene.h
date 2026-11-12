@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QObject>
+#include <functional>
 #include <vector>
 
 #include "entity.h"
@@ -29,6 +30,9 @@ public:
 
     void setName(EntityId id, const QString &name);
     void setTransform(EntityId id, const Transform &transform);
+    // Generic edit: `change` modifies the entity in place, then entityChanged is emitted.
+    // The id must not be changed.
+    void modifyEntity(EntityId id, const std::function<void(Entity &)> &change);
 
     // Name not used by any entity: "Entity", "Entity 2", "Entity 3"...
     QString uniqueName(const QString &base) const;

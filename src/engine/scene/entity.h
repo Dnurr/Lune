@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QColor>
 #include <QString>
 #include <QtGlobal>
 
@@ -17,4 +18,8 @@ struct Entity
     QString name;
     Transform transform;
     MeshPtr mesh; // nullptr = empty entity (just a transform)
+
+    // Viewport display of the mesh
+    QColor displayColor { 0xB9, 0xBB, 0xC4 };
+    bool visible = true;
 };

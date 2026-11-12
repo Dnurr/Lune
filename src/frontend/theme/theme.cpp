@@ -164,6 +164,23 @@ Panel {
 QLabel#PanelTitle { color: @onSurfaceVariant; font-weight: 600; background: transparent; }
 /* Nested panels: a light tint on top of the host's glass */
 Panel Panel { background-color: @glassNested; border-radius: 10px; }
+/* Read-only values in the Inspector */
+QLabel#PropertyValue { color: @onSurfaceVariant; }
+
+/* Command palette (components/palette): glass, a bit more opaque than panels */
+QFrame#CommandPalette {
+    background-color: @glassStrong; border: 1px solid @glassBorder; border-radius: 14px;
+}
+QFrame#CommandPalette QLineEdit, QFrame#CommandPalette QLineEdit:focus {
+    background: transparent; border: none; border-bottom: 1px solid @glassBorder;
+    border-radius: 0; padding: 10px 12px; font-size: 11pt;
+}
+QFrame#CommandPalette QAbstractItemView { background: transparent; border: none; padding: 2px; }
+QFrame#CommandPalette QAbstractItemView::item { padding: 7px 10px; border-radius: 8px; }
+QFrame#CommandPalette QAbstractItemView::item:selected {
+    background-color: @primaryContainer; color: @onPrimaryContainer;
+}
+
 /* Lists inside a panel sit directly on the glass */
 Panel QAbstractItemView { background: transparent; border: none; padding: 0; }
 
@@ -410,6 +427,7 @@ QString buildStyleSheet(const Palette &p)
         { "glassNested", css(withAlpha(p.onSurface, 0.05)) },
         { "glassBorder", css(withAlpha(p.onSurface, 0.10)) },
         { "glass", css(withAlpha(p.surfaceContainer, 0.45)) },
+        { "glassStrong", css(withAlpha(p.surfaceContainer, 0.78)) },
 
         { "iconDown", writeIcon("chevron-down", p.onSurfaceVariant, iconChevronDown) },
         { "iconDownOnPrimary", writeIcon("chevron-down", p.onPrimary, iconChevronDown) },

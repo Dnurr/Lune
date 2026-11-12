@@ -55,7 +55,7 @@ EntityId pickEntity(const Scene &scene, const QVector3D &origin, const QVector3D
     float bestT = std::numeric_limits<float>::max();
 
     for (const Entity &e : scene.entities()) {
-        if (!e.mesh)
+        if (!e.mesh || !e.visible)
             continue;
         bool invertible = false;
         const QMatrix4x4 toObject = e.transform.matrix().inverted(&invertible);

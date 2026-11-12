@@ -2,6 +2,7 @@
 
 #include <QElapsedTimer>
 #include <QUndoCommand>
+#include <QVariant>
 
 #include "engine/scene/entity.h"
 
@@ -58,6 +59,30 @@ private:
     Scene *m_scene;
     EntityId m_id;
     QString m_before, m_after;
+};
+
+// Edit of any reflected property (see engine/scene/components.h), used by the Inspector.
+// Consecutive edits of the same property of the same entity that arrive close together
+// (e.g. the many small steps of a drag on a label) merge into one undo step.
+class SetPropertyCommand : public QUndoCommand
+{
+public:
+    SetPropertyCommand(Scene *scene, EntityId id, int component, int property, const QVariant &after);
+
+    void redo() override;
+    void undo() override;
+
+    int id() const override { return 2; }
+    bool mergeWith(const QUndoCommand *other) override;
+
+private:
+    void apply(const QVariant &value);
+
+    Scene *m_scene;
+    EntityId m_entity;
+    int m_component, m_property;
+    QVariant m_before, m_after;
+    QElapsedTimer m_lastEdit;
 };
 
 // Transform edit.

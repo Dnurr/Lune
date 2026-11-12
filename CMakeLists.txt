@@ -10,6 +10,7 @@ find_package(Qt6 REQUIRED COMPONENTS Gui Widgets ShaderTools)
 add_executable(Lune
     # Engine: scene data and rendering, no Qt Widgets
     src/engine/scene/scene.cpp
+    src/engine/scene/components.cpp
     src/engine/scene/primitives.cpp
     src/engine/scene/picking.cpp
     src/engine/io/objloader.cpp
@@ -24,7 +25,8 @@ add_executable(Lune
     src/frontend/components/widgets/draglabel.cpp
     src/frontend/components/widgets/vector3.cpp
     src/frontend/components/panel/panel.cpp
-    src/frontend/components/panel/transform/transform.cpp
+    src/frontend/components/panel/inspector/inspector.cpp
+    src/frontend/components/palette/commandpalette.cpp
     src/frontend/components/panel/outliner/outliner.cpp
     src/frontend/editor.cpp
     src/frontend/theme/theme.cpp

@@ -14,6 +14,9 @@ Viewport::Viewport(QWidget *parent)
     : QRhiWidget(parent)
 {
     setMouseTracking(true); // gizmo hover highlight
+    // Clicking the viewport takes the keyboard focus away from text fields
+    // (so Ctrl+Z undoes the scene, and the command palette closes).
+    setFocusPolicy(Qt::ClickFocus);
 }
 
 Viewport::~Viewport() = default;

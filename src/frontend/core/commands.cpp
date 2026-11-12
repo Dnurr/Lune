@@ -1,5 +1,6 @@
 #include "commands.h"
 
+#include "engine/scene/components.h"
 #include "engine/scene/scene.h"
 #include "selection.h"
 
@@ -109,6 +110,53 @@ void RenameEntityCommand::redo()
 void RenameEntityCommand::undo()
 {
     m_scene->setName(m_id, m_before);
+}
+
+// ---------------------------------------------------------------------------
+// Property
+// ---------------------------------------------------------------------------
+
+SetPropertyCommand::SetPropertyCommand(Scene *scene, EntityId id, int component, int property, const QVariant &after)
+    : m_scene(scene)
+    , m_entity(id)
+    , m_component(component)
+    , m_property(property)
+    , m_after(after)
+{
+    const ComponentDesc &c = components()[size_t(component)];
+    if (const Entity *e = scene->entity(id))
+        m_before = c.get(*e, property);
+    m_lastEdit.start();
+    setText(QStringLiteral("Change %1").arg(c.properties[size_t(property)].name));
+}
+
+void SetPropertyCommand::apply(const QVariant &value)
+{
+    const ComponentDesc &c = components()[size_t(m_component)];
+    const int property = m_property;
+    m_scene->modifyEntity(m_entity, [&](Entity &e) { c.set(e, property, value); });
+}
+
+void SetPropertyCommand::redo()
+{
+    apply(m_after);
+}
+
+void SetPropertyCommand::undo()
+{
+    apply(m_before);
+}
+
+bool SetPropertyCommand::mergeWith(const QUndoCommand *other)
+{
+    const auto *o = static_cast<const SetPropertyCommand *>(other);
+    if (o->m_entity != m_entity || o->m_component != m_component || o->m_property != m_property
+        || m_lastEdit.elapsed() > kMergeWindowMs)
+        return false;
+    m_after = o->m_after;
+    m_lastEdit.restart();
+    setObsolete(m_after == m_before);
+    return true;
 }
 
 // ---------------------------------------------------------------------------

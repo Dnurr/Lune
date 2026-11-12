@@ -11,8 +11,9 @@
 #include <QMenuBar>
 #include <QUndoStack>
 
+#include "components/palette/commandpalette.h"
+#include "components/panel/inspector/inspector.h"
 #include "components/panel/outliner/outliner.h"
-#include "components/panel/transform/transform.h"
 #include "components/viewport/viewport.h"
 #include "core/commands.h"
 #include "core/selection.h"
@@ -50,12 +51,6 @@ Editor::Editor(QWidget *parent)
         if (m_selection->current() == id)
             m_selection->clear();
     });
-    connect(m_selection, &Selection::changed, this, &Editor::refreshInspector);
-    connect(m_scene, &Scene::entityChanged, this, [this](EntityId id) {
-        if (id == m_selection->current())
-            refreshInspector();
-    });
-    refreshInspector();
 }
 
 Editor::~Editor() = default;
@@ -71,6 +66,8 @@ void Editor::createMenus()
     saveFile->setShortcut(QKeySequence::Save);
     auto *saveAs = new QAction(QIcon::fromTheme("document-save-as"), "Save as", this);
     saveAs->setShortcut(QKeySequence::SaveAs);
+    for (QAction *a : { newFile, openFile, saveFile, saveAs })
+        a->setEnabled(false); // until scene saving exists (also keeps them out of the command palette)
     auto *importAction = new QAction("Import OBJ...", this);
     importAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_I));
     connect(importAction, &QAction::triggered, this, &Editor::importObj);
@@ -112,6 +109,14 @@ void Editor::createMenus()
     edit->addActions({ move, rotate, scale });
     edit->addSeparator();
     edit->addAction(del);
+    edit->addSeparator();
+
+    // Command palette: listed in Edit for discoverability, but not inside the palette itself.
+    auto *palette = new QAction("Command Palette", this);
+    palette->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_K));
+    palette->setProperty("paletteHidden", true);
+    connect(palette, &QAction::triggered, this, [this] { m_palette->open(); });
+    edit->addAction(palette);
 
     // Add: also opens at the mouse cursor with Shift+A
     m_addMenu = menuBar()->addMenu("Add");
@@ -139,33 +144,18 @@ void Editor::createPanels()
         m_undo->push(new RenameEntityCommand(m_scene, id, name));
     });
 
-    // Inspector (right): only visible while something is selected.
-    m_inspector = new Panel("Inspector", m_viewport, Panel::Side::Right);
-    m_inspector->setMargin(12);
-    m_inspector->setPanelWidth(280);
-
-    m_transformPanel = new TransformPanel(m_inspector);
-    m_transformPanel->setMargin(12);
-    m_transformPanel->setPanelWidth(200);
-    m_inspector->contentLayout()->addWidget(m_transformPanel);
-    connect(m_transformPanel, &TransformPanel::edited, this, [this](const Transform &t, TransformField field) {
-        const EntityId id = m_selection->current();
-        if (id != InvalidEntity)
-            m_undo->push(new SetTransformCommand(m_scene, id, t, field));
-    });
+    // Inspector (right): built from the component descriptors, hidden while nothing is selected.
+    auto *inspector = new InspectorPanel(m_scene, m_selection, m_undo, m_viewport);
+    inspector->setMargin(12);
+    inspector->setPanelWidth(280);
 
     // Assets (bottom)
     auto *assets = new Panel("Assets", m_viewport, Panel::Side::Bottom);
     assets->setMargin(12);
     assets->setPanelHeight(200);
-}
 
-void Editor::refreshInspector()
-{
-    const Entity *e = m_scene->entity(m_selection->current());
-    m_inspector->setVisible(e != nullptr);
-    if (e)
-        m_transformPanel->setTransform(e->transform);
+    // Created last so it sits above the panels.
+    m_palette = new CommandPalette(this, m_viewport);
 }
 
 void Editor::addEntity(const QString &name, const MeshPtr &mesh)
