@@ -34,5 +34,5 @@ void main()
 
     vec3 base = color.rgb;
     vec3 lit = base * (ambient + vec3(1.0, 0.97, 0.92) * key * 0.9 + vec3(0.55, 0.65, 0.9) * fill * 0.3) + rim;
-    fragColor = vec4(pow(lit, vec3(1.0 / 2.2)), 1.0);
+    fragColor = vec4(lit, 1.0);
 }

@@ -22,6 +22,14 @@ float roundedBox(vec2 p, vec2 halfSize, float r)
     return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
 }
 
+vec3 linearToSRGB(vec3 c)
+{
+    c = clamp(c, 0.0, 1.0);
+    vec3 l = c * 12.92;
+    vec3 h = 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055;
+    return mix(l, h, step(0.0031308, c));
+}
+
 void main()
 {
     vec2 px = vec2(v_uv.x, info.z > 0.5 ? 1.0 - v_uv.y : v_uv.y) * size.xy;
@@ -39,5 +47,6 @@ void main()
 
     vec3 scene = texture(sceneTex, v_uv).rgb;
     vec3 blurred = texture(blurTex, v_uv).rgb;
-    fragColor = vec4(mix(scene, blurred, glass), 1.0);
+
+    fragColor = vec4(linearToSRGB(mix(scene, blurred, glass)), 1.0);
 }

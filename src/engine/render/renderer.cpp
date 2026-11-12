@@ -13,7 +13,7 @@
 namespace
 {
 constexpr int kBlurDownscale = 4; // blur resolution = target / 4
-constexpr float BlurRadius = 2;
+constexpr float kBlurRadius = 2;
 constexpr int kGridUbufSize = 64 + 8 * 16;
 constexpr int kCompositeUbufSize = 2 * 16 + Renderer::MaxGlassRects * 16;
 constexpr int kEntityUbufSize = 3 * 64 + 4 * 16; // see mesh.vert
@@ -42,13 +42,18 @@ float *putVec4(float *dst, const QColor &c, float w)
     return dst + 4;
 }
 
-// Colors picked in the UI are display (sRGB) values; mesh lighting happens in linear space.
-float *putLinearColor(float *dst, const QColor &c)
+float sRGBToLinear(float c)
 {
-    dst[0] = std::pow(float(c.redF()), 2.2f);
-    dst[1] = std::pow(float(c.greenF()), 2.2f);
-    dst[2] = std::pow(float(c.blueF()), 2.2f);
-    dst[3] = 1.0f;
+    return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
+}
+
+// Colors picked in the UI are display (sRGB) values; mesh lighting happens in linear space.
+float *putLinearColor(float *dst, const QColor &c, float a)
+{
+    dst[0] = sRGBToLinear(c.redF());
+    dst[1] = sRGBToLinear(c.greenF());
+    dst[2] = sRGBToLinear(c.blueF());
+    dst[3] = a;
     return dst + 4;
 }
 
@@ -140,7 +145,7 @@ void Renderer::createSizeDependentResources()
     const QSize blurSize = (m_pixelSize / kBlurDownscale).expandedTo(QSize(1, 1));
 
     auto texture = [this](const QSize &s) {
-        std::unique_ptr<QRhiTexture> t(m_rhi->newTexture(m_rhi->isTextureFormatSupported(QRhiTexture::RGBA16F) ? QRhiTexture::RGBA16F : QRhiTexture::RGBA8, s, 1, QRhiTexture::RenderTarget));
+        std::unique_ptr<QRhiTexture> t(m_rhi->newTexture(m_rhi->isTextureFormatSupported(QRhiTexture::RGBA16F, QRhiTexture::RenderTarget) ? QRhiTexture::RGBA16F : QRhiTexture::RGBA8, s, 1, QRhiTexture::RenderTarget));
         t->create();
         return t;
     };
@@ -361,12 +366,12 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         v[2] = 1.0f;
         v[3] = 10.0f;
         v += 4;
-        v = putVec4(v, QColor("#1C1C20"), 1.0f); // sky top
-        v = putVec4(v, QColor("#121214"), 1.0f); // sky bottom / horizon
-        v = putVec4(v, QColor("#2E2E34"), 1.0f); // minor lines
-        v = putVec4(v, QColor("#46464E"), 1.0f); // major lines
-        v = putVec4(v, QColor("#C8434F"), 0.9f); // X axis
-        putVec4(v, QColor("#3F6FD8"), 0.9f);     // Z axis (navy-blue accent)
+        v = putLinearColor(v, QColor("#1C1C20"), 1.0f); // sky top
+        v = putLinearColor(v, QColor("#121214"), 1.0f); // sky bottom / horizon
+        v = putLinearColor(v, QColor("#2E2E34"), 1.0f); // minor lines
+        v = putLinearColor(v, QColor("#46464E"), 1.0f); // major lines
+        v = putLinearColor(v, QColor("#C8434F"), 0.9f); // X axis
+        putLinearColor(v, QColor("#3F6FD8"), 0.9f);     // Z axis (navy-blue accent)
         rub->updateDynamicBuffer(m_gridUbuf.get(), 0, kGridUbufSize, data);
     }
 
@@ -394,8 +399,8 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
                 float *v = putMat4(data, clipViewProj * model);
                 v = putMat4(v, model);
                 v = putMat4(v, QMatrix4x4(model.normalMatrix()));
-                v = putLinearColor(v, e.displayColor);
-                v = putVec4(v, kOutlineColor, kOutlineWidth * m_overlayScale);
+                v = putLinearColor(v, e.displayColor, 1.0f);
+                v = putLinearColor(v, kOutlineColor, kOutlineWidth * m_overlayScale);
                 v[0] = float(m_pixelSize.width());
                 v[1] = float(m_pixelSize.height());
                 v += 4;
@@ -432,7 +437,7 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         const float tx = 1.0f / blurSize.width();
         const float ty = 1.0f / blurSize.height();
         for (int i = 0; i < 4; ++i) {
-            const float p[4] = { (i % 2 == 0) ? tx : 0.0f, (i % 2 == 0) ? 0.0f : ty, BlurRadius, 0 };
+            const float p[4] = { (i % 2 == 0) ? tx : 0.0f, (i % 2 == 0) ? 0.0f : ty, kBlurRadius, 0 };
             rub->updateDynamicBuffer(m_blurUbufs[i].get(), 0, 16, p);
         }
     }
