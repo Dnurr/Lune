@@ -4,8 +4,9 @@
 #include <QStringList>
 
 // How the viewport turns the HDR scene into the image on screen: exposure and tonemapping
-// operator. Editor state (a viewing choice, not scene content): not undoable, saved in the
-// "editor" section of the scene file.
+// operator. Editor state (a viewing choice, not scene content), saved in the "editor"
+// section of the scene file. Undo is handled from outside by DisplayHistory, so this class
+// stays a plain value holder.
 //
 // The renderer receives them in the display pass uniforms (display.frag):
 //   params.x = exposure in EV (stops): the scene is multiplied by 2^EV

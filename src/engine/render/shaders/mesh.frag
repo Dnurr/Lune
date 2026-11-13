@@ -12,6 +12,7 @@ layout(std140, binding = 0) uniform buf {
     vec4 outline;
     vec4 viewport;
     vec4 cameraPos;
+    vec4 material;  // x: roughness, y: metallic (0..1)
 };
 
 // Simple editor shading (studio-like): key + fill light and a sky/ground ambient.

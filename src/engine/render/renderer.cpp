@@ -16,7 +16,7 @@ constexpr int kBlurDownscale = 4; // blur resolution = target / 4
 constexpr float kBlurRadius = 2;
 constexpr int kGridUbufSize = 64 + 8 * 16;
 constexpr int kCompositeUbufSize = 2 * 16 + Renderer::MaxGlassRects * 16;
-constexpr int kEntityUbufSize = 3 * 64 + 4 * 16; // see mesh.vert
+constexpr int kEntityUbufSize = 3 * 64 + 5 * 16; // see mesh.vert
 constexpr int kOverlayVertexSize = int(sizeof(OverlayVertex));
 
 // Editor look of meshes.
@@ -427,6 +427,8 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
                 v[1] = float(m_pixelSize.height());
                 v += 4;
                 v[0] = eye.x(); v[1] = eye.y(); v[2] = eye.z();
+                v += 4;
+                v[0] = e.roughness; v[1] = e.metallic;
                 rub->updateDynamicBuffer(ge.uniforms.get(), 0, kEntityUbufSize, data);
 
                 draws.push_back({ &gm, ge.srb.get(), e.id == selected });

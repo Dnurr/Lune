@@ -22,4 +22,9 @@ struct Entity
     // Viewport display of the mesh
     QColor displayColor { 0xB9, 0xBB, 0xC4 };
     bool visible = true;
+
+    // Surface parameters for physically based shading (mesh.frag), both 0..1.
+    // The base color is displayColor.
+    float roughness = 0.5f; // 0 = mirror-like, 1 = fully diffuse highlight
+    float metallic = 0.0f;  // 0 = dielectric (plastic, stone...), 1 = metal
 };

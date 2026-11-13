@@ -91,6 +91,7 @@ Commands (`frontend/core/commands.h`):
 | `RenameEntityCommand` | |
 | `SetPropertyCommand` | Inspector edits. Consecutive edits of the same property within 600 ms merge into one step; an edit that ends where it started leaves no step. |
 | `SetTransformCommand` | Gizmo drags: the scene is updated live during the drag, one command with the explicit "before" state is pushed on release. Never merged. |
+| Display change (`DisplayHistory`) | Exposure / tonemapper. Recorded after the change happened (the first redo does nothing), so the menus need no undo code. Exposure changes within 600 ms merge. |
 
 Loading a scene or creating a new one clears the history (it refers to the old scene).
 The window title shows `*` while the undo stack isn't at its clean (saved) index.
@@ -135,8 +136,10 @@ exactly what you can grab, and the renderer knows nothing about gizmos.
 ### Display settings
 
 `DisplaySettings` (`frontend/core/displaysettings.h`) holds the viewport exposure and
-tonemapping operator. It's editor state, like the camera: not undoable, saved in the
-`editor` section of the scene file. The Display menu in the viewport corner
+tonemapping operator. It's editor state, like the camera, saved in the `editor` section of
+the scene file. Unlike the camera it's undoable: `DisplayHistory` records every change on
+the undo stack after it happens (exposure scrubs merge into one step), so the settings
+also mark the scene as modified and closing asks to save them. The Display menu in the viewport corner
 (`DisplayMenu`) and the View menu actions edit it; the viewport passes it to the renderer
 every frame.
 

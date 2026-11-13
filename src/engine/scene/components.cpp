@@ -65,10 +65,34 @@ ComponentDesc meshComponent()
     };
     return c;
 }
+ComponentDesc materialComponent()
+{
+    ComponentDesc c;
+    c.name = QStringLiteral("Material");
+    PropertyDesc roughness { QStringLiteral("roughness"), PropertyType::Float, 0.005, 0.0, 1.0 };
+    PropertyDesc metallic { QStringLiteral("metallic"), PropertyType::Float, 0.005, 0.0, 1.0 };
+    c.properties = { roughness, metallic };
+    c.present = [](const Entity &e) { return e.mesh != nullptr; };
+    c.get = [](const Entity &e, int i) -> QVariant {
+        switch (i) {
+        case 0: return double(e.roughness);
+        case 1: return double(e.metallic);
+        }
+        return {};
+    };
+    c.set = [](Entity &e, int i, const QVariant &v) {
+        const float x = float(qBound(0.0, v.toDouble(), 1.0));
+        switch (i) {
+        case 0: e.roughness = x; break;
+        case 1: e.metallic = x; break;
+        }
+    };
+    return c;
+}
 } // namespace
 
 const std::vector<ComponentDesc> &components()
 {
-    static const std::vector<ComponentDesc> all = { transformComponent(), meshComponent() };
+    static const std::vector<ComponentDesc> all = { transformComponent(), meshComponent(), materialComponent() };
     return all;
 }

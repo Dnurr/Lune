@@ -57,6 +57,8 @@ private slots:
         cube.transform.scale = QVector3D(1, 2, 3);
         cube.displayColor = QColor("#336699");
         cube.visible = false;
+        cube.roughness = 0.25f;
+        cube.metallic = 1.0f;
         scene.createEntity(cube);
         Entity sphere;
         sphere.name = QStringLiteral("Sphere");
@@ -86,6 +88,9 @@ private slots:
         QVERIFY(fuzzyEqual(c.transform.scale, cube.transform.scale));
         QCOMPARE(c.displayColor, QColor("#336699"));
         QVERIFY(!c.visible);
+        QCOMPARE(c.roughness, 0.25f);
+        QCOMPARE(c.metallic, 1.0f);
+        QCOMPARE(loaded.entities()[1].roughness, 0.5f); // defaults survive too
         QCOMPARE(loaded.entities()[1].mesh, Primitives::sphere());
         QVERIFY(!loaded.entities()[2].mesh);
     }

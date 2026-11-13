@@ -14,6 +14,7 @@ layout(std140, binding = 0) uniform buf {
     vec4 outline;
     vec4 viewport;
     vec4 cameraPos;
+    vec4 material;
 };
 
 void main()

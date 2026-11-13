@@ -72,6 +72,8 @@ like the triangle count, are derived). Current components:
 | | `scale` | `[x, y, z]` |
 | `Mesh` (only with a mesh) | `color` | `"#rrggbb"` (sRGB) |
 | | `visible` | boolean |
+| `Material` (only with a mesh) | `roughness` | number, 0–1 (default 0.5) |
+| | `metallic` | number, 0–1 (default 0) |
 
 Value types by property type: `Float` → number, `Vector3` → array of 3 numbers,
 `Color` → `"#rrggbb"` string, `Bool` → boolean, `Text` → string. Numbers are written

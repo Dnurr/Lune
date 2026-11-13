@@ -38,6 +38,7 @@ add_library(lune_editor_core STATIC
     src/frontend/core/selection.cpp
     src/frontend/core/commands.cpp
     src/frontend/core/displaysettings.cpp
+    src/frontend/core/displayhistory.cpp
     src/frontend/components/viewport/gizmo.cpp
 )
 target_link_libraries(lune_editor_core PUBLIC lune_engine)

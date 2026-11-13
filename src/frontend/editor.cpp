@@ -20,6 +20,7 @@
 #include "components/viewport/displaymenu.h"
 #include "components/viewport/viewport.h"
 #include "core/commands.h"
+#include "core/displayhistory.h"
 #include "core/displaysettings.h"
 #include "core/selection.h"
 #include "engine/io/meshimport.h"
@@ -42,6 +43,8 @@ Editor::Editor(QWidget *parent)
 
     m_viewport->setEditorContext(m_scene, m_selection, m_undo);
     m_viewport->setDisplaySettings(m_display);
+    // Display changes go on the undo stack too (and so mark the scene as modified).
+    new DisplayHistory(m_display, m_undo, this);
     createDefaultScene();
 
     createMenus();

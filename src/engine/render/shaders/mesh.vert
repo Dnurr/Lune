@@ -15,6 +15,7 @@ layout(std140, binding = 0) uniform buf {
     vec4 outline;       // rgb: outline color, w: width in pixels
     vec4 viewport;      // xy: target size in pixels
     vec4 cameraPos;     // xyz
+    vec4 material;      // x: roughness, y: metallic (0..1), zw: free
 };
 
 void main()
