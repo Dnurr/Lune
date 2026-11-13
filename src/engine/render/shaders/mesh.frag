@@ -73,9 +73,6 @@ void main()
 
     if (dot(N, V) < 0.0) N = -N;
 
-    vec3 L = normalize(vec3(0.45, 0.8, 0.35));
-    vec3 H = normalize(V + L);
-
     vec3 albedo = color.rgb;
     float roughness = max(material.x, 0.045);
     float metallic = material.y;
@@ -83,20 +80,38 @@ void main()
     vec3 F0 = vec3(0.04);
     F0 = mix(F0, albedo, metallic);
 
-    float D = DistGGX(N, H, roughness * roughness);
-    float G = GeomSmith(N, V, L, (roughness + 1.0) * (roughness + 1.0) / 8.0);
-    vec3 F = Fresnel(max(dot(H, V), 0.0), F0);
-
     float NdotV = max(dot(N, V), 0.0);
-    float NdotL = max(dot(N, L), 0.0);
     
-    vec3 spec = (D * G * F) / ((4.0 * NdotV * NdotL) + 0.001);
-    
-    vec3 kD = (1.0 - F) * (1.0 - metallic);
+    vec3 final = vec3(0.0);
 
-    vec3 Lo = (kD * albedo / PI + spec) * 3.0 * NdotL;
-    
-    vec3 ambient = 0.03 * albedo;
+    for (int i = 0; i < lightCount.x; i++)
+    {
+        vec3 radiance = lights[i].color.rgb * lights[i].color.w;
+        vec3 L;
+        if (lights[i].position.w > 0.5) // point
+        {
+            vec3 toLight = lights[i].position.xyz - v_world;
+            float dist2 = max(dot(toLight, toLight), 1e-4);
+            L = toLight * inversesqrt(dist2);
+            radiance /= dist2;
+        }
+        else L = -lights[i].direction.xyz;
+        
+        vec3 H = normalize(V + L);
 
-    fragColor = vec4(Lo + ambient, 1.0);
+        float D = DistGGX(N, H, roughness * roughness);
+        float G = GeomSmith(N, V, L, (roughness + 1.0) * (roughness + 1.0) / 8.0);
+        vec3 F = Fresnel(max(dot(H, V), 0.0), F0);
+
+        float NdotL = max(dot(N, L), 0.0);
+        
+        vec3 spec = (D * G * F) / ((4.0 * NdotV * NdotL) + 0.001);
+        
+        vec3 kD = (1.0 - F) * (1.0 - metallic);
+
+        final += (kD * albedo / PI + spec) * radiance * NdotL;
+    }
+    fragColor = vec4(final + 0.03 * albedo, 1.0);
+    
+    fragColor = vec4(final, 1.0);
 }

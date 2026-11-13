@@ -128,15 +128,18 @@ docs/                  documentation
 - [Scene file format](docs/scene-format.md): the `.lune` specification.
 - [Extending Lune](docs/extending.md): adding components, actions, file formats, shaders, dependencies, tests.
 - [Troubleshooting](docs/troubleshooting.md): common build problems.
+- [Roadmap](docs/roadmap.md): planned features and who writes each part.
 
 ## Roadmap
 
-1. ~~Scene model, selection, undo~~
-2. ~~Meshes, picking, transform gizmo~~
-3. HDR pipeline (linear lighting, tonemapping, exposure) and color management
-4. Timeline: playback, keyframes, scrubbing
+1. ~~Editor foundations: scene, selection, undo, gizmo, files~~
+2. HDR and shading: PBR, lights, image-based lighting, shadows, textures, color management
+3. Post-processing: bloom, depth of field, anti-aliasing
+4. Timeline: playback, keyframes, curves
 5. GPU particles (compute), emitters and forces
 6. Image sequence output (EXR)
+
+The detailed checklist, with who writes each part, is in [docs/roadmap.md](docs/roadmap.md).
 
 ## Development and AI assistance
 
