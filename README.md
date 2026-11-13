@@ -149,6 +149,14 @@ file formats, tests, stats overlay and this documentation. The rendering and VFX
 - [Qt 6](https://www.qt.io/) (LGPLv3, linked dynamically): UI, QRhi rendering, shader tools.
 - [cgltf](https://github.com/jkuhlmann/cgltf) (MIT): glTF 2.0 parsing.
 
+Techniques adapted in the shaders (`src/engine/render/shaders/display.frag`):
+
+- **ACES tonemapping**: fit by Stephen Hill, from
+  [BakingLab](https://github.com/TheRealMJP/BakingLab/blob/master/BakingLab/ACES.hlsl) (MIT, Copyright (c) 2016 MJP).
+- **AgX tonemapping**: the display transform by [Troy Sobotka](https://github.com/sobotka/AgX),
+  in the minimal polynomial fit by Benjamin Wrensch,
+  [Minimal AgX Implementation](https://iolite-engine.com/blog_posts/minimal_agx_implementation).
+
 ## License
 
 Lune is released under the [MIT License](LICENSE). Copyright (c) 2026 Stefano Russo.
