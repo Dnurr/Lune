@@ -88,6 +88,12 @@ const char *Renderer::backendName() const
     return m_rhi ? m_rhi->backendName() : "none";
 }
 
+void Renderer::setDisplayParams(float exposureEv, int tonemapper)
+{
+    m_exposure = exposureEv;
+    m_tonemapper = tonemapper;
+}
+
 void Renderer::setOverlay(std::vector<OverlayVertex> vertices, float pixelScale)
 {
     m_overlay = std::move(vertices);
@@ -446,9 +452,9 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         rub->updateDynamicBuffer(m_overlayUbuf.get(), 0, 16, p);
     }
 
-    // --- Display uniforms: free for now (exposure, tonemapping operator... in step 2) ---
+    // --- Display uniforms: x = exposure (EV), y = tonemapper index, zw free ---
     {
-        const float p[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+        const float p[4] = { m_exposure, float(m_tonemapper), 0.0f, 0.0f };
         rub->updateDynamicBuffer(m_displayUbuf.get(), 0, 16, p);
     }
 

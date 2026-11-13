@@ -8,6 +8,7 @@
 #include "engine/render/renderer.h"
 #include "gizmo.h"
 
+class DisplaySettings;
 class QUndoStack;
 class StatsOverlay;
 class Scene;
@@ -40,6 +41,9 @@ public:
 
     // Editor state the viewport shows and edits. Must be set before the first frame.
     void setEditorContext(Scene *scene, Selection *selection, QUndoStack *undoStack);
+
+    // Exposure and tonemapping used to show the HDR scene. Redraws when they change.
+    void setDisplaySettings(DisplaySettings *settings);
 
     void setGizmoMode(Gizmo::Mode mode);
     Gizmo::Mode gizmoMode() const { return m_gizmo.mode(); }
@@ -75,6 +79,7 @@ private:
     OrbitCamera m_camera;
     Gizmo m_gizmo;
     StatsOverlay *m_stats = nullptr;
+    DisplaySettings *m_display = nullptr;
 
     Scene *m_scene = nullptr;
     Selection *m_selection = nullptr;

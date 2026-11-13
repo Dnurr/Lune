@@ -132,6 +132,14 @@ The **gizmo** is computed in screen space: each frame its handles are projected 
 and the same 2D shapes are drawn (as overlay triangles) and hit-tested. What you see is
 exactly what you can grab, and the renderer knows nothing about gizmos.
 
+### Display settings
+
+`DisplaySettings` (`frontend/core/displaysettings.h`) holds the viewport exposure and
+tonemapping operator. It's editor state, like the camera: not undoable, saved in the
+`editor` section of the scene file. The Display menu in the viewport corner
+(`DisplayMenu`) and the View menu actions edit it; the viewport passes it to the renderer
+every frame.
+
 ### Command palette
 
 `CommandPalette` lists every enabled action of the window's menus. Anything added to a

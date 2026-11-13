@@ -24,6 +24,8 @@ Most actions are one keystroke or one search in the command palette away.
 - **Undo / redo** for every edit; drags collapse into a single step.
 - **Command palette** (Ctrl+K) with fuzzy search over every action.
 - **Scene files** (`.lune`, JSON) and mesh import (OBJ, glTF 2.0 / GLB).
+- **HDR viewport**: linear lighting in a 16-bit float scene, with exposure and tonemapping
+  chosen from the Display menu in the viewport corner.
 - **Stats overlay** (F12): FPS, CPU frame time, draw calls, triangles.
 - **Automated tests** for the scene model, undo, file formats, picking and gizmo.
 
@@ -83,6 +85,7 @@ Third-party libraries are downloaded on the first configure into `build/_deps`
 | Zoom | Wheel |
 | Scrub a value | Drag a property's label (Shift = fine, Ctrl = coarse) |
 | Move a panel | Drag its title; it snaps to the nearest edge |
+| Exposure / tonemapping | Display menu, top-right corner of the viewport (drag "exposure" to scrub) |
 
 ### Keyboard
 

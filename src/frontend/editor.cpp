@@ -17,8 +17,10 @@
 #include "components/palette/commandpalette.h"
 #include "components/panel/inspector/inspector.h"
 #include "components/panel/outliner/outliner.h"
+#include "components/viewport/displaymenu.h"
 #include "components/viewport/viewport.h"
 #include "core/commands.h"
+#include "core/displaysettings.h"
 #include "core/selection.h"
 #include "engine/io/meshimport.h"
 #include "engine/io/sceneio.h"
@@ -31,6 +33,7 @@ Editor::Editor(QWidget *parent)
     , m_selection(new Selection(this))
     , m_undo(new QUndoStack(this))
     , m_viewport(new Viewport(this))
+    , m_display(new DisplaySettings(this))
 {
     resize(1280, 720);
 
@@ -38,6 +41,7 @@ Editor::Editor(QWidget *parent)
     setCentralWidget(m_viewport);
 
     m_viewport->setEditorContext(m_scene, m_selection, m_undo);
+    m_viewport->setDisplaySettings(m_display);
     createDefaultScene();
 
     createMenus();
@@ -126,7 +130,25 @@ void Editor::createMenus()
     stats->setShortcut(QKeySequence(Qt::Key_F12));
     stats->setCheckable(true);
     connect(stats, &QAction::toggled, m_viewport, &Viewport::setStatsVisible);
-    menuBar()->addMenu("View")->addAction(stats);
+    QMenu *view = menuBar()->addMenu("View");
+    view->addAction(stats);
+    view->addSeparator();
+
+    // Display: tonemapping operator (one checked at a time) and exposure reset.
+    // Same settings as the Display menu in the viewport corner; both stay in sync.
+    auto *tonemappers = new QActionGroup(this);
+    const QStringList names = DisplaySettings::tonemapperNames();
+    for (int i = 0; i < names.size(); ++i) {
+        auto *a = new QAction(QStringLiteral("Tonemap: %1").arg(names[i]), tonemappers);
+        a->setCheckable(true);
+        a->setChecked(m_display->tonemapper() == i);
+        connect(a, &QAction::triggered, this, [this, i] { m_display->setTonemapper(i); });
+        connect(m_display, &DisplaySettings::changed, a, [this, a, i] { a->setChecked(m_display->tonemapper() == i); });
+        view->addAction(a);
+    }
+    auto *resetExposure = new QAction("Reset Exposure", this);
+    connect(resetExposure, &QAction::triggered, this, [this] { m_display->setExposure(0.0); });
+    view->addAction(resetExposure);
 
     // Add: also opens at the mouse cursor with Shift+A
     m_addMenu = menuBar()->addMenu("Add");
@@ -165,6 +187,9 @@ void Editor::createPanels()
     assets->setPanelHeight(200);
 
     // Created last so it sits above the panels.
+    // Display dropdown in the top-right corner of the free viewport area.
+    new DisplayMenu(m_display, m_viewport);
+
     m_palette = new CommandPalette(this, m_viewport);
 }
 
@@ -221,6 +246,7 @@ void Editor::newScene()
     m_scene->clear();
     createDefaultScene();
     m_viewport->setCamera(OrbitCamera {});
+    m_display->reset();
     resetDocument(QString());
 }
 
@@ -318,8 +344,12 @@ QJsonObject Editor::editorState() const
     camera["yaw"] = c.yaw;
     camera["pitch"] = c.pitch;
     camera["distance"] = c.distance;
+    QJsonObject display;
+    display["exposure"] = m_display->exposure();
+    display["tonemapper"] = DisplaySettings::tonemapperIds().value(m_display->tonemapper());
     QJsonObject state;
     state["camera"] = camera;
+    state["display"] = display;
     return state;
 }
 
@@ -334,6 +364,12 @@ void Editor::applyEditorState(const QJsonObject &state)
     c.pitch = qBound(-89.0f, float(camera["pitch"].toDouble(c.pitch)), 89.0f);
     c.distance = qBound(0.5f, float(camera["distance"].toDouble(c.distance)), 500.0f);
     m_viewport->setCamera(c);
+
+    // Missing or unknown values (older files, operators removed later): defaults.
+    const QJsonObject display = state["display"].toObject();
+    m_display->setExposure(display["exposure"].toDouble(0.0));
+    const int tonemapper = DisplaySettings::tonemapperIds().indexOf(display["tonemapper"].toString());
+    m_display->setTonemapper(tonemapper >= 0 ? tonemapper : DisplaySettings::None);
 }
 
 void Editor::closeEvent(QCloseEvent *event)

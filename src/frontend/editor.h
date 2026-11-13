@@ -5,6 +5,7 @@
 #include "engine/scene/mesh.h"
 
 class CommandPalette;
+class DisplaySettings;
 class QCloseEvent;
 class QJsonObject;
 class QMenu;
@@ -66,6 +67,7 @@ private:
 
     Viewport *m_viewport = nullptr; // owned by Qt (central widget)
     CommandPalette *m_palette = nullptr;
+    DisplaySettings *m_display = nullptr; // exposure + tonemapping of the viewport
     QMenu *m_addMenu = nullptr;
     QString m_scenePath; // empty = never saved
 };

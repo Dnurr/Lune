@@ -77,6 +77,10 @@ public:
     // to target pixels (the widget's device pixel ratio).
     void setOverlay(std::vector<OverlayVertex> vertices, float pixelScale);
 
+    // Parameters of the display pass (display.frag): params.x = exposure in EV,
+    // params.y = tonemapping operator index.
+    void setDisplayParams(float exposureEv, int tonemapper);
+
     const FrameStats &lastFrameStats() const { return m_stats; }
     const char *backendName() const;
 
@@ -104,6 +108,8 @@ private:
     QList<QRectF> m_glassRects;
     float m_glassRadius = 0.0f;
     FrameStats m_stats;
+    float m_exposure = 0.0f;
+    int m_tonemapper = 0;
     std::vector<OverlayVertex> m_overlay;
     float m_overlayScale = 1.0f;
 

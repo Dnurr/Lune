@@ -9,7 +9,8 @@ layout(location = 1) in vec2 v_ndc;
 layout(location = 0) out vec4 fragColor;
 
 layout(std140, binding = 0) uniform buf {
-    vec4 params; // free: filled by Renderer::render() ("Display uniforms"), all 0 for now
+    vec4 params; // x: exposure in EV, y: tonemapper index (0 none, 1 Reinhard, 2 ACES, 3 AgX), zw: free
+                 // set from the viewport's Display menu (DisplaySettings) via Renderer::setDisplayParams
 };
 layout(binding = 1) uniform sampler2D sceneTex;
 

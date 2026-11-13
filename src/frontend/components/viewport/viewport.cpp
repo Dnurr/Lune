@@ -10,6 +10,7 @@
 #include "engine/scene/picking.h"
 #include "engine/scene/scene.h"
 #include "frontend/core/commands.h"
+#include "frontend/core/displaysettings.h"
 #include "frontend/core/selection.h"
 #include "statsoverlay.h"
 
@@ -70,6 +71,13 @@ void Viewport::setCamera(const OrbitCamera &camera)
     redraw();
 }
 
+void Viewport::setDisplaySettings(DisplaySettings *settings)
+{
+    m_display = settings;
+    connect(m_display, &DisplaySettings::changed, this, &Viewport::redraw);
+    redraw();
+}
+
 void Viewport::setStatsVisible(bool visible)
 {
     m_stats->setVisible(visible);
@@ -112,6 +120,8 @@ void Viewport::render(QRhiCommandBuffer *cb)
     if (layoutGizmo())
         m_gizmo.appendGeometry(overlay);
     m_renderer.setOverlay(std::move(overlay), float(devicePixelRatio()));
+    if (m_display)
+        m_renderer.setDisplayParams(float(m_display->exposure()), m_display->tonemapper());
 
     const EntityId selected = m_selection ? m_selection->current() : InvalidEntity;
     m_renderer.render(cb, renderTarget(), m_camera, m_scene, selected);

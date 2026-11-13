@@ -188,6 +188,19 @@ QLabel#StatsOverlay {
     font-family: "Cascadia Mono", "Consolas", monospace; font-size: 9pt;
 }
 
+/* Display dropdown in the viewport corner (components/viewport/displaymenu) */
+QFrame#DisplayMenu {
+    background-color: @glassStrong; color: @onSurface;
+    border: 1px solid @glassBorder; border-radius: 10px;
+}
+QToolButton#DisplayMenuHeader { color: @onSurfaceVariant; padding: 4px 6px; font-weight: 600; }
+QToolButton#DisplayMenuHeader:checked { background: transparent; color: @onSurface; }
+QToolButton#DisplayMenuReset { padding: 2px 8px; border: 1px solid @glassBorder; }
+QFrame#DisplayMenu QAbstractSpinBox, QFrame#DisplayMenu QComboBox { padding: 4px 8px; min-height: 18px; }
+QFrame#DisplayMenu QAbstractSpinBox:focus, QFrame#DisplayMenu QComboBox:focus,
+QFrame#DisplayMenu QComboBox:on { padding: 3px 7px; }
+QFrame#DisplayMenu QComboBox { padding-right: 30px; }
+
 /* Lists inside a panel sit directly on the glass */
 Panel QAbstractItemView { background: transparent; border: none; padding: 0; }
 
