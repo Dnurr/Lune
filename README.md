@@ -24,6 +24,8 @@ Most actions are one keystroke or one search in the command palette away.
 - **Undo / redo** for every edit; drags collapse into a single step.
 - **Command palette** (Ctrl+K) with fuzzy search over every action.
 - **Scene files** (`.lune`, JSON) and mesh import (OBJ, glTF 2.0 / GLB).
+- **Lights and PBR shading**: directional and point lights, Cook-Torrance materials
+  (roughness, metallic).
 - **HDR viewport**: linear lighting in a 16-bit float scene, with exposure and tonemapping
   chosen from the Display menu in the viewport corner.
 - **Stats overlay** (F12): FPS, CPU frame time, draw calls, triangles.
@@ -92,7 +94,7 @@ Third-party libraries are downloaded on the first configure into `build/_deps`
 | Shortcut | Action |
 |---|---|
 | Ctrl+K | Command palette |
-| Shift+A | Add menu at the cursor (empty, cube, sphere, plane, import) |
+| Shift+A | Add menu at the cursor (empty, cube, sphere, plane, lights, import) |
 | W / E / R | Move / rotate / scale gizmo |
 | Delete | Delete the selection |
 | F2 / double click | Rename in the outliner |

@@ -60,6 +60,7 @@ class Renderer
 {
 public:
     static constexpr int MaxGlassRects = 16; // must match MAX_RECTS in composite.frag
+    static constexpr int MaxLights = 8;      // must match MAX_LIGHTS in mesh.frag; extra lights are ignored
 
     Renderer();
     ~Renderer();
@@ -122,6 +123,7 @@ private:
     std::unique_ptr<QRhiBuffer> m_overlayUbuf;
     std::unique_ptr<QRhiBuffer> m_overlayVbuf;
     std::unique_ptr<QRhiBuffer> m_layoutUbuf; // only gives m_meshLayoutSrb a buffer to point to
+    std::unique_ptr<QRhiBuffer> m_lightsUbuf; // the frame's lights, binding 1 of every mesh SRB
 
     // Offscreen targets:
     //   scene   full size, HDR (RGBA16F) + depth, linear values

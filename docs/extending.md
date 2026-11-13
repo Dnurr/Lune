@@ -4,13 +4,14 @@ Recipes for the most common changes. Each one lists every file you need to touch
 
 ## Add a component
 
-Example: a `Light` component with an intensity and a color.
+Example: a simplified version of the real `Light` component (see `lightComponent()` in
+`engine/scene/components.cpp` for the full one).
 
 1. **Data**: add the fields to `Entity` (`engine/scene/entity.h`), or a struct held by it:
 
    ```cpp
-   struct LightData { float intensity = 1.0f; QColor color = Qt::white; };
-   std::optional<LightData> light; // absent = the entity has no light
+   struct Light { float intensity = 3.0f; QColor color = Qt::white; };
+   std::optional<Light> light; // absent = the entity has no light
    ```
 
 2. **Descriptor**: in `engine/scene/components.cpp`, write a function returning a
@@ -33,6 +34,7 @@ Example: a `Light` component with an intensity and a color.
            if (i == 0) e.light->intensity = float(v.toDouble());
            else e.light->color = v.value<QColor>();
        };
+       c.add = [](Entity &e) { e.light = Light {}; }; // optional component: lets files add it
        return c;
    }
    ```
@@ -45,6 +47,11 @@ Notes:
 
 - `PropertyDesc::dragStep` is the change per pixel when dragging the label.
 - Mark derived values `readOnly` (shown as text, not saved).
+- A choice between a few values is `PropertyType::Enum`: the value is an `int` index into
+  `PropertyDesc::options`, the Inspector shows a drop-down, files store the option id
+  (`"point"`), so reordering options doesn't break old files.
+- An optional component (present only on some entities) needs `add`: loading a file that
+  has the component calls it before setting the properties.
 - Property and component names are part of the file format: renaming them makes old
   files lose that value (it falls back to the default).
 - To let the user *add* the component, add an action that pushes a command setting

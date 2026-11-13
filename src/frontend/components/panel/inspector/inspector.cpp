@@ -3,6 +3,7 @@
 #include <QBoxLayout>
 #include <QCheckBox>
 #include <QColorDialog>
+#include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QLabel>
 #include <QPushButton>
@@ -172,6 +173,25 @@ void InspectorPanel::rebuild()
                 l->addWidget(check, 1);
                 connect(check, &QCheckBox::toggled, this, [this, ci, pi](bool on) { edit(ci, pi, on); });
                 row.show = [check](const QVariant &x) { check->setChecked(x.toBool()); };
+                alignLabel(label);
+                section->contentLayout()->addWidget(w);
+                break;
+            }
+            case PropertyType::Enum: {
+                auto *w = new QWidget(section);
+                auto *l = rowLayout(w);
+                auto *label = new QLabel(prop.name, w);
+                auto *combo = new QComboBox(w);
+                for (const QString &id : prop.options) // "point" -> "Point"
+                    combo->addItem(id.left(1).toUpper() + id.mid(1));
+                combo->setEnabled(!prop.readOnly);
+                l->addWidget(label);
+                l->addWidget(combo, 1);
+                connect(combo, &QComboBox::currentIndexChanged, this, [this, ci, pi](int index) {
+                    if (index >= 0)
+                        edit(ci, pi, index);
+                });
+                row.show = [combo](const QVariant &x) { combo->setCurrentIndex(x.toInt()); };
                 alignLabel(label);
                 section->contentLayout()->addWidget(w);
                 break;

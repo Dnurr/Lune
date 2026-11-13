@@ -161,6 +161,9 @@ void Editor::createMenus()
     m_addMenu->addAction("Sphere", this, [this] { addEntity(QStringLiteral("Sphere"), Primitives::sphere()); });
     m_addMenu->addAction("Plane", this, [this] { addEntity(QStringLiteral("Plane"), Primitives::plane()); });
     m_addMenu->addSeparator();
+    m_addMenu->addAction("Directional Light", this, [this] { addLight(Light::Directional); });
+    m_addMenu->addAction("Point Light", this, [this] { addLight(Light::Point); });
+    m_addMenu->addSeparator();
     m_addMenu->addAction(importAction);
 
     auto *addAtCursor = new QAction(this);
@@ -204,6 +207,31 @@ void Editor::addEntity(const QString &name, const MeshPtr &mesh)
     m_undo->push(new AddEntityCommand(m_scene, m_selection, e));
 }
 
+Entity Editor::lightPrototype(Light::Type type)
+{
+    Entity e;
+    e.light = Light {};
+    e.light->type = type;
+    if (type == Light::Directional) {
+        e.name = QStringLiteral("Sun");
+        // Above the scene, tilted like the old built-in key light (only the rotation matters).
+        e.transform.position = QVector3D(0.0f, 3.0f, 0.0f);
+        e.transform.rotation = QVector3D(21.0f, 0.0f, -29.0f);
+    } else {
+        e.name = QStringLiteral("Point Light");
+        e.transform.position = QVector3D(0.0f, 2.0f, 0.0f);
+        e.light->intensity = 10.0f; // falls off with distance squared: 2.5 at the grid
+    }
+    return e;
+}
+
+void Editor::addLight(Light::Type type)
+{
+    Entity e = lightPrototype(type);
+    e.name = m_scene->uniqueName(e.name);
+    m_undo->push(new AddEntityCommand(m_scene, m_selection, e));
+}
+
 void Editor::importMeshFile()
 {
     const QString path = QFileDialog::getOpenFileName(this, "Import Mesh", lastDirectory(), meshFileFilter());
@@ -230,6 +258,7 @@ void Editor::createDefaultScene()
     cube.transform.position = QVector3D(0.0f, 0.5f, 0.0f); // resting on the grid
     cube.mesh = Primitives::cube();
     m_selection->select(m_scene->createEntity(cube));
+    m_scene->createEntity(lightPrototype(Light::Directional));
 }
 
 void Editor::resetDocument(const QString &path)

@@ -2,7 +2,7 @@
 
 #include <QMainWindow>
 
-#include "engine/scene/mesh.h"
+#include "engine/scene/entity.h"
 
 class CommandPalette;
 class DisplaySettings;
@@ -43,6 +43,8 @@ private:
     void createPanels();
 
     void addEntity(const QString &name, const MeshPtr &mesh);
+    void addLight(Light::Type type);
+    static Entity lightPrototype(Light::Type type); // name, transform and light of a new light
     void importMeshFile();
     void deleteSelected();
 

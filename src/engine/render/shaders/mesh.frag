@@ -15,6 +15,20 @@ layout(std140, binding = 0) uniform buf {
     vec4 material;  // x: roughness, y: metallic (0..1)
 };
 
+// Scene lights, filled by the Renderer once per frame (binding 1, shared by every mesh).
+// A scene without enabled lights gets one default sun, so lightCount.x is never 0.
+#define MAX_LIGHTS 8 // Renderer::MaxLights
+struct Light
+{
+    vec4 position;  // xyz: world position (point lights), w: type (0 directional, 1 point)
+    vec4 direction; // xyz: normalized direction the light travels (directional lights)
+    vec4 color;     // rgb: linear color, w: intensity -> radiance = color.rgb * color.w
+};
+layout(std140, binding = 1) uniform lightsBuf {
+    ivec4 lightCount; // x: number of lights in use
+    Light lights[MAX_LIGHTS];
+};
+
 const float PI = 3.14159265359;
 
 float DistGGX(vec3 N, vec3 H, float a)

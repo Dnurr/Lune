@@ -95,6 +95,58 @@ private slots:
         QVERIFY(!loaded.entities()[2].mesh);
     }
 
+    void lightsRoundTrip()
+    {
+        QTemporaryDir dir;
+        const QString path = dir.filePath("lights.lune");
+
+        Scene scene;
+        Entity sun;
+        sun.name = QStringLiteral("Sun");
+        sun.light = Light {};
+        sun.light->color = QColor("#ffeedd");
+        sun.light->intensity = 4.5f;
+        scene.createEntity(sun);
+        Entity lamp;
+        lamp.name = QStringLiteral("Lamp");
+        lamp.light = Light {};
+        lamp.light->type = Light::Point;
+        lamp.light->enabled = false;
+        scene.createEntity(lamp);
+        scene.createEntity(QStringLiteral("Empty"));
+
+        QString error;
+        QVERIFY2(SceneIO::save(scene, path, {}, &error), qPrintable(error));
+        // Enums are written as readable ids
+        const QJsonArray saved = readJson(path)["entities"].toArray();
+        QCOMPARE(saved[1].toObject()["components"].toObject()["Light"].toObject()["type"].toString(),
+                 QStringLiteral("point"));
+
+        Scene loaded;
+        QStringList warnings;
+        QVERIFY2(SceneIO::load(loaded, path, nullptr, &warnings, &error), qPrintable(error));
+        QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join('\n')));
+        QCOMPARE(loaded.entities()[0].light, sun.light);
+        QCOMPARE(loaded.entities()[1].light, lamp.light);
+        QVERIFY(!loaded.entities()[2].light); // no Light component: not a light
+    }
+
+    void unknownEnumValueIsAWarning()
+    {
+        QTemporaryDir dir;
+        const QString path = dir.filePath("bad.lune");
+        writeFile(path, R"({"format": "lune-scene", "version": 1, "entities": [
+            {"id": 1, "name": "L", "components": {"Light": {"type": "spot", "intensity": 2}}}]})");
+        Scene scene;
+        QStringList warnings;
+        QString error;
+        QVERIFY2(SceneIO::load(scene, path, nullptr, &warnings, &error), qPrintable(error));
+        QCOMPARE(warnings.size(), 1);
+        QVERIFY(scene.entities()[0].light);
+        QCOMPARE(scene.entities()[0].light->type, Light::Directional); // default kept
+        QCOMPARE(scene.entities()[0].light->intensity, 2.0f);
+    }
+
     void meshFilesUseRelativePathsAndLoadOnce()
     {
         QTemporaryDir dir;

@@ -133,6 +133,13 @@ The **gizmo** is computed in screen space: each frame its handles are projected 
 and the same 2D shapes are drawn (as overlay triangles) and hit-tested. What you see is
 exactly what you can grab, and the renderer knows nothing about gizmos.
 
+### Lights
+
+A light is an entity with a `Light` component (`std::optional<Light>` in `Entity`), placed
+by its transform. Lights have no mesh, so the viewport draws them as screen-space icons in
+the overlay (`LightIcons`), and a click on an icon selects the light before mesh picking.
+The renderer collects the enabled lights into one uniform buffer per frame.
+
 ### Display settings
 
 `DisplaySettings` (`frontend/core/displaysettings.h`) holds the viewport exposure and

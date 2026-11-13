@@ -12,6 +12,7 @@
 #include "frontend/core/commands.h"
 #include "frontend/core/displaysettings.h"
 #include "frontend/core/selection.h"
+#include "lighticons.h"
 #include "statsoverlay.h"
 
 Viewport::Viewport(QWidget *parent)
@@ -117,7 +118,10 @@ void Viewport::render(QRhiCommandBuffer *cb)
     updateGlassRects();
 
     std::vector<OverlayVertex> overlay;
-    if (layoutGizmo())
+    if (m_scene)
+        LightIcons::append(*m_scene, m_camera, QSizeF(size()), m_selection ? m_selection->current() : InvalidEntity,
+                           overlay);
+    if (layoutGizmo()) // after the icons: drawn on top of them
         m_gizmo.appendGeometry(overlay);
     m_renderer.setOverlay(std::move(overlay), float(devicePixelRatio()));
     if (m_display)
@@ -227,6 +231,12 @@ void Viewport::mousePressEvent(QMouseEvent *event)
                 event->accept();
                 return;
             }
+        }
+        // Light icons sit on top of the scene, so they are tested before the meshes.
+        if (const EntityId light = LightIcons::hitTest(*m_scene, m_camera, QSizeF(size()), pos)) {
+            m_selection->select(light);
+            event->accept();
+            return;
         }
         QVector3D origin, direction;
         m_camera.screenRay(pos, QSizeF(size()), &origin, &direction);

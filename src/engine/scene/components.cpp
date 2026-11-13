@@ -89,10 +89,51 @@ ComponentDesc materialComponent()
     };
     return c;
 }
+ComponentDesc lightComponent()
+{
+    ComponentDesc c;
+    c.name = QStringLiteral("Light");
+    PropertyDesc type { QStringLiteral("type"), PropertyType::Enum };
+    type.options = { QStringLiteral("directional"), QStringLiteral("point") };
+    PropertyDesc intensity { QStringLiteral("intensity"), PropertyType::Float, 0.02, 0.0, 1000.0 };
+    c.properties = {
+        type,
+        { QStringLiteral("color"), PropertyType::Color },
+        intensity,
+        { QStringLiteral("enabled"), PropertyType::Bool },
+    };
+    c.present = [](const Entity &e) { return e.light.has_value(); };
+    c.get = [](const Entity &e, int i) -> QVariant {
+        if (!e.light)
+            return {};
+        switch (i) {
+        case 0: return int(e.light->type);
+        case 1: return e.light->color;
+        case 2: return double(e.light->intensity);
+        case 3: return e.light->enabled;
+        }
+        return {};
+    };
+    c.set = [](Entity &e, int i, const QVariant &v) {
+        if (!e.light)
+            return;
+        switch (i) {
+        case 0: e.light->type = v.toInt() == Light::Point ? Light::Point : Light::Directional; break;
+        case 1: e.light->color = v.value<QColor>(); break;
+        case 2: e.light->intensity = float(qMax(0.0, v.toDouble())); break;
+        case 3: e.light->enabled = v.toBool(); break;
+        }
+    };
+    c.add = [](Entity &e) {
+        if (!e.light)
+            e.light = Light {};
+    };
+    return c;
+}
 } // namespace
 
 const std::vector<ComponentDesc> &components()
 {
-    static const std::vector<ComponentDesc> all = { transformComponent(), meshComponent(), materialComponent() };
+    static const std::vector<ComponentDesc> all = { transformComponent(), meshComponent(), materialComponent(), lightComponent() };
     return all;
 }

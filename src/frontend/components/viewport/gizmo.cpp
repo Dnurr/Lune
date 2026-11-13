@@ -1,10 +1,14 @@
 #include "gizmo.h"
 
+#include "overlaydraw.h"
+
 #include <QColor>
 #include <QLineF>
 #include <QtMath>
 
 #include <limits>
+
+using namespace OverlayDraw;
 
 namespace
 {
@@ -32,43 +36,6 @@ QColor highlighted(const QColor &c)
 {
     return QColor::fromRgbF(c.redF() + (1.0f - c.redF()) * 0.55f, c.greenF() + (1.0f - c.greenF()) * 0.55f,
                             c.blueF() + (1.0f - c.blueF()) * 0.55f);
-}
-
-void addTriangle(std::vector<OverlayVertex> &out, const QPointF &a, const QPointF &b, const QPointF &c, const QColor &col)
-{
-    for (const QPointF &p : { a, b, c })
-        out.push_back({ float(p.x()), float(p.y()), float(col.redF()), float(col.greenF()), float(col.blueF()), 1.0f });
-}
-
-void addQuad(std::vector<OverlayVertex> &out, const QPointF &a, const QPointF &b, const QPointF &c, const QPointF &d,
-             const QColor &col)
-{
-    addTriangle(out, a, b, c, col);
-    addTriangle(out, a, c, d, col);
-}
-
-void addSegment(std::vector<OverlayVertex> &out, const QPointF &p, const QPointF &q, float width, const QColor &col)
-{
-    QPointF d = q - p;
-    const double len = std::hypot(d.x(), d.y());
-    if (len < 1e-6)
-        return;
-    const QPointF n(-d.y() / len * width * 0.5, d.x() / len * width * 0.5);
-    addQuad(out, p + n, q + n, q - n, p - n, col);
-}
-
-void addSquare(std::vector<OverlayVertex> &out, const QPointF &c, float half, const QColor &col)
-{
-    addQuad(out, c + QPointF(-half, -half), c + QPointF(half, -half), c + QPointF(half, half), c + QPointF(-half, half), col);
-}
-
-double distanceToSegment(const QPointF &p, const QPointF &a, const QPointF &b)
-{
-    const QPointF ab = b - a;
-    const double len2 = QPointF::dotProduct(ab, ab);
-    const double t = len2 > 0 ? qBound(0.0, QPointF::dotProduct(p - a, ab) / len2, 1.0) : 0.0;
-    const QPointF closest = a + ab * t;
-    return std::hypot(p.x() - closest.x(), p.y() - closest.y());
 }
 
 // Wrap an angle difference to (-180, 180].
@@ -181,7 +148,7 @@ void Gizmo::appendGeometry(std::vector<OverlayVertex> &out) const
         const size_t n = s.points.size();
         const size_t segments = s.closed ? n : n - 1;
         for (size_t i = 0; i < segments; ++i)
-            addSegment(out, s.points[i], s.points[(i + 1) % n], width, col);
+            segment(out, s.points[i], s.points[(i + 1) % n], width, col);
 
         if (s.closed)
             continue;
@@ -194,13 +161,13 @@ void Gizmo::appendGeometry(std::vector<OverlayVertex> &out) const
         const QPointF dir = d / len;
         const QPointF nrm(-dir.y(), dir.x());
         if (m_mode == Mode::Translate)
-            addTriangle(out, b + dir * 14.0, b + nrm * 6.0, b - nrm * 6.0, col); // arrow head
+            triangle(out, b + dir * 14.0, b + nrm * 6.0, b - nrm * 6.0, col); // arrow head
         else
-            addSquare(out, b, 5.0f, col);
+            square(out, b, 5.0f, col);
     }
 
     if (m_mode == Mode::Scale && (m_active == None || m_active == Uniform))
-        addSquare(out, m_screenCenter, 6.0f, colorFor(Uniform));
+        square(out, m_screenCenter, 6.0f, colorFor(Uniform));
 }
 
 void Gizmo::beginDrag(int handle, const QPointF &mouse, const Transform &start)

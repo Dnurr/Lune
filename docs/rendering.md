@@ -36,7 +36,7 @@ flowchart LR
 | Pass | Target | Shaders | Notes |
 |---|---|---|---|
 | Grid | scene (RGBA16F) | `fullscreen.vert` + `grid.frag` | Fullscreen triangle; each pixel intersects its view ray with y = 0. No depth write: it's the background. Colors converted to linear on the CPU. |
-| Meshes | scene | `mesh.vert` + `mesh.frag` | Depth tested, two-sided, key + fill light with a sky/ground ambient. Writes linear values (can exceed 1). |
+| Meshes | scene | `mesh.vert` + `mesh.frag` | Depth tested, two-sided, Cook-Torrance (GGX) shading with the scene lights and a small ambient. Writes linear values (can exceed 1). |
 | Outline | scene | `outline.vert` + `outline.frag` | Selected entity only. "Inverted hull": back faces pushed outwards in screen space, front faces culled. |
 | Display | display (RGBA8) | `fullscreen.vert` + `display.frag` | Converts the linear HDR scene to sRGB for the screen. Exposure and tonemapping go here: `params.x` = exposure (EV), `params.y` = operator index (0 none, 1 Reinhard, 2 ACES, 3 AgX), set with `Renderer::setDisplayParams()` from the editor's `DisplaySettings`. |
 | Overlay | display | `overlay.vert` + `overlay.frag` | Triangles in widget pixels with premultiplied alpha (the gizmo), in display colors: interface, so exposure/tonemapping never touch it; still blurred behind panels. |
@@ -55,6 +55,10 @@ Resources:
   own buffer (a dynamic buffer must not be updated twice in one frame).
 - Each entity with a mesh has its own uniform buffer and binding set; meshes are cached
   by `Mesh*` and released when no entity uses them any more.
+- The scene lights go in one buffer per frame (binding 1 of every mesh binding set):
+  up to `Renderer::MaxLights` (8) enabled lights, each as position + type, direction and
+  linear color + intensity (see the `Light` block in `mesh.frag`). A scene with no enabled
+  light gets one default sun, so older scenes and empty ones stay visible.
 - Size-dependent textures are recreated on resize. Render pass descriptors are created
   once and reused, so the pipelines built with them stay valid.
 
@@ -105,7 +109,8 @@ Shader Tools) into `.qsb` files with SPIR-V, GLSL 300 es/330, HLSL 5.0 and MSL 1
 embedded as resources at `:/shaders/<name>.qsb`. The list is in `qt6_add_shaders()` in
 the root `CMakeLists.txt`.
 
-Uniform blocks use `std140`, binding 0; textures start at binding 1. A block shared by
+Uniform blocks use `std140`, binding 0; textures start at binding 1 (meshes use binding 1
+for the lights block). A block shared by
 several shaders must be declared identically in each (see `mesh.vert`, `mesh.frag`,
 `outline.vert`, `outline.frag`).
 

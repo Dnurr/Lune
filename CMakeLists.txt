@@ -40,6 +40,8 @@ add_library(lune_editor_core STATIC
     src/frontend/core/displaysettings.cpp
     src/frontend/core/displayhistory.cpp
     src/frontend/components/viewport/gizmo.cpp
+    src/frontend/components/viewport/overlaydraw.cpp
+    src/frontend/components/viewport/lighticons.cpp
 )
 target_link_libraries(lune_editor_core PUBLIC lune_engine)
 

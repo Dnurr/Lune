@@ -18,6 +18,9 @@ constexpr int kGridUbufSize = 64 + 8 * 16;
 constexpr int kCompositeUbufSize = 2 * 16 + Renderer::MaxGlassRects * 16;
 constexpr int kEntityUbufSize = 3 * 64 + 5 * 16; // see mesh.vert
 constexpr int kOverlayVertexSize = int(sizeof(OverlayVertex));
+// Lights uniform block (mesh.frag, binding 1): ivec4 header + MaxLights * 3 vec4.
+constexpr int kLightSize = 3 * 16;
+constexpr int kLightsUbufSize = 16 + Renderer::MaxLights * kLightSize;
 
 // Editor look of meshes.
 const QColor kOutlineColor("#8FB0F2"); // palette primary (navy accent)
@@ -127,11 +130,13 @@ void Renderer::initialize(QRhi *rhi, QRhiRenderTarget *target)
         m_displayUbuf = ubuf(16);
         m_overlayUbuf = ubuf(16);
         m_layoutUbuf = ubuf(kEntityUbufSize);
+        m_lightsUbuf = ubuf(kLightsUbufSize);
 
         using B = QRhiShaderResourceBinding;
         const auto stages = B::VertexStage | B::FragmentStage;
         m_meshLayoutSrb.reset(m_rhi->newShaderResourceBindings());
-        m_meshLayoutSrb->setBindings({ B::uniformBuffer(0, stages, m_layoutUbuf.get()) });
+        m_meshLayoutSrb->setBindings({ B::uniformBuffer(0, stages, m_layoutUbuf.get()),
+                                       B::uniformBuffer(1, B::FragmentStage, m_lightsUbuf.get()) });
         m_meshLayoutSrb->create();
         m_overlaySrb.reset(m_rhi->newShaderResourceBindings());
         m_overlaySrb->setBindings({ B::uniformBuffer(0, B::VertexStage, m_overlayUbuf.get()) });
@@ -322,6 +327,7 @@ void Renderer::release()
     m_overlayUbuf.reset();
     m_overlayVbuf.reset();
     m_layoutUbuf.reset();
+    m_lightsUbuf.reset();
     m_sampler.reset();
     m_rhi = nullptr;
     m_pixelSize = {};
@@ -358,7 +364,8 @@ Renderer::GpuEntity &Renderer::gpuEntity(EntityId id)
     g.uniforms.reset(m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, kEntityUbufSize));
     g.uniforms->create();
     g.srb.reset(m_rhi->newShaderResourceBindings());
-    g.srb->setBindings({ B::uniformBuffer(0, B::VertexStage | B::FragmentStage, g.uniforms.get()) });
+    g.srb->setBindings({ B::uniformBuffer(0, B::VertexStage | B::FragmentStage, g.uniforms.get()),
+                         B::uniformBuffer(1, B::FragmentStage, m_lightsUbuf.get()) }); // shared by every entity
     g.srb->create();
     return m_entities.emplace(id, std::move(g)).first->second;
 }
@@ -395,6 +402,35 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         v = putLinearColor(v, QColor("#C8434F"), 0.9f); // X axis
         putLinearColor(v, QColor("#3F6FD8"), 0.9f);     // Z axis (navy-blue accent)
         rub->updateDynamicBuffer(m_gridUbuf.get(), 0, kGridUbufSize, data);
+    }
+
+    // --- Lights: one buffer for the frame, shared by every mesh ---
+    {
+        float data[kLightsUbufSize / 4] = {};
+        int count = 0;
+        auto put = [&](int type, const QVector3D &position, const QVector3D &direction, const QColor &color,
+                       float intensity) {
+            float *v = data + 4 + count * (kLightSize / 4);
+            v[0] = position.x(); v[1] = position.y(); v[2] = position.z(); v[3] = float(type);
+            v[4] = direction.x(); v[5] = direction.y(); v[6] = direction.z();
+            putLinearColor(v + 8, color, intensity);
+            ++count;
+        };
+        if (scene) {
+            for (const Entity &e : scene->entities()) {
+                if (!e.light || !e.light->enabled || count == MaxLights)
+                    continue;
+                put(e.light->type, e.transform.position, Light::direction(e.transform), e.light->color,
+                    e.light->intensity);
+            }
+        }
+        // A scene without lights (older files, or all disabled) would be black:
+        // light it with a default sun so it can still be edited.
+        if (count == 0)
+            put(Light::Directional, QVector3D(), QVector3D(-0.45f, -0.8f, -0.35f).normalized(), Qt::white, 3.0f);
+        const qint32 header[4] = { count, 0, 0, 0 };
+        std::memcpy(data, header, sizeof(header));
+        rub->updateDynamicBuffer(m_lightsUbuf.get(), 0, kLightsUbufSize, data);
     }
 
     // --- Meshes: upload new ones, per-entity uniforms ---

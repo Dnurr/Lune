@@ -43,8 +43,17 @@ QJsonValue toJson(PropertyType type, const QVariant &v)
         return v.toBool();
     case PropertyType::Text:
         return v.toString();
+    case PropertyType::Enum:
+        break; // needs the option ids: see propertyToJson
     }
     return {};
+}
+
+QJsonValue propertyToJson(const PropertyDesc &p, const QVariant &v)
+{
+    if (p.type == PropertyType::Enum)
+        return p.options.value(v.toInt());
+    return toJson(p.type, v);
 }
 
 // Invalid QVariant if the JSON value doesn't fit the type.
@@ -67,8 +76,19 @@ QVariant fromJson(PropertyType type, const QJsonValue &j)
         return j.isBool() ? QVariant(j.toBool()) : QVariant();
     case PropertyType::Text:
         return j.isString() ? QVariant(j.toString()) : QVariant();
+    case PropertyType::Enum:
+        break; // needs the option ids: see propertyFromJson
     }
     return {};
+}
+
+QVariant propertyFromJson(const PropertyDesc &p, const QJsonValue &j)
+{
+    if (p.type == PropertyType::Enum) {
+        const int index = p.options.indexOf(j.toString());
+        return index >= 0 ? QVariant(index) : QVariant();
+    }
+    return fromJson(p.type, j);
 }
 
 QString meshReference(const MeshPtr &mesh, const QDir &sceneDir)
@@ -103,7 +123,7 @@ bool save(const Scene &scene, const QString &path, const QJsonObject &editorStat
             for (int i = 0; i < int(c.properties.size()); ++i) {
                 const PropertyDesc &p = c.properties[size_t(i)];
                 if (!p.readOnly) // read-only values are derived (e.g. triangle count)
-                    props[p.name] = toJson(p.type, c.get(e, i));
+                    props[p.name] = propertyToJson(p, c.get(e, i));
             }
             jc[c.name] = props;
         }
@@ -204,14 +224,18 @@ bool load(Scene &scene, const QString &path, QJsonObject *editorState, QStringLi
 
         const QJsonObject jc = je["components"].toObject();
         for (const ComponentDesc &c : comps) {
-            if (!c.present(e) || !jc.contains(c.name))
+            if (!jc.contains(c.name))
+                continue;
+            if (!c.present(e) && c.add)
+                c.add(e); // optional component (e.g. Light) saved in the file
+            if (!c.present(e))
                 continue;
             const QJsonObject props = jc[c.name].toObject();
             for (int i = 0; i < int(c.properties.size()); ++i) {
                 const PropertyDesc &p = c.properties[size_t(i)];
                 if (p.readOnly || !props.contains(p.name))
                     continue;
-                const QVariant value = fromJson(p.type, props[p.name]);
+                const QVariant value = propertyFromJson(p, props[p.name]);
                 if (value.isValid())
                     c.set(e, i, value);
                 else

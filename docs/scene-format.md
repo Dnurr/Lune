@@ -74,9 +74,18 @@ like the triangle count, are derived). Current components:
 | | `visible` | boolean |
 | `Material` (only with a mesh) | `roughness` | number, 0–1 (default 0.5) |
 | | `metallic` | number, 0–1 (default 0) |
+| `Light` (only on lights) | `type` | `"directional"` or `"point"` |
+| | `color` | `"#rrggbb"` (sRGB) |
+| | `intensity` | number ≥ 0 (radiance; for point lights, at 1 unit of distance) |
+| | `enabled` | boolean |
+
+An entity with a `Light` component is a light. Its transform places it: a point light
+shines from its position, a directional light along its local −Y axis (straight down
+with no rotation).
 
 Value types by property type: `Float` → number, `Vector3` → array of 3 numbers,
-`Color` → `"#rrggbb"` string, `Bool` → boolean, `Text` → string. Numbers are written
+`Color` → `"#rrggbb"` string, `Bool` → boolean, `Text` → string, `Enum` → the option id
+string (an unknown id keeps the default and is reported as a warning). Numbers are written
 with at most 7 significant digits (all a `float` holds).
 
 ### Editor state
