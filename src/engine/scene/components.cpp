@@ -98,10 +98,13 @@ ComponentDesc lightComponent()
     PropertyDesc type { QStringLiteral("type"), PropertyType::Enum };
     type.options = { QStringLiteral("directional"), QStringLiteral("point") };
     PropertyDesc intensity { QStringLiteral("intensity"), PropertyType::Float, 0.02, 0.0, 1000.0 };
+    PropertyDesc softness { QStringLiteral("softness"), PropertyType::Float, 0.01, 0.0, 8.0 };
     c.properties = {
         type,
         { QStringLiteral("color"), PropertyType::Color },
         intensity,
+        { QStringLiteral("shadows"), PropertyType::Bool },
+        softness,
         { QStringLiteral("enabled"), PropertyType::Bool },
     };
     c.present = [](const Entity &e) { return e.light.has_value(); };
@@ -112,7 +115,9 @@ ComponentDesc lightComponent()
         case 0: return int(e.light->type);
         case 1: return e.light->color;
         case 2: return double(e.light->intensity);
-        case 3: return e.light->enabled;
+        case 3: return e.light->shadows;
+        case 4: return double(e.light->softness);
+        case 5: return e.light->enabled;
         }
         return {};
     };
@@ -123,7 +128,9 @@ ComponentDesc lightComponent()
         case 0: e.light->type = v.toInt() == Light::Point ? Light::Point : Light::Directional; break;
         case 1: e.light->color = v.value<QColor>(); break;
         case 2: e.light->intensity = float(qMax(0.0, v.toDouble())); break;
-        case 3: e.light->enabled = v.toBool(); break;
+        case 3: e.light->shadows = v.toBool(); break;
+        case 4: e.light->softness = float(qBound(0.0, v.toDouble(), 8.0)); break;
+        case 5: e.light->enabled = v.toBool(); break;
         }
     };
     c.add = [](Entity &e) {

@@ -42,6 +42,22 @@ layout(binding = 4) uniform samplerCube prefilteredMap;
 // Split-sum BRDF terms: texture(brdfLut, vec2(NdotV, roughness)).rg = (scale, bias) for F0.
 layout(binding = 5) uniform sampler2D brdfLut;
 
+// Shadows of one directional light: the first enabled one with shadows on (a scene without
+// lights: the default sun). Shared by every mesh.
+layout(std140, binding = 6) uniform shadowBuf {
+    mat4 shadowMatrix;  // world -> shadow map: (shadowMatrix * vec4(v_world, 1.0)).xyz = (uv, depth)
+    mat4 lightViewProj; // world -> light clip space (used by shadow.vert)
+    vec4 shadowParams;  // x: 1 = shadows on, y: index of the shadowed light in lights[],
+                        // z: softness (filter radius in texels), w: texel size (1 / map size)
+};
+// Depth of the scene seen from the light, read through a comparison sampler:
+//     texture(shadowMap, vec3(uv, depth))  ->  1 = lit (depth <= the stored one), 0 = in shadow,
+// already blended across the 4 nearest texels. Outside 0..1 in uv it repeats the border:
+// treat that as lit. The shadow pass already applies a slope-scaled depth bias.
+// TODO (author): in the light loop, for the shadowed light only, multiply its contribution by
+// a filtered (PCF) shadow factor; a small normal offset or bias on top fixes the remaining acne.
+layout(binding = 7) uniform sampler2DShadow shadowMap;
+
 // Direction in the world -> direction to sample the environment maps with.
 vec3 toEnvironment(vec3 dir)
 {

@@ -24,6 +24,11 @@ constexpr int kLightsUbufSize = 16 + Renderer::MaxLights * kLightSize;
 // Environment uniform block (mesh.frag binding 2, background.frag binding 1): mat4 + vec4.
 constexpr int kEnvUbufSize = 64 + 16;
 constexpr int kBackgroundUbufSize = 64 + 2 * 16;
+// Shadow uniform block (mesh.frag binding 6, shadow.vert binding 1): 2 mat4 + vec4.
+constexpr int kShadowUbufSize = 2 * 64 + 16;
+// Hardware depth bias of the shadow pass, growing with the surface's slope as seen from the
+// light: removes most shadow acne on its own. The shader can add its own on top.
+constexpr float kShadowSlopeBias = 1.5f;
 
 // Editor look of meshes.
 const QColor kOutlineColor("#8FB0F2"); // palette primary (navy accent)
@@ -136,8 +141,33 @@ void Renderer::initialize(QRhi *rhi, QRhiRenderTarget *target)
         m_lightsUbuf = ubuf(kLightsUbufSize);
         m_envUbuf = ubuf(kEnvUbufSize);
         m_backgroundUbuf = ubuf(kBackgroundUbufSize);
+        m_shadowUbuf = ubuf(kShadowUbufSize);
 
         m_ibl.initialize(m_rhi);
+
+        // Shadow map: the most precise depth format available, rendered without color.
+        QRhiTexture::Format depthFormat = QRhiTexture::D16;
+        for (QRhiTexture::Format f : { QRhiTexture::D32F, QRhiTexture::D24 }) {
+            if (m_rhi->isTextureFormatSupported(f)) {
+                depthFormat = f;
+                break;
+            }
+        }
+        m_shadowMap.reset(m_rhi->newTexture(depthFormat, QSize(ShadowMapSize, ShadowMapSize), 1,
+                                            QRhiTexture::RenderTarget));
+        m_shadowMap->create();
+        QRhiTextureRenderTargetDescription shadowDesc;
+        shadowDesc.setDepthTexture(m_shadowMap.get());
+        m_shadowRt.reset(m_rhi->newTextureRenderTarget(shadowDesc));
+        m_shadowRp.reset(m_shadowRt->newCompatibleRenderPassDescriptor());
+        m_shadowRt->setRenderPassDescriptor(m_shadowRp.get());
+        m_shadowRt->create();
+        // Comparison sampler: texture(shadowMap, vec3(uv, depth)) = 1 where depth <= stored depth,
+        // filtered (linear) across the 4 nearest texels.
+        m_shadowSampler.reset(m_rhi->newSampler(QRhiSampler::Linear, QRhiSampler::Linear, QRhiSampler::None,
+                                                QRhiSampler::ClampToEdge, QRhiSampler::ClampToEdge));
+        m_shadowSampler->setTextureCompareOp(QRhiSampler::LessOrEqual);
+        m_shadowSampler->create();
 
         using B = QRhiShaderResourceBinding;
         const auto stages = B::VertexStage | B::FragmentStage;
@@ -147,6 +177,12 @@ void Renderer::initialize(QRhi *rhi, QRhiRenderTarget *target)
             m_meshLayoutSrb->setBindings(b.cbegin(), b.cend());
         }
         m_meshLayoutSrb->create();
+        m_shadowLayoutSrb.reset(m_rhi->newShaderResourceBindings());
+        {
+            const auto b = shadowBindings(m_layoutUbuf.get());
+            m_shadowLayoutSrb->setBindings(b.cbegin(), b.cend());
+        }
+        m_shadowLayoutSrb->create();
         m_backgroundSrb.reset(m_rhi->newShaderResourceBindings());
         m_backgroundSrb->setBindings({ B::uniformBuffer(0, stages, m_backgroundUbuf.get()),
                                        B::uniformBuffer(1, B::FragmentStage, m_envUbuf.get()),
@@ -247,6 +283,7 @@ void Renderer::createPipelines(QRhiRenderTarget *target)
         QRhiGraphicsPipeline::CullMode cull = QRhiGraphicsPipeline::None;
         bool depth = false;
         bool blend = false;
+        float slopeBias = 0.0f;
     };
     auto pipeline = [&](const QShader &vert, const QString &frag, QRhiShaderResourceBindings *srb,
                         QRhiRenderPassDescriptor *rp, int sampleCount, const Options &o = {}) {
@@ -259,6 +296,7 @@ void Renderer::createPipelines(QRhiRenderTarget *target)
         p->setCullMode(o.cull);
         p->setDepthTest(o.depth);
         p->setDepthWrite(o.depth);
+        p->setSlopeScaledDepthBias(o.slopeBias);
         if (o.blend) {
             QRhiGraphicsPipeline::TargetBlend b;
             b.enable = true;
@@ -278,6 +316,11 @@ void Renderer::createPipelines(QRhiRenderTarget *target)
     mesh.cull = QRhiGraphicsPipeline::None; // two-sided: imported meshes may have mixed winding
     Options outline = mesh;
     outline.cull = QRhiGraphicsPipeline::Front; // inverted hull: only the back faces
+    Options shadow; // depth only: positions, no color
+    shadow.input.setBindings({ { quint32(sizeof(MeshVertex)) } });
+    shadow.input.setAttributes({ { 0, 0, QRhiVertexInputAttribute::Float3, 0 } });
+    shadow.depth = true;
+    shadow.slopeBias = kShadowSlopeBias;
     Options background; // opaque, then the grid blends over it
     Options grid;
     grid.blend = true; // premultiplied: opaque with its own sky, only the lines over an environment
@@ -289,6 +332,8 @@ void Renderer::createPipelines(QRhiRenderTarget *target)
 
     // Rebuilt on every initialize(): they reference SRBs and the target's render pass,
     // which can be recreated on resize. Cheap enough at this scale.
+    m_shadowPipe = pipeline(loadShader(QStringLiteral("shadow.vert")), QStringLiteral("shadow.frag"),
+                            m_shadowLayoutSrb.get(), m_shadowRp.get(), 1, shadow);
     m_backgroundPipe = pipeline(loadShader(QStringLiteral("background.vert")), QStringLiteral("background.frag"),
                                 m_backgroundSrb.get(), m_sceneRp.get(), 1, background);
     m_gridPipe = pipeline(fullscreen, QStringLiteral("grid.frag"), m_gridSrb.get(), m_sceneRp.get(), 1, grid);
@@ -313,6 +358,7 @@ void Renderer::release()
     m_entities.clear();
     m_gridPipe.reset();
     m_backgroundPipe.reset();
+    m_shadowPipe.reset();
     m_meshPipe.reset();
     m_outlinePipe.reset();
     m_overlayPipe.reset();
@@ -327,6 +373,7 @@ void Renderer::release()
     m_overlaySrb.reset();
     m_meshLayoutSrb.reset();
     m_backgroundSrb.reset();
+    m_shadowLayoutSrb.reset();
     for (auto &s : m_blurSrbs)
         s.reset();
     m_sceneRt.reset();
@@ -352,6 +399,11 @@ void Renderer::release()
     m_lightsUbuf.reset();
     m_envUbuf.reset();
     m_backgroundUbuf.reset();
+    m_shadowUbuf.reset();
+    m_shadowRt.reset();
+    m_shadowRp.reset();
+    m_shadowMap.reset();
+    m_shadowSampler.reset();
     m_ibl.release();
     m_sampler.reset();
     m_rhi = nullptr;
@@ -392,6 +444,10 @@ Renderer::GpuEntity &Renderer::gpuEntity(EntityId id)
     const auto bindings = meshBindings(g.uniforms.get());
     g.srb->setBindings(bindings.cbegin(), bindings.cend());
     g.srb->create();
+    g.shadowSrb.reset(m_rhi->newShaderResourceBindings());
+    const auto shadow = shadowBindings(g.uniforms.get());
+    g.shadowSrb->setBindings(shadow.cbegin(), shadow.cend());
+    g.shadowSrb->create();
     return m_entities.emplace(id, std::move(g)).first->second;
 }
 
@@ -404,7 +460,15 @@ QList<QRhiShaderResourceBinding> Renderer::meshBindings(QRhiBuffer *entityUnifor
              B::uniformBuffer(2, fs, m_envUbuf.get()),
              B::sampledTexture(3, fs, m_ibl.irradiance(), m_ibl.cubeSampler()),
              B::sampledTexture(4, fs, m_ibl.prefiltered(), m_ibl.cubeSampler()),
-             B::sampledTexture(5, fs, m_ibl.brdfLut(), m_ibl.lutSampler()) };
+             B::sampledTexture(5, fs, m_ibl.brdfLut(), m_ibl.lutSampler()),
+             B::uniformBuffer(6, fs, m_shadowUbuf.get()),
+             B::sampledTexture(7, fs, m_shadowMap.get(), m_shadowSampler.get()) };
+}
+
+QList<QRhiShaderResourceBinding> Renderer::shadowBindings(QRhiBuffer *entityUniforms) const
+{
+    using B = QRhiShaderResourceBinding;
+    return { B::uniformBuffer(0, B::VertexStage, entityUniforms), B::uniformBuffer(1, B::VertexStage, m_shadowUbuf.get()) };
 }
 
 // ---------------------------------------------------------------------------
@@ -463,6 +527,10 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
     }
 
     // --- Lights: one buffer for the frame, shared by every mesh ---
+    // The first enabled directional light with shadows on casts them (index in lights[]).
+    int shadowLight = -1;
+    QVector3D shadowDirection;
+    float shadowSoftness = 1.0f;
     {
         float data[kLightsUbufSize / 4] = {};
         int count = 0;
@@ -478,14 +546,22 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
             for (const Entity &e : scene->entities()) {
                 if (!e.light || !e.light->enabled || count == MaxLights)
                     continue;
+                if (shadowLight < 0 && e.light->shadows && e.light->type == Light::Directional) {
+                    shadowLight = count;
+                    shadowDirection = Light::direction(e.transform);
+                    shadowSoftness = e.light->softness;
+                }
                 put(e.light->type, e.transform.position, Light::direction(e.transform), e.light->color,
                     e.light->intensity);
             }
         }
         // A scene without lights (older files, or all disabled) would be black:
         // light it with a default sun so it can still be edited.
-        if (count == 0)
-            put(Light::Directional, QVector3D(), QVector3D(-0.45f, -0.8f, -0.35f).normalized(), Qt::white, 3.0f);
+        if (count == 0) {
+            shadowLight = 0;
+            shadowDirection = QVector3D(-0.45f, -0.8f, -0.35f).normalized();
+            put(Light::Directional, QVector3D(), shadowDirection, Qt::white, 3.0f);
+        }
         const qint32 header[4] = { count, 0, 0, 0 };
         std::memcpy(data, header, sizeof(header));
         rub->updateDynamicBuffer(m_lightsUbuf.get(), 0, kLightsUbufSize, data);
@@ -513,9 +589,11 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
     {
         GpuMesh *mesh;
         QRhiShaderResourceBindings *srb;
+        QRhiShaderResourceBindings *shadowSrb;
         bool selected;
     };
     std::vector<Draw> draws;
+    QVector3D boundsMin(1e30f, 1e30f, 1e30f), boundsMax(-1e30f, -1e30f, -1e30f); // of every drawn mesh, world space
     {
         const QMatrix4x4 clipViewProj = m_rhi->clipSpaceCorrMatrix() * viewProj;
         std::unordered_map<EntityId, bool> seen;
@@ -542,13 +620,59 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
                 v[0] = e.roughness; v[1] = e.metallic;
                 rub->updateDynamicBuffer(ge.uniforms.get(), 0, kEntityUbufSize, data);
 
-                draws.push_back({ &gm, ge.srb.get(), e.id == selected });
+                draws.push_back({ &gm, ge.srb.get(), ge.shadowSrb.get(), e.id == selected });
+
+                const QVector3D &lo = e.mesh->boundsMin, &hi = e.mesh->boundsMax;
+                for (int c = 0; c < 8; ++c) {
+                    const QVector3D corner = model.map(QVector3D(c & 1 ? hi.x() : lo.x(), c & 2 ? hi.y() : lo.y(),
+                                                                 c & 4 ? hi.z() : lo.z()));
+                    boundsMin = QVector3D(qMin(boundsMin.x(), corner.x()), qMin(boundsMin.y(), corner.y()),
+                                          qMin(boundsMin.z(), corner.z()));
+                    boundsMax = QVector3D(qMax(boundsMax.x(), corner.x()), qMax(boundsMax.y(), corner.y()),
+                                          qMax(boundsMax.z(), corner.z()));
+                }
             }
         }
         // Forget entities that are gone, and meshes no entity uses any more
         // (an undo-able deleted entity still holds its MeshPtr, so its mesh stays).
         std::erase_if(m_entities, [&](const auto &kv) { return !seen.count(kv.first); });
         std::erase_if(m_meshes, [](const auto &kv) { return kv.second.mesh.use_count() == 1; });
+    }
+
+    // --- Shadow uniforms ---
+    // The light's view covers the bounding sphere of every mesh: independent from the camera,
+    // so shadows don't swim while orbiting. Large scenes lose resolution (cascades: later).
+    const bool shadows = shadowLight >= 0 && !draws.empty();
+    {
+        QMatrix4x4 lightClip;  // world -> light clip space, corrected for the backend (shadow pass)
+        QMatrix4x4 shadowUv;   // world -> (shadow map uv, depth compared with the map)
+        if (shadows) {
+            const QVector3D center = (boundsMin + boundsMax) * 0.5f;
+            const float radius = qMax(0.5f, (boundsMax - boundsMin).length() * 0.5f * 1.02f);
+            const QVector3D up = qAbs(shadowDirection.y()) > 0.99f ? QVector3D(1, 0, 0) : QVector3D(0, 1, 0);
+            QMatrix4x4 view;
+            view.lookAt(center - shadowDirection * radius, center, up);
+            QMatrix4x4 projection;
+            projection.ortho(-radius, radius, -radius, radius, 0.0f, 2.0f * radius);
+            lightClip = m_rhi->clipSpaceCorrMatrix() * projection * view;
+
+            // Clip space -> texture: x, y from -1..1 to 0..1 (v flipped where texture rows and
+            // clip-space y disagree), depth to 0..1 where the backend's clip depth is -1..1 (OpenGL).
+            const bool zeroToOne = m_rhi->isClipDepthZeroToOne();
+            const float vScale = m_rhi->isYUpInFramebuffer() == m_rhi->isYUpInNDC() ? 0.5f : -0.5f;
+            QMatrix4x4 toTexture;
+            toTexture.translate(0.5f, 0.5f, zeroToOne ? 0.0f : 0.5f);
+            toTexture.scale(0.5f, vScale, zeroToOne ? 1.0f : 0.5f);
+            shadowUv = toTexture * lightClip;
+        }
+        float data[kShadowUbufSize / 4] = {};
+        float *v = putMat4(data, shadowUv);
+        v = putMat4(v, lightClip);
+        v[0] = shadows ? 1.0f : 0.0f;
+        v[1] = float(qMax(0, shadowLight));
+        v[2] = shadowSoftness;
+        v[3] = 1.0f / ShadowMapSize;
+        rub->updateDynamicBuffer(m_shadowUbuf.get(), 0, kShadowUbufSize, data);
     }
 
     // --- Overlay ---
@@ -619,19 +743,40 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
     };
     const QColor black(Qt::black);
 
-    // Stats: grid + display + downsample + 4 blur + composite = 8 fullscreen draws in 8 passes.
+    // Stats: grid + display + downsample + 4 blur + composite = 8 fullscreen draws in 8 passes,
+    // plus the shadow pass.
     m_stats = {};
     m_stats.meshes = int(draws.size());
-    m_stats.renderPasses = 8 + iblPasses;
+    m_stats.renderPasses = 9 + iblPasses;
     m_stats.drawCalls = 8 + iblPasses + (overlayCount > 0 ? 1 : 0) + (showBackground ? 1 : 0);
     for (const Draw &d : draws) {
         const int times = d.selected ? 2 : 1; // the outline draws the mesh again
         m_stats.drawCalls += times;
         m_stats.triangles += quint64(d.mesh->indexCount / 3) * quint64(times);
     }
+    if (shadows) {
+        m_stats.drawCalls += int(draws.size());
+        for (const Draw &d : draws)
+            m_stats.triangles += d.mesh->indexCount / 3;
+    }
+
+    // 0. Shadow map: every mesh's depth from the light. Always cleared, so it's valid to
+    //    sample even without shadows (mesh.frag checks shadowParams.x).
+    cb->beginPass(m_shadowRt.get(), black, { 1.0f, 0 }, rub);
+    if (shadows) {
+        cb->setGraphicsPipeline(m_shadowPipe.get());
+        cb->setViewport({ 0, 0, float(ShadowMapSize), float(ShadowMapSize) });
+        for (const Draw &d : draws) {
+            cb->setShaderResources(d.shadowSrb);
+            const QRhiCommandBuffer::VertexInput vin(d.mesh->vertices.get(), 0);
+            cb->setVertexInput(0, 1, &vin, d.mesh->indices.get(), 0, QRhiCommandBuffer::IndexUInt32);
+            cb->drawIndexed(d.mesh->indexCount);
+        }
+    }
+    cb->endPass();
 
     // 1. Scene (HDR, linear): environment and grid as background (no depth), meshes, selection outline
-    cb->beginPass(m_sceneRt.get(), black, { 1.0f, 0 }, rub);
+    cb->beginPass(m_sceneRt.get(), black, { 1.0f, 0 });
     if (showBackground)
         fullscreen(m_backgroundPipe.get(), m_backgroundSrb.get(), m_pixelSize);
     fullscreen(m_gridPipe.get(), m_gridSrb.get(), m_pixelSize);

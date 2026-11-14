@@ -96,6 +96,8 @@ qt6_add_shaders(Lune "shaders"
         src/engine/render/shaders/brdf_lut.frag
         src/engine/render/shaders/background.vert
         src/engine/render/shaders/background.frag
+        src/engine/render/shaders/shadow.vert
+        src/engine/render/shaders/shadow.frag
 )
 
 if(WIN32)

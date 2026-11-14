@@ -25,7 +25,7 @@ Most actions are one keystroke or one search in the command palette away.
 - **Command palette** (Ctrl+K) with fuzzy search over every action.
 - **Scene files** (`.lune`, JSON) and mesh import (OBJ, glTF 2.0 / GLB).
 - **Lights and PBR shading**: directional and point lights, Cook-Torrance materials
-  (roughness, metallic).
+  (roughness, metallic); shadow map for a directional light.
 - **Image-based lighting**: an Environment from an HDR image (`.hdr`) or a sky/ground
   gradient, precomputed on the GPU into irradiance and prefiltered cubemaps; optionally
   shown as the background.

@@ -51,7 +51,7 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 
 ### Shadows
 
-- [ ] Shadow map render target and light-space depth pass (Claude)
+- [x] Shadow map render target and light-space depth pass, `shadows` / `softness` light properties (Claude)
 - [ ] Shadow sampling and PCF filtering for the directional light (Author)
 - [ ] Point light shadows (cube shadow maps) (Claude: targets, Author: sampling)
 - [ ] Cascaded shadow maps for large scenes (Author, later)
