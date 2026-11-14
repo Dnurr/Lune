@@ -22,8 +22,10 @@ class QRhiTextureRenderTarget;
 
 // Shadow maps of every light that casts shadows, in two depth atlases:
 //
-//   directional  DirectionalAtlasSize^2: one DirectionalSize^2 tile per light (2 x 2),
-//                orthographic, covering the bounding sphere of every visible mesh
+//   directional  DirectionalAtlasSize^2, CascadeCount cascades per light: the camera's view
+//                is cut in slices by distance, each slice gets its own orthographic tile
+//                (fine near the camera, coarse far away). One light: 2 x 2 tiles of 2048^2;
+//                more lights: a row of 4 tiles of 1024^2 per light
 //   point        6 x MaxPoint tiles of PointFaceSize^2: one row per light, one cube face
 //                per column (+X -X +Y -Y +Z -Z), perspective from the light's position
 //
@@ -36,14 +38,17 @@ public:
     static constexpr int MaxLights = 8; // must match Renderer::MaxLights and MAX_LIGHTS in mesh.frag
     static constexpr int MaxDirectional = 4;
     static constexpr int MaxPoint = 4;
-    static constexpr int DirectionalSize = 2048;
-    static constexpr int DirectionalAtlasSize = 2 * DirectionalSize;
+    static constexpr int CascadeCount = 4;
+    static constexpr int DirectionalAtlasSize = 4096;
+    static constexpr int DirectionalViews = MaxDirectional * CascadeCount;
+    // Split distances blend uniform and logarithmic spacing: 0 = uniform, 1 = logarithmic.
+    static constexpr float CascadeSplitBlend = 0.75f;
     static constexpr int PointFaceSize = 512;
     // Extra texels rendered around each cube face (a field of view a bit wider than 90°),
     // so filters near a face's edge still read valid depth inside the tile: filter and
     // search radii up to this many texels never need clamping.
     static constexpr int PointFaceBorder = 24;
-    static constexpr int ViewCount = MaxDirectional + 6 * MaxPoint;
+    static constexpr int ViewCount = DirectionalViews + 6 * MaxPoint;
 
     // One light of the frame, at index `lightIndex` in mesh.frag's lights[].
     struct Light
@@ -55,6 +60,17 @@ public:
         bool shadows = true;
         float size = 0.0f;
         float softness = 1.0f;
+    };
+
+    // The camera the cascades are fitted to.
+    struct Camera
+    {
+        QVector3D eye;
+        QVector3D forward, right, up; // unit vectors
+        float fovY = 50.0f;           // vertical, degrees
+        float aspect = 1.0f;
+        float nearPlane = 0.1f;
+        float farPlane = 1000.0f;
     };
 
     // A mesh drawn into the shadow maps: its buffers and its binding set (casterBindings()).
@@ -79,10 +95,11 @@ public:
     QList<QRhiShaderResourceBinding> casterBindings(QRhiBuffer *entityUniforms) const;
 
     // Picks the shadowed lights (up to MaxDirectional + MaxPoint, in order), fits their
-    // views to the meshes' world bounds and writes the uniforms. Lights beyond the limits,
-    // or with `shadows` off, light without shadows.
-    void prepare(QRhiResourceUpdateBatch *rub, const std::vector<Light> &lights, const QVector3D &boundsMin,
-                 const QVector3D &boundsMax, bool hasMeshes);
+    // views (directional: cascades of the camera's view, up to the farthest mesh; point:
+    // the meshes' bounds) and writes the uniforms. Lights beyond the limits, or with
+    // `shadows` off, light without shadows.
+    void prepare(QRhiResourceUpdateBatch *rub, const std::vector<Light> &lights, const Camera &camera,
+                 const QVector3D &boundsMin, const QVector3D &boundsMax, bool hasMeshes);
     // Records both atlas passes (always cleared, so they're valid to sample). `rub` goes
     // with the first pass.
     void render(QRhiCommandBuffer *cb, QRhiResourceUpdateBatch *rub, const std::vector<Caster> &casters);
@@ -94,13 +111,13 @@ private:
     struct View
     {
         bool point = false;
-        int tile = 0;           // directional: slot; point: slot * 6 + face
+        int tile = 0;           // directional: slot * CascadeCount + cascade; point: slot * 6 + face
         QMatrix4x4 clip;        // world -> clip space, corrected for the backend
         QRectF viewport;        // in the atlas, QRhi convention (pixels, origin bottom-left)
     };
 
     void createPipeline();
-    QRectF tileViewport(bool point, int tile) const;
+    QRectF tileViewport(bool point, int tile, int directionalCount) const;
     QMatrix4x4 clipToTile(const QRectF &viewport, const QSize &atlas) const;
 
     QRhi *m_rhi = nullptr;

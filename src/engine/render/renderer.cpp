@@ -588,7 +588,19 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
     }
 
     // --- Shadow maps: views fitted to the meshes, uniforms ---
-    m_shadows.prepare(rub, shadowLights, boundsMin, boundsMax, !draws.empty());
+    {
+        const QMatrix4x4 toWorld = camera.view().inverted();
+        ShadowMaps::Camera shadowCamera;
+        shadowCamera.eye = eye;
+        shadowCamera.forward = (camera.target - eye).normalized();
+        shadowCamera.right = toWorld.mapVector(QVector3D(1, 0, 0)).normalized();
+        shadowCamera.up = toWorld.mapVector(QVector3D(0, 1, 0)).normalized();
+        shadowCamera.fovY = camera.fieldOfView;
+        shadowCamera.aspect = aspect;
+        shadowCamera.nearPlane = camera.nearPlane;
+        shadowCamera.farPlane = camera.farPlane;
+        m_shadows.prepare(rub, shadowLights, shadowCamera, boundsMin, boundsMax, !draws.empty());
+    }
 
     // --- Overlay ---
     const quint32 overlayCount = quint32(m_overlay.size());

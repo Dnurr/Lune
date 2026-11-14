@@ -46,7 +46,13 @@ layout(binding = 5) uniform sampler2D brdfLut;
 // to MAX_DIR_SHADOWS directional and MAX_POINT_SHADOWS point lights (in scene order); the
 // others light without shadows. Each shadowed light has a slot: a tile in its type's atlas.
 //
-// Directional light, slot s:  p = (dirShadowMatrix[s] * vec4(v_world, 1.0)).xyz  (orthographic: w = 1)
+// Directional light, slot s:  cascaded. Pick the cascade from the distance along the camera's view:
+//                               depth = dot(v_world - cameraPos.xyz, cameraForward.xyz)
+//                               cascade = how many of cascadeSplits.xyz are < depth (0..3);
+//                               past cascadeSplits.w there are no meshes, treat as lit.
+//                             t = s * SHADOW_CASCADES + cascade;
+//                             p = (dirShadowMatrix[t] * vec4(v_world, 1.0)).xyz  (orthographic: w = 1)
+//                             and dirShadowTile[t], dirShadowRange[t] for that cascade.
 // Point light, slot s:        face = major axis of (v_world - light position), in the order
 //                             +X -X +Y -Y +Z -Z;  c = pointShadowMatrix[s * 6 + face] * vec4(v_world, 1.0),
 //                             p = c.xyz / c.w  (perspective: divide by w)
@@ -56,15 +62,16 @@ layout(binding = 5) uniform sampler2D brdfLut;
 // extra texels around the 90° view, so samples up to 24 texels away stay valid near a face's
 // edge; keep point light search and filter radii within that.
 #define MAX_DIR_SHADOWS 4
+#define SHADOW_CASCADES 4
 #define MAX_POINT_SHADOWS 4
 layout(std140, binding = 6) uniform shadowBuf {
     vec4 lightShadow[MAX_LIGHTS];                     // per lights[i]: x slot (-1 = no shadows), y size
                                                       // (point: radius; directional: angular diameter, degrees),
                                                       // z softness (filter radius in texels), w unused
-    mat4 dirShadowMatrix[MAX_DIR_SHADOWS];            // world -> (atlas uv, depth)
-    vec4 dirShadowTile[MAX_DIR_SHADOWS];              // uv rectangle of the slot's tile
-    vec4 dirShadowRange[MAX_DIR_SHADOWS];             // x: world distance covered by depth 0..1 (depth is linear),
-                                                      // y: world size of one texel
+    mat4 dirShadowMatrix[MAX_DIR_SHADOWS * SHADOW_CASCADES]; // world -> (atlas uv, depth), per cascade
+    vec4 dirShadowTile[MAX_DIR_SHADOWS * SHADOW_CASCADES];   // uv rectangle of each cascade's tile
+    vec4 dirShadowRange[MAX_DIR_SHADOWS * SHADOW_CASCADES];  // x: world distance covered by depth 0..1 (linear),
+                                                             // y: world size of one texel (differs per cascade)
     mat4 pointShadowMatrix[MAX_POINT_SHADOWS * 6];    // world -> (atlas uv, depth), per face
     vec4 pointShadowTile[MAX_POINT_SHADOWS * 6];      // uv rectangle of each face's tile
     vec4 pointShadowRange[MAX_POINT_SHADOWS];         // x: near, y: far. Depth is perspective; distance along
@@ -73,6 +80,8 @@ layout(std140, binding = 6) uniform shadowBuf {
                                                       // w: face size in texels. World size of one texel at
                                                       // distance d along the axis = 2 * d * z / w
     vec4 shadowAtlas;                                 // xy: texel size (uv) of the directional atlas, zw: point atlas
+    vec4 cascadeSplits;                               // far distance of cascades 0..3 along the camera's view
+    vec4 cameraForward;                               // xyz: the camera's view direction (unit)
 };
 // Each atlas twice. The comparison sampler gives the filtered shadow test:
 //     texture(dirShadowMap, vec3(uv, depth))  ->  1 = lit (depth <= the stored one), 0 = in shadow,
@@ -136,6 +145,8 @@ float Shadow(int i, int type, vec3 N)
     float lit = 0.0;
 
     int slot = int(lightShadow[i].x);
+    int t = 0;
+
     float size = lightShadow[i].y;
     float softness = lightShadow[i].z;
 
@@ -174,18 +185,33 @@ float Shadow(int i, int type, vec3 N)
     float near = pointShadowRange[slot].x, far = pointShadowRange[slot].y;
     
     if (type == 0)
-    {        
-        texelWorld = dirShadowRange[slot].y;
+    {
+        float camDepth = dot(v_world - cameraPos.xyz, cameraForward.xyz);
+        if (camDepth > cascadeSplits.w) return 1.0; // too far = no shadows
+
+        int cascade = int(camDepth > cascadeSplits.x) + int(camDepth > cascadeSplits.y)
+                    + int(camDepth > cascadeSplits.z);
+
+        float start = cascade == 0 ? 0.0 : cascadeSplits[cascade - 1];
+        float end = cascadeSplits[cascade];
+        float fraction = (camDepth - start) / (end - start);
+
+        float blend = smoothstep(0.85, 1.0, fraction);
+        float noise = angle / 6.2831853;
+        if (cascade < SHADOW_CASCADES - 1 && blend > noise) cascade++;
+
+        t = slot * SHADOW_CASCADES + cascade;
+        texelWorld = dirShadowRange[t].y;
         pos = v_world + N * texelWorld * 2.0; 
 
-        p = (dirShadowMatrix[slot] * vec4(pos, 1.0)).xyz;
-        tile = dirShadowTile[slot];
+        p = (dirShadowMatrix[t] * vec4(pos, 1.0)).xyz;
+        tile = dirShadowTile[t];
      
         if (any(lessThan(p.xy, tile.xy)) || any(greaterThan(p.xy, tile.zw))) return 1.0;
      
         texel = shadowAtlas.xy;
         
-        dReceiver = p.z * dirShadowRange[slot].x;
+        dReceiver = p.z * dirShadowRange[t].x;
     }
     else
     {
@@ -195,7 +221,8 @@ float Shadow(int i, int type, vec3 N)
         if (a.x >= a.y && a.x >= a.z) face = d.x > 0.0 ? 0 : 1;
         else if (a.y >= a.z)          face = d.y > 0.0 ? 2 : 3;
         else                          face = d.z > 0.0 ? 4 : 5;
-        int t = slot * 6 + face;
+        
+        t = slot * 6 + face;
 
         float tanHalf = pointShadowRange[slot].z;
         float axisDist = max(a.x, max(a.y, a.z));
@@ -216,7 +243,7 @@ float Shadow(int i, int type, vec3 N)
     {
         vec2 uv = clamp(p.xy + rot * poisson[k] * searchUV, tile.xy, tile.zw);
         float z = type == 0 ? textureLod(dirShadowDepth, uv, 0.0).r : textureLod(pointShadowDepth, uv, 0.0).r;
-        float dist = type == 0 ? z * dirShadowRange[slot].x
+        float dist = type == 0 ? z * dirShadowRange[t].x
                                : near * far / (far - z * (far - near));
         if (z < p.z) { sum += dist; count++; }
     }
@@ -291,7 +318,7 @@ void main()
 
         float shadow = 1.0;
         int slot = int(lightShadow[i].x);
-        if (slot >= 0) // directional; point lights: TODO (author)
+        if (slot >= 0)
             shadow = Shadow(i, int(lights[i].position.w), N);
 
         final += (kD * albedo / PI + spec) * radiance * NdotL * shadow;

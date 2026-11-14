@@ -12,14 +12,16 @@ namespace
 {
 // Shadow block of mesh.frag (binding 6), std140. Offsets in floats.
 constexpr int kLightShadow = 0;                                                     // vec4[MaxLights]
-constexpr int kDirMatrix = kLightShadow + 4 * ShadowMaps::MaxLights;                // mat4[MaxDirectional]
-constexpr int kDirTile = kDirMatrix + 16 * ShadowMaps::MaxDirectional;              // vec4[MaxDirectional]
-constexpr int kDirRange = kDirTile + 4 * ShadowMaps::MaxDirectional;                // vec4[MaxDirectional]
-constexpr int kPointMatrix = kDirRange + 4 * ShadowMaps::MaxDirectional;            // mat4[MaxPoint * 6]
+constexpr int kDirMatrix = kLightShadow + 4 * ShadowMaps::MaxLights;                // mat4[DirectionalViews]
+constexpr int kDirTile = kDirMatrix + 16 * ShadowMaps::DirectionalViews;            // vec4[DirectionalViews]
+constexpr int kDirRange = kDirTile + 4 * ShadowMaps::DirectionalViews;              // vec4[DirectionalViews]
+constexpr int kPointMatrix = kDirRange + 4 * ShadowMaps::DirectionalViews;          // mat4[MaxPoint * 6]
 constexpr int kPointTile = kPointMatrix + 16 * 6 * ShadowMaps::MaxPoint;            // vec4[MaxPoint * 6]
 constexpr int kPointRange = kPointTile + 4 * 6 * ShadowMaps::MaxPoint;              // vec4[MaxPoint]
 constexpr int kAtlas = kPointRange + 4 * ShadowMaps::MaxPoint;                      // vec4
-constexpr int kUniformFloats = kAtlas + 4;
+constexpr int kCascadeSplits = kAtlas + 4;                                          // vec4
+constexpr int kCameraForward = kCascadeSplits + 4;                                  // vec4
+constexpr int kUniformFloats = kCameraForward + 4;
 constexpr int kUniformSize = kUniformFloats * 4;
 
 constexpr int kLayoutUbufSize = 512; // at least the entity block of mesh.vert
@@ -166,13 +168,19 @@ QList<QRhiShaderResourceBinding> ShadowMaps::casterBindings(QRhiBuffer *entityUn
              B::uniformBufferWithDynamicOffset(1, B::VertexStage, m_viewUbuf.get(), 64) };
 }
 
-QRectF ShadowMaps::tileViewport(bool point, int tile) const
+QRectF ShadowMaps::tileViewport(bool point, int tile, int directionalCount) const
 {
     if (point) {
         const int face = tile % 6, slot = tile / 6;
         return QRectF(face * PointFaceSize, slot * PointFaceSize, PointFaceSize, PointFaceSize);
     }
-    return QRectF((tile % 2) * DirectionalSize, (tile / 2) * DirectionalSize, DirectionalSize, DirectionalSize);
+    const int slot = tile / CascadeCount, cascade = tile % CascadeCount;
+    if (directionalCount <= 1) { // one light: 2 x 2 tiles, half the atlas each way
+        const int size = DirectionalAtlasSize / 2;
+        return QRectF((cascade % 2) * size, (cascade / 2) * size, size, size);
+    }
+    const int size = DirectionalAtlasSize / CascadeCount; // a row per light
+    return QRectF(cascade * size, slot * size, size, size);
 }
 
 // Clip space (backend-corrected) -> (u, v, depth) in the atlas, for a tile drawn with
@@ -204,8 +212,8 @@ QMatrix4x4 ShadowMaps::clipToTile(const QRectF &viewport, const QSize &atlas) co
     return toTile * toTexture;
 }
 
-void ShadowMaps::prepare(QRhiResourceUpdateBatch *rub, const std::vector<Light> &lights, const QVector3D &boundsMin,
-                         const QVector3D &boundsMax, bool hasMeshes)
+void ShadowMaps::prepare(QRhiResourceUpdateBatch *rub, const std::vector<Light> &lights, const Camera &camera,
+                         const QVector3D &boundsMin, const QVector3D &boundsMax, bool hasMeshes)
 {
     m_views.clear();
     float data[kUniformFloats] = {};
@@ -217,9 +225,55 @@ void ShadowMaps::prepare(QRhiResourceUpdateBatch *rub, const std::vector<Light> 
     putVec4(data + kAtlas, 1.0f / directionalAtlas.width(), 1.0f / directionalAtlas.height(),
             1.0f / pointAtlas.width(), 1.0f / pointAtlas.height());
 
-    const QVector3D center = (boundsMin + boundsMax) * 0.5f;
-    const float radius = qMax(0.5f, (boundsMax - boundsMin).length() * 0.5f * 1.02f);
     const QMatrix4x4 corr = m_rhi->clipSpaceCorrMatrix();
+    QVector3D corners[8]; // of the meshes' bounds
+    for (int c = 0; c < 8; ++c)
+        corners[c] = QVector3D(c & 1 ? boundsMax.x() : boundsMin.x(), c & 2 ? boundsMax.y() : boundsMin.y(),
+                               c & 4 ? boundsMax.z() : boundsMin.z());
+
+    // Cascade splits: view distances along the camera's forward axis, from the near plane to
+    // the farthest mesh (no shadows are needed past it).
+    float shadowFar = camera.nearPlane * 10.0f;
+    for (const QVector3D &c : corners)
+        shadowFar = qMax(shadowFar, QVector3D::dotProduct(c - camera.eye, camera.forward));
+    shadowFar = qMin(shadowFar * 1.01f, camera.farPlane);
+    float splits[CascadeCount + 1];
+    splits[0] = camera.nearPlane;
+    for (int i = 1; i <= CascadeCount; ++i) {
+        const float t = float(i) / CascadeCount;
+        const float logSplit = camera.nearPlane * std::pow(shadowFar / camera.nearPlane, t);
+        const float uniformSplit = camera.nearPlane + (shadowFar - camera.nearPlane) * t;
+        splits[i] = CascadeSplitBlend * logSplit + (1.0f - CascadeSplitBlend) * uniformSplit;
+    }
+    putVec4(data + kCascadeSplits, splits[1], splits[2], splits[3], splits[4]);
+    putVec4(data + kCameraForward, camera.forward.x(), camera.forward.y(), camera.forward.z(), 0.0f);
+
+    // Bounding sphere of each slice of the camera's view. Its size doesn't change when the
+    // camera turns, which (with texel snapping below) keeps shadows from shimmering.
+    const float tanY = std::tan(qDegreesToRadians(camera.fovY) * 0.5f), tanX = tanY * camera.aspect;
+    QVector3D sliceCenter[CascadeCount];
+    float sliceRadius[CascadeCount];
+    for (int i = 0; i < CascadeCount; ++i) {
+        QVector3D pts[8];
+        QVector3D sum;
+        for (int k = 0; k < 8; ++k) {
+            const float d = splits[i + (k & 1)];
+            pts[k] = camera.eye + camera.forward * d + camera.right * (d * tanX * (k & 2 ? 1.0f : -1.0f))
+                + camera.up * (d * tanY * (k & 4 ? 1.0f : -1.0f));
+            sum += pts[k];
+        }
+        sliceCenter[i] = sum / 8.0f;
+        float r = 0.0f;
+        for (const QVector3D &q : pts)
+            r = qMax(r, (q - sliceCenter[i]).length());
+        sliceRadius[i] = std::ceil(r * 16.0f) / 16.0f; // rounded up: stable while the camera moves slightly
+    }
+
+    int directionalTotal = 0; // how many directional lights get shadows (decides the tile size)
+    for (const Light &light : lights)
+        if (hasMeshes && light.shadows && !light.point && light.lightIndex >= 0 && light.lightIndex < MaxLights)
+            ++directionalTotal;
+    directionalTotal = qMin(directionalTotal, MaxDirectional);
 
     int directionalCount = 0, pointCount = 0;
     for (const Light &light : lights) {
@@ -231,38 +285,52 @@ void ShadowMaps::prepare(QRhiResourceUpdateBatch *rub, const std::vector<Light> 
             if (directionalCount == MaxDirectional)
                 continue;
             const int slot = directionalCount++;
-            // Orthographic view along the light, covering the bounding sphere of every mesh.
-            // It doesn't depend on the camera, so shadows don't swim while orbiting.
             const QVector3D dir = light.direction.normalized();
             const QVector3D up = qAbs(dir.y()) > 0.99f ? QVector3D(1, 0, 0) : QVector3D(0, 1, 0);
-            QMatrix4x4 view;
-            view.lookAt(center - dir * radius, center, up);
-            QMatrix4x4 projection;
-            projection.ortho(-radius, radius, -radius, radius, 0.0f, 2.0f * radius);
+            QMatrix4x4 rotation; // world -> light space (rotation only), looking along `dir`
+            rotation.lookAt(QVector3D(), dir, up);
+            for (int cascade = 0; cascade < CascadeCount; ++cascade) {
+                const float radius = sliceRadius[cascade];
+                const int tile = slot * CascadeCount + cascade;
+                const QRectF viewport = tileViewport(false, tile, directionalTotal);
+                const float texelWorld = 2.0f * radius / float(viewport.width());
 
-            View v;
-            v.tile = slot;
-            v.clip = corr * projection * view;
-            v.viewport = tileViewport(false, slot);
-            const QMatrix4x4 toTile = clipToTile(v.viewport, directionalAtlas);
-            putMat4(data + kDirMatrix + 16 * slot, toTile * v.clip);
-            const QVector3D a = toTile.map(QVector3D(-1, -1, 0)), b = toTile.map(QVector3D(1, 1, 0));
-            putVec4(data + kDirTile + 4 * slot, qMin(a.x(), b.x()), qMin(a.y(), b.y()), qMax(a.x(), b.x()),
-                    qMax(a.y(), b.y()));
-            putVec4(data + kDirRange + 4 * slot, 2.0f * radius, 2.0f * radius / DirectionalSize, 0.0f, 0.0f);
+                // Slice center in light space, snapped to whole texels: when the camera moves,
+                // the shadow map moves by whole texels and edges don't crawl.
+                QVector3D c = rotation.map(sliceCenter[cascade]);
+                c.setX(std::floor(c.x() / texelWorld) * texelWorld);
+                c.setY(std::floor(c.y() / texelWorld) * texelWorld);
+                // Depth: from the mesh nearest to the light (every caster, even outside the
+                // slice) to the far side of the slice. Light space looks down -Z.
+                float nearDist = -c.z() - radius, farDist = -c.z() + radius;
+                for (const QVector3D &corner : corners)
+                    nearDist = qMin(nearDist, -rotation.map(corner).z());
+                nearDist -= 0.01f;
+
+                QMatrix4x4 projection;
+                projection.ortho(c.x() - radius, c.x() + radius, c.y() - radius, c.y() + radius, nearDist, farDist);
+
+                View v;
+                v.tile = tile;
+                v.clip = corr * projection * rotation;
+                v.viewport = viewport;
+                const QMatrix4x4 toTile = clipToTile(v.viewport, directionalAtlas);
+                putMat4(data + kDirMatrix + 16 * tile, toTile * v.clip);
+                const QVector3D ta = toTile.map(QVector3D(-1, -1, 0)), tb = toTile.map(QVector3D(1, 1, 0));
+                putVec4(data + kDirTile + 4 * tile, qMin(ta.x(), tb.x()), qMin(ta.y(), tb.y()), qMax(ta.x(), tb.x()),
+                        qMax(ta.y(), tb.y()));
+                putVec4(data + kDirRange + 4 * tile, farDist - nearDist, texelWorld, 0.0f, 0.0f);
+                m_views.push_back(v);
+            }
             putVec4(ls, float(slot), light.size, light.softness, 0.0f);
-            m_views.push_back(v);
         } else {
             if (pointCount == MaxPoint)
                 continue;
             const int slot = pointCount++;
             // Far plane: the farthest corner of the meshes' bounds.
             float far = kPointNear * 10.0f;
-            for (int c = 0; c < 8; ++c) {
-                const QVector3D corner(c & 1 ? boundsMax.x() : boundsMin.x(), c & 2 ? boundsMax.y() : boundsMin.y(),
-                                       c & 4 ? boundsMax.z() : boundsMin.z());
+            for (const QVector3D &corner : corners)
                 far = qMax(far, (corner - light.position).length() * 1.01f);
-            }
             // A little wider than 90°: PointFaceBorder extra texels on each side.
             const float tanHalf = float(PointFaceSize) / float(PointFaceSize - 2 * PointFaceBorder);
             const float fov = 2.0f * qRadiansToDegrees(std::atan(tanHalf));
@@ -278,7 +346,7 @@ void ShadowMaps::prepare(QRhiResourceUpdateBatch *rub, const std::vector<Light> 
                 v.point = true;
                 v.tile = slot * 6 + face;
                 v.clip = corr * projection * view;
-                v.viewport = tileViewport(true, v.tile);
+                v.viewport = tileViewport(true, v.tile, directionalTotal);
                 const QMatrix4x4 toTile = clipToTile(v.viewport, pointAtlas);
                 putMat4(data + kPointMatrix + 16 * v.tile, toTile * v.clip);
                 const QVector3D a = toTile.map(QVector3D(-1, -1, 0)), b = toTile.map(QVector3D(1, 1, 0));
@@ -293,7 +361,7 @@ void ShadowMaps::prepare(QRhiResourceUpdateBatch *rub, const std::vector<Light> 
     rub->updateDynamicBuffer(m_uniforms.get(), 0, kUniformSize, data);
 
     for (const View &v : m_views) {
-        const int index = v.point ? MaxDirectional + v.tile : v.tile;
+        const int index = v.point ? DirectionalViews + v.tile : v.tile;
         float m[16];
         putMat4(m, v.clip);
         rub->updateDynamicBuffer(m_viewUbuf.get(), quint32(index) * m_viewStride, 64, m);
@@ -315,7 +383,7 @@ void ShadowMaps::render(QRhiCommandBuffer *cb, QRhiResourceUpdateBatch *rub, con
             }
             cb->setViewport({ float(v.viewport.x()), float(v.viewport.y()), float(v.viewport.width()),
                               float(v.viewport.height()) });
-            const quint32 offset = quint32(point ? MaxDirectional + v.tile : v.tile) * m_viewStride;
+            const quint32 offset = quint32(point ? DirectionalViews + v.tile : v.tile) * m_viewStride;
             const QRhiCommandBuffer::DynamicOffset dynamicOffset(1, offset);
             for (const Caster &c : casters) {
                 cb->setShaderResources(c.srb, 1, &dynamicOffset);

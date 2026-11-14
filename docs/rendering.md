@@ -117,17 +117,26 @@ without shadows; a scene without lights gets the default sun, which casts them).
 
 | Atlas | Size | Tiles | Projection |
 |---|---|---|---|
-| directional | 4096² | 2 × 2 of 2048², one per light | orthographic along the light, covering the bounding sphere of every visible mesh |
+| directional | 4096² | 4 cascades per light: one light gets 2 × 2 tiles of 2048², more lights a row of 4 tiles of 1024² each | orthographic along the light, one per slice of the camera's view (see below) |
 | point | 3072 × 2048 | 6 × 4 of 512², one row per light, one cube face (+X −X +Y −Y +Z −Z) per column | perspective from the light, a little wider than 90° (24 border texels, `pointShadowRange.zw` gives tan(fov/2) and the face size), far plane at the farthest mesh |
 
-- **Passes**: one per atlas, one viewport per tile; each mesh is drawn once per tile. The
-  views don't depend on the camera, so shadows don't move while orbiting; a larger scene
-  spreads the same texels over more space (cascades are on the roadmap).
+- **Passes**: one per atlas, one viewport per tile; each mesh is drawn once per tile.
+- **Cascades** (directional lights): the camera's view is cut into 4 slices by distance,
+  from the near plane to the farthest mesh, with splits that blend logarithmic and uniform
+  spacing (`CascadeSplitBlend` = 0.75). Each slice gets the tile that covers its bounding
+  sphere, so the nearest cascade has the smallest texels, however large the scene. The
+  sphere doesn't change size when the camera turns and its center is snapped to whole
+  texels, so shadow edges don't shimmer while orbiting. The depth range starts at the mesh
+  nearest to the light, so casters outside the slice still cast into it.
+  `mesh.frag` picks the cascade from the distance along the camera's view
+  (`cascadeSplits`, `cameraForward`); in the last 15% of a cascade, a per-pixel noise moves
+  a growing share of pixels to the next one, so the change of resolution isn't a visible line.
+- **Point lights**: views don't depend on the camera; the far plane reaches the farthest mesh.
 - **Format**: `D32F` (or `D24`/`D16` where unsupported).
 - **Bias**: the shadow passes use a slope-scaled depth bias, which removes most acne; the
   shader can add a normal offset on top.
 - **Sampling** (`mesh.frag`): `lightShadow[i]` gives the slot of `lights[i]` (−1 = no
-  shadows), its `size` and `softness`. Per slot, a matrix turns a world position into
+  shadows), its `size` and `softness`. Per slot (and cascade), a matrix turns a world position into
   `(uv, depth)` in the atlas on every backend (texture orientation, clip depth range and
   tile placement handled; point faces need the division by w), plus the tile's uv
   rectangle and what's needed to turn depth back into distance. Each atlas is bound twice:
