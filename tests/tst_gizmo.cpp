@@ -105,6 +105,87 @@ private slots:
         QVERIFY2(qAbs(t.rotation.y() - 270.0f) < 0.5f, qPrintable(QString::number(t.rotation.y())));
     }
 
+    void centerMovesInTheViewPlane()
+    {
+        Gizmo g;
+        g.layout(camera, kView, transform);
+        const QPointF c = camera.project(QVector3D(), kView);
+        QCOMPARE(g.hitTest(c), Gizmo::Center);
+        g.beginDrag(Gizmo::Center, c, transform);
+        const QPointF target = c + QPointF(60, -40);
+        const Transform t = g.dragTo(target);
+        // The entity stays under the mouse, at the same distance along the view direction.
+        const QPointF screen = camera.project(t.position, kView);
+        QVERIFY2(QLineF(screen, target).length() < 0.5, qPrintable(QStringLiteral("%1 %2").arg(screen.x()).arg(screen.y())));
+        const QVector3D forward = (camera.target - camera.eye()).normalized();
+        QVERIFY(qAbs(QVector3D::dotProduct(t.position - transform.position, forward)) < 1e-4f);
+    }
+
+    void localTranslateFollowsTheEntityAxis()
+    {
+        Transform rotated;
+        rotated.rotation = QVector3D(0, 90, 0); // local X points along world -Z
+        Gizmo g;
+        g.setSpace(Gizmo::Space::Local);
+        g.layout(camera, kView, rotated);
+        const QVector3D axis = rotated.axis(0);
+        QVERIFY(near(axis, QVector3D(0, 0, -1)));
+        g.beginDrag(Gizmo::AxisX, camera.project(axis * 0.5f, kView), rotated);
+        const Transform t = g.dragTo(camera.project(axis * 1.5f, kView));
+        QVERIFY2(near(t.position, axis), qPrintable(QStringLiteral("%1 %2 %3").arg(t.position.x()).arg(t.position.y()).arg(t.position.z())));
+    }
+
+    void globalRotationIsAroundTheWorldAxis()
+    {
+        // Rotated 90° around Y first: rotating around world X must turn around world X,
+        // not around the entity's (now world -Z) X axis.
+        Transform start;
+        start.rotation = QVector3D(0, 90, 0);
+        Gizmo g;
+        g.setMode(Gizmo::Mode::Rotate);
+        g.layout(camera, kView, start);
+        const QPointF c = camera.project(QVector3D(), kView);
+        g.beginDrag(Gizmo::AxisX, c + QPointF(100, 0), start);
+        g.dragTo(c + QPointF(70, -70));
+        const Transform t = g.dragTo(c + QPointF(0, -100)); // quarter turn on screen
+        const QQuaternion expected = QQuaternion::fromAxisAndAngle(1, 0, 0, 90) * start.rotationQuaternion();
+        const QQuaternion got = t.rotationQuaternion();
+        QVERIFY2(qAbs(QQuaternion::dotProduct(expected, got)) > 0.999f,
+                 qPrintable(QStringLiteral("%1 %2 %3").arg(t.rotation.x()).arg(t.rotation.y()).arg(t.rotation.z())));
+    }
+
+    void localRotationIsAroundTheEntityAxis()
+    {
+        Transform start;
+        start.rotation = QVector3D(0, 90, 0);
+        Gizmo g;
+        g.setMode(Gizmo::Mode::Rotate);
+        g.setSpace(Gizmo::Space::Local);
+        g.layout(camera, kView, start);
+        const QPointF c = camera.project(QVector3D(), kView);
+        g.beginDrag(Gizmo::AxisX, c + QPointF(100, 0), start);
+        const Transform t = g.dragTo(c + QPointF(0, -100));
+        // The local X axis doesn't move when rotating around it.
+        QVERIFY(near(t.axis(0), start.axis(0)));
+        QVERIFY2(!near(t.axis(1), start.axis(1)),
+                 qPrintable(QStringLiteral("%1 %2 %3").arg(t.rotation.x()).arg(t.rotation.y()).arg(t.rotation.z())));
+    }
+
+    void eulerRoundTripStaysContinuous()
+    {
+        const QVector3D angles[] = { { 10, 20, 30 }, { -45, 80, 170 }, { 0, 90, 0 }, { 30, -90, 10 }, { 190, 0, 0 } };
+        for (const QVector3D &a : angles) {
+            Transform t;
+            t.rotation = a;
+            const QVector3D back = Transform::eulerFromQuaternion(t.rotationQuaternion(), a);
+            Transform u;
+            u.rotation = back;
+            QVERIFY2(qAbs(QQuaternion::dotProduct(t.rotationQuaternion(), u.rotationQuaternion())) > 0.9999f,
+                     qPrintable(QStringLiteral("%1 %2 %3").arg(back.x()).arg(back.y()).arg(back.z())));
+            QVERIFY2(near(back, a, 0.05f), qPrintable(QStringLiteral("%1 %2 %3").arg(back.x()).arg(back.y()).arg(back.z())));
+        }
+    }
+
     void hiddenWhenBehindTheCamera()
     {
         Gizmo g;

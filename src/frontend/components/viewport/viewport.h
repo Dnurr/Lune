@@ -28,7 +28,8 @@ class Selection;
 // Mouse:
 //   left click        select the entity under the cursor (empty space = deselect)
 //   left drag gizmo   move / rotate / scale the selection (one undo step per drag;
-//                     right click during the drag cancels it)
+//                     right click during the drag cancels it). The center handle moves
+//                     in the view plane (move) or scales uniformly (scale)
 //   right drag        orbit,  middle drag = pan,  wheel = zoom
 class Viewport : public QRhiWidget
 {
@@ -47,6 +48,9 @@ public:
 
     void setGizmoMode(Gizmo::Mode mode);
     Gizmo::Mode gizmoMode() const { return m_gizmo.mode(); }
+    // World or entity axes for move and rotate (scale always uses the entity's axes).
+    void setGizmoSpace(Gizmo::Space space);
+    Gizmo::Space gizmoSpace() const { return m_gizmo.space(); }
 
     // Frame statistics panel; while visible the viewport renders continuously.
     void setStatsVisible(bool visible);

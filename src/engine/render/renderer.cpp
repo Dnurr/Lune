@@ -148,6 +148,9 @@ void Renderer::initialize(QRhi *rhi, QRhiRenderTarget *target)
             m_meshLayoutSrb->setBindings(b.cbegin(), b.cend());
         }
         m_meshLayoutSrb->create();
+        m_outlineLayoutSrb.reset(m_rhi->newShaderResourceBindings());
+        m_outlineLayoutSrb->setBindings({ B::uniformBuffer(0, stages, m_layoutUbuf.get()) });
+        m_outlineLayoutSrb->create();
         m_backgroundSrb.reset(m_rhi->newShaderResourceBindings());
         m_backgroundSrb->setBindings({ B::uniformBuffer(0, stages, m_backgroundUbuf.get()),
                                        B::uniformBuffer(1, B::FragmentStage, m_envUbuf.get()),
@@ -296,7 +299,7 @@ void Renderer::createPipelines(QRhiRenderTarget *target)
     m_meshPipe = pipeline(loadShader(QStringLiteral("mesh.vert")), QStringLiteral("mesh.frag"), m_meshLayoutSrb.get(),
                           m_sceneRp.get(), 1, mesh);
     m_outlinePipe = pipeline(loadShader(QStringLiteral("outline.vert")), QStringLiteral("outline.frag"),
-                             m_meshLayoutSrb.get(), m_sceneRp.get(), 1, outline);
+                             m_outlineLayoutSrb.get(), m_sceneRp.get(), 1, outline);
     m_displayPipe = pipeline(fullscreen, QStringLiteral("display.frag"), m_displaySrb.get(), m_ldrRp.get(), 1);
     // The overlay is interface, not scene: drawn after the display conversion, in display colors,
     // so exposure/tonemapping never touch it. It's still before the blur, so panels blur it too.
@@ -327,6 +330,7 @@ void Renderer::release()
     m_compositeSrb.reset();
     m_overlaySrb.reset();
     m_meshLayoutSrb.reset();
+    m_outlineLayoutSrb.reset();
     m_backgroundSrb.reset();
     for (auto &s : m_blurSrbs)
         s.reset();
@@ -394,6 +398,9 @@ Renderer::GpuEntity &Renderer::gpuEntity(EntityId id)
     const auto bindings = meshBindings(g.uniforms.get());
     g.srb->setBindings(bindings.cbegin(), bindings.cend());
     g.srb->create();
+    g.outlineSrb.reset(m_rhi->newShaderResourceBindings());
+    g.outlineSrb->setBindings({ B::uniformBuffer(0, B::VertexStage | B::FragmentStage, g.uniforms.get()) });
+    g.outlineSrb->create();
     g.shadowSrb.reset(m_rhi->newShaderResourceBindings());
     const auto shadow = m_shadows.casterBindings(g.uniforms.get());
     g.shadowSrb->setBindings(shadow.cbegin(), shadow.cend());
@@ -530,6 +537,7 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         GpuMesh *mesh;
         QRhiShaderResourceBindings *srb;
         QRhiShaderResourceBindings *shadowSrb;
+        QRhiShaderResourceBindings *outlineSrb;
         bool selected;
     };
     std::vector<Draw> draws;
@@ -560,7 +568,7 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
                 v[0] = e.roughness; v[1] = e.metallic;
                 rub->updateDynamicBuffer(ge.uniforms.get(), 0, kEntityUbufSize, data);
 
-                draws.push_back({ &gm, ge.srb.get(), ge.shadowSrb.get(), e.id == selected });
+                draws.push_back({ &gm, ge.srb.get(), ge.shadowSrb.get(), ge.outlineSrb.get(), e.id == selected });
 
                 const QVector3D &lo = e.mesh->boundsMin, &hi = e.mesh->boundsMax;
                 for (int c = 0; c < 8; ++c) {
@@ -640,10 +648,10 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         cb->setShaderResources(srb);
         cb->draw(3);
     };
-    auto drawMesh = [&](QRhiGraphicsPipeline *pipe, const Draw &d) {
+    auto drawMesh = [&](QRhiGraphicsPipeline *pipe, QRhiShaderResourceBindings *srb, const Draw &d) {
         cb->setGraphicsPipeline(pipe);
         cb->setViewport(fullViewport);
-        cb->setShaderResources(d.srb);
+        cb->setShaderResources(srb);
         const QRhiCommandBuffer::VertexInput vin(d.mesh->vertices.get(), 0);
         cb->setVertexInput(0, 1, &vin, d.mesh->indices.get(), 0, QRhiCommandBuffer::IndexUInt32);
         cb->drawIndexed(d.mesh->indexCount);
@@ -681,10 +689,10 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         fullscreen(m_backgroundPipe.get(), m_backgroundSrb.get(), m_pixelSize);
     fullscreen(m_gridPipe.get(), m_gridSrb.get(), m_pixelSize);
     for (const Draw &d : draws)
-        drawMesh(m_meshPipe.get(), d);
+        drawMesh(m_meshPipe.get(), d.srb, d);
     for (const Draw &d : draws) {
         if (d.selected)
-            drawMesh(m_outlinePipe.get(), d);
+            drawMesh(m_outlinePipe.get(), d.outlineSrb, d);
     }
     cb->endPass();
 

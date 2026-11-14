@@ -104,6 +104,10 @@ private:
         std::unique_ptr<QRhiBuffer> uniforms;
         std::unique_ptr<QRhiShaderResourceBindings> srb;       // scene pass (meshBindings)
         std::unique_ptr<QRhiShaderResourceBindings> shadowSrb; // shadow passes (ShadowMaps::casterBindings)
+        // Selection outline: entity uniforms only. Not the scene SRB: on Direct3D 11 the
+        // registers of a binding set are resolved for the first pipeline that uses it, and
+        // mesh.frag and outline.frag put the entity block in different registers.
+        std::unique_ptr<QRhiShaderResourceBindings> outlineSrb;
     };
 
     void createSizeDependentResources();
@@ -154,7 +158,8 @@ private:
 
     std::unique_ptr<QRhiShaderResourceBindings> m_gridSrb, m_displaySrb, m_downSrb, m_compositeSrb, m_overlaySrb;
     std::unique_ptr<QRhiShaderResourceBindings> m_backgroundSrb;
-    std::unique_ptr<QRhiShaderResourceBindings> m_meshLayoutSrb; // layout of the per-entity SRBs
+    std::unique_ptr<QRhiShaderResourceBindings> m_meshLayoutSrb;    // layout of the per-entity SRBs
+    std::unique_ptr<QRhiShaderResourceBindings> m_outlineLayoutSrb; // layout of the per-entity outline SRBs
     std::array<std::unique_ptr<QRhiShaderResourceBindings>, 4> m_blurSrbs;
 
     std::unique_ptr<QRhiGraphicsPipeline> m_gridPipe, m_meshPipe, m_outlinePipe, m_overlayPipe, m_backgroundPipe;

@@ -101,6 +101,14 @@ void Viewport::setGizmoMode(Gizmo::Mode mode)
     redraw();
 }
 
+void Viewport::setGizmoSpace(Gizmo::Space space)
+{
+    if (m_gizmo.isDragging())
+        return;
+    m_gizmo.setSpace(space);
+    redraw();
+}
+
 // ---------------------------------------------------------------------------
 // Rendering (delegated to the engine)
 // ---------------------------------------------------------------------------

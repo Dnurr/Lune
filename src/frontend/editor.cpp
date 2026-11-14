@@ -112,11 +112,19 @@ void Editor::createMenus()
     QAction *move = tool("Move", Qt::Key_W, Gizmo::Mode::Translate);
     QAction *rotate = tool("Rotate", Qt::Key_E, Gizmo::Mode::Rotate);
     QAction *scale = tool("Scale", Qt::Key_R, Gizmo::Mode::Scale);
+    // Move / rotate along the world axes or the entity's own (scale always uses its own).
+    auto *localAxes = new QAction("Local Axes", this);
+    localAxes->setShortcut(QKeySequence(Qt::Key_T));
+    localAxes->setCheckable(true);
+    localAxes->setChecked(m_viewport->gizmoSpace() == Gizmo::Space::Local);
+    connect(localAxes, &QAction::toggled, this, [this](bool on) {
+        m_viewport->setGizmoSpace(on ? Gizmo::Space::Local : Gizmo::Space::Global);
+    });
 
     QMenu *edit = menuBar()->addMenu("Edit");
     edit->addActions({ undo, redo });
     edit->addSeparator();
-    edit->addActions({ move, rotate, scale });
+    edit->addActions({ move, rotate, scale, localAxes });
     edit->addSeparator();
     edit->addAction(del);
     edit->addSeparator();

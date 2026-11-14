@@ -131,7 +131,10 @@ rectangles, and delegates all GPU work to `Renderer`.
 
 The **gizmo** is computed in screen space: each frame its handles are projected once,
 and the same 2D shapes are drawn (as overlay triangles) and hit-tested. What you see is
-exactly what you can grab, and the renderer knows nothing about gizmos.
+exactly what you can grab, and the renderer knows nothing about gizmos. Move and rotate
+work along the world axes or the entity's own (`Gizmo::Space`, T); scale always uses the
+entity's axes, since scale is applied before rotation. The center handle moves the entity
+in the plane facing the camera (move) or scales it uniformly (scale).
 
 ### Lights
 
@@ -171,7 +174,7 @@ menu shows up in the palette automatically; set the dynamic property
 | Decision | Why |
 |---|---|
 | Floating panels instead of docks | Minimal UI: the viewport always fills the window. |
-| Euler angles in `Transform` | Easy to display and edit. A quaternion can be derived when needed; the gizmo rotates one Euler component, exact for single-axis rotations. |
+| Euler angles in `Transform` | Easy to display and edit. The gizmo rotates with quaternions (around a world axis, or the entity's own axis in local mode) and converts back to the Euler set closest to the previous one (`Transform::eulerFromQuaternion`), so the values stay continuous while dragging. |
 | JSON scene files | Readable, diff-friendly, easy to extend with forward-compatible rules. |
 | One mesh per imported file | Simple model for now; a file with several objects is baked into one mesh. |
 | Static libraries for engine and editor core | Tests link the real code without a UI. |

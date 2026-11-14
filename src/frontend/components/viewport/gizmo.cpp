@@ -49,9 +49,17 @@ float wrapDegrees(float a)
 }
 } // namespace
 
-QVector3D Gizmo::axisVector(int axis) const
+// Mouse ray hitting the plane through the gizmo center, facing the camera.
+bool Gizmo::viewPlanePoint(const QPointF &mouse, QVector3D *point) const
 {
-    return QVector3D(axis == AxisX ? 1.0f : 0.0f, axis == AxisY ? 1.0f : 0.0f, axis == AxisZ ? 1.0f : 0.0f);
+    QVector3D o, d;
+    m_camera.screenRay(mouse, m_viewSize, &o, &d);
+    const QVector3D n = (m_camera.eye() - m_camera.target).normalized();
+    const float denom = QVector3D::dotProduct(d, n);
+    if (qAbs(denom) < 1e-6f)
+        return false;
+    *point = o + d * (QVector3D::dotProduct(m_center - o, n) / denom);
+    return true;
 }
 
 void Gizmo::layout(const OrbitCamera &camera, const QSizeF &viewSize, const Transform &transform)
@@ -61,6 +69,9 @@ void Gizmo::layout(const OrbitCamera &camera, const QSizeF &viewSize, const Tran
     m_center = transform.position;
     m_shapes.clear();
     m_axisEnds.assign(3, QPointF());
+    const bool local = m_space == Space::Local || m_mode == Mode::Scale;
+    for (int axis = AxisX; axis <= AxisZ; ++axis)
+        m_axes[axis] = local ? transform.axis(axis) : QVector3D(axis == AxisX, axis == AxisY, axis == AxisZ);
 
     bool inFront = false;
     m_screenCenter = camera.project(m_center, viewSize, &inFront);
@@ -97,10 +108,10 @@ int Gizmo::hitTest(const QPointF &point) const
     if (!m_visible)
         return None;
 
-    if (m_mode == Mode::Scale) {
+    if (hasCenterHandle()) {
         const QPointF d = point - m_screenCenter;
-        if (qAbs(d.x()) <= 8 && qAbs(d.y()) <= 8)
-            return Uniform;
+        if (std::hypot(d.x(), d.y()) <= 11.0)
+            return Center;
     }
 
     int best = None;
@@ -166,8 +177,14 @@ void Gizmo::appendGeometry(std::vector<OverlayVertex> &out) const
             square(out, b, 5.0f, col);
     }
 
-    if (m_mode == Mode::Scale && (m_active == None || m_active == Uniform))
-        square(out, m_screenCenter, 6.0f, colorFor(Uniform));
+    // Center handle, on top of the axes: a ring (move in the view plane) or a square (uniform scale).
+    if (hasCenterHandle() && (m_active == None || m_active == Center)) {
+        const QColor col = colorFor(Center);
+        if (m_mode == Mode::Translate)
+            ring(out, m_screenCenter, 8.0f, focus == Center ? kLineWidthActive : kLineWidth, col);
+        else
+            square(out, m_screenCenter, focus == Center ? 8.0f : 7.0f, col);
+    }
 }
 
 void Gizmo::beginDrag(int handle, const QPointF &mouse, const Transform &start)
@@ -178,7 +195,10 @@ void Gizmo::beginDrag(int handle, const QPointF &mouse, const Transform &start)
     if (handle >= AxisX && handle <= AxisZ)
         m_startAxisScreen = m_axisEnds[handle] - m_screenCenter;
 
-    if (m_mode == Mode::Translate) {
+    if (m_mode == Mode::Translate && handle == Center) {
+        m_startPlanePoint = m_center;
+        viewPlanePoint(mouse, &m_startPlanePoint);
+    } else if (m_mode == Mode::Translate) {
         m_startParam = 0.0f;
         // Same computation as dragTo, so the object doesn't jump on the first move.
         QVector3D o, d;
@@ -194,6 +214,8 @@ void Gizmo::beginDrag(int handle, const QPointF &mouse, const Transform &start)
         const QPointF r = mouse - m_screenCenter;
         m_lastAngle = float(qRadiansToDegrees(std::atan2(r.y(), r.x())));
         m_angle = 0.0f;
+        m_dragAxis = axisVector(handle);
+        m_lastRotation = start.rotation;
     }
 }
 
@@ -205,6 +227,12 @@ Transform Gizmo::dragTo(const QPointF &mouse)
 
     switch (m_mode) {
     case Mode::Translate: {
+        if (m_active == Center) { // follow the mouse on the plane facing the camera
+            QVector3D p;
+            if (viewPlanePoint(mouse, &p))
+                t.position = m_start.position + (p - m_startPlanePoint);
+            break;
+        }
         // Closest point on the axis line to the mouse ray.
         QVector3D o, d;
         m_camera.screenRay(mouse, m_viewSize, &o, &d);
@@ -226,11 +254,12 @@ Transform Gizmo::dragTo(const QPointF &mouse)
         m_lastAngle = angle;
         // Screen y points down, so a growing atan2 angle is clockwise on screen.
         // A positive rotation is counter-clockwise when the axis points at the viewer.
-        const QVector3D a = axisVector(m_active);
-        const float facing = QVector3D::dotProduct(a, m_camera.eye() - m_start.position) >= 0.0f ? 1.0f : -1.0f;
-        QVector3D rot = m_start.rotation;
-        rot[m_active] = m_start.rotation[m_active] - m_angle * facing;
-        t.rotation = rot;
+        const float facing = QVector3D::dotProduct(m_dragAxis, m_camera.eye() - m_start.position) >= 0.0f ? 1.0f : -1.0f;
+        // Rotation around a world direction (a world axis, or the entity's own axis at the
+        // start of the drag), applied on top of the starting rotation.
+        const QQuaternion q = QQuaternion::fromAxisAndAngle(m_dragAxis, -m_angle * facing) * m_start.rotationQuaternion();
+        t.rotation = Transform::eulerFromQuaternion(q, m_lastRotation);
+        m_lastRotation = t.rotation;
         break;
     }
     case Mode::Scale: {

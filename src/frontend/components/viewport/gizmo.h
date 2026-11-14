@@ -8,7 +8,9 @@
 #include "engine/render/renderer.h"
 #include "engine/scene/transform.h"
 
-// Transform gizmo (move / rotate / scale along the world axes).
+// Transform gizmo: move / rotate / scale along the world axes (Global) or the entity's own
+// axes (Local). Scale is always along the entity's axes: scale is applied before rotation,
+// so it can't stretch along a world axis of a rotated entity.
 // Everything happens in screen space: the handles are projected once per frame
 // (layout), then the same 2D shapes are used to draw them and to hit-test the mouse,
 // so what you see is exactly what you can grab. Constant size on screen.
@@ -28,15 +30,25 @@ public:
         Scale,
     };
 
-    // Handles: one per axis, plus the center square (uniform scale).
+    enum class Space
+    {
+        Global, // world axes
+        Local,  // the entity's axes
+    };
+
+    // Handles: one per axis, plus the center: move in the view plane (Translate),
+    // uniform scale (Scale).
     static constexpr int None = -1;
     static constexpr int AxisX = 0;
     static constexpr int AxisY = 1;
     static constexpr int AxisZ = 2;
-    static constexpr int Uniform = 3;
+    static constexpr int Center = 3;
+    static constexpr int Uniform = Center;
 
     void setMode(Mode mode) { m_mode = mode; }
     Mode mode() const { return m_mode; }
+    void setSpace(Space space) { m_space = space; }
+    Space space() const { return m_space; }
 
     void layout(const OrbitCamera &camera, const QSizeF &viewSize, const Transform &transform);
     bool isVisible() const { return m_visible; }
@@ -63,9 +75,13 @@ private:
         bool closed = false;
     };
 
-    QVector3D axisVector(int axis) const;
+    QVector3D axisVector(int axis) const { return m_axes[axis]; }
+    bool hasCenterHandle() const { return m_mode != Mode::Rotate; }
+    bool viewPlanePoint(const QPointF &mouse, QVector3D *point) const;
 
     Mode m_mode = Mode::Translate;
+    Space m_space = Space::Global;
+    QVector3D m_axes[3];    // world direction of each handle's axis
     OrbitCamera m_camera;
     QSizeF m_viewSize;
     QVector3D m_center;     // world
@@ -84,4 +100,7 @@ private:
     QPointF m_startAxisScreen;  // scale: screen vector of the axis at the start
     float m_lastAngle = 0.0f;   // rotate: previous mouse angle around the center (degrees)
     float m_angle = 0.0f;       // rotate: accumulated angle
+    QVector3D m_dragAxis;       // rotate: world axis, fixed for the whole drag
+    QVector3D m_lastRotation;   // rotate: Euler angles of the previous step (continuity)
+    QVector3D m_startPlanePoint; // translate, center: mouse on the view plane at the start
 };

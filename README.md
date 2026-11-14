@@ -85,6 +85,7 @@ Third-party libraries are downloaded on the first configure into `build/_deps`
 |---|---|
 | Select | Left click on an object (empty space deselects) |
 | Move / rotate / scale | Left drag on a gizmo handle; right click while dragging cancels |
+| Move in the view plane / uniform scale | Left drag on the gizmo's center |
 | Orbit | Right drag |
 | Pan | Middle drag |
 | Zoom | Wheel |
@@ -99,6 +100,7 @@ Third-party libraries are downloaded on the first configure into `build/_deps`
 | Ctrl+K | Command palette |
 | Shift+A | Add menu at the cursor (empty, cube, sphere, plane, lights, environment, import) |
 | W / E / R | Move / rotate / scale gizmo |
+| T | Gizmo axes: global / local (scale always uses the entity's axes) |
 | Delete | Delete the selection |
 | F2 / double click | Rename in the outliner |
 | Ctrl+Z / Ctrl+Y | Undo / redo (also Ctrl+Shift+Z) |
