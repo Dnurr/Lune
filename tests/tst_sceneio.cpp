@@ -114,6 +114,7 @@ private slots:
         lamp.light->enabled = false;
         lamp.light->shadows = false;
         lamp.light->softness = 2.5f;
+        lamp.light->size = 0.35f;
         scene.createEntity(lamp);
         scene.createEntity(QStringLiteral("Empty"));
 

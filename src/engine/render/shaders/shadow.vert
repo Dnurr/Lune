@@ -1,6 +1,7 @@
 #version 440
 
-// Shadow pass: each mesh's depth as seen from the shadowed directional light.
+// Shadow passes (ShadowMaps): each mesh's depth as seen from one shadowed light, drawn once
+// per tile of the shadow atlases.
 layout(location = 0) in vec3 position;
 
 // Per-entity uniforms (the same block as mesh.vert; only `model` is used here).
@@ -15,11 +16,9 @@ layout(std140, binding = 0) uniform buf {
     vec4 material;
 };
 
-// Shadow uniforms (the same block as mesh.frag, binding 6 there).
-layout(std140, binding = 1) uniform shadowBuf {
-    mat4 shadowMatrix;
-    mat4 lightViewProj;
-    vec4 shadowParams;
+// The tile being drawn (a dynamic offset into one buffer per frame).
+layout(std140, binding = 1) uniform viewBuf {
+    mat4 lightViewProj; // world -> the light's clip space, corrected for the backend
 };
 
 void main()

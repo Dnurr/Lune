@@ -10,6 +10,7 @@
 
 #include "engine/scene/entity.h"
 #include "iblmaps.h"
+#include "shadowmaps.h"
 
 class OrbitCamera;
 class Scene;
@@ -49,7 +50,7 @@ struct FrameStats
 //
 // Frame:
 //   0. ibl     -> environment maps, only when the environment changed (IblMaps)
-//      shadow  -> depth of every mesh seen from the shadowed directional light
+//      shadow  -> depth of every mesh seen from each shadowed light (ShadowMaps)
 //   1. scene   -> environment background (optional), world grid, meshes (depth tested),
 //                 selection outline                                         [HDR, linear]
 //   2. display -> scene converted for the screen (future tonemapping), then
@@ -66,7 +67,7 @@ class Renderer
 public:
     static constexpr int MaxGlassRects = 16; // must match MAX_RECTS in composite.frag
     static constexpr int MaxLights = 8;      // must match MAX_LIGHTS in mesh.frag; extra lights are ignored
-    static constexpr int ShadowMapSize = 2048;
+    static_assert(MaxLights == ShadowMaps::MaxLights);
 
     Renderer();
     ~Renderer();
@@ -102,7 +103,7 @@ private:
     {
         std::unique_ptr<QRhiBuffer> uniforms;
         std::unique_ptr<QRhiShaderResourceBindings> srb;       // scene pass (meshBindings)
-        std::unique_ptr<QRhiShaderResourceBindings> shadowSrb; // shadow pass: entity and shadow uniforms only
+        std::unique_ptr<QRhiShaderResourceBindings> shadowSrb; // shadow passes (ShadowMaps::casterBindings)
     };
 
     void createSizeDependentResources();
@@ -111,9 +112,7 @@ private:
     GpuEntity &gpuEntity(EntityId id);
     // Bindings of every mesh SRB: entity uniforms, then what the whole scene shares.
     QList<QRhiShaderResourceBinding> meshBindings(QRhiBuffer *entityUniforms) const;
-    // Bindings of every shadow pass SRB. Separate from the scene's: those sample the shadow
-    // map, which the shadow pass writes.
-    QList<QRhiShaderResourceBinding> shadowBindings(QRhiBuffer *entityUniforms) const;
+
 
     QRhi *m_rhi = nullptr;
     QSize m_pixelSize;
@@ -138,13 +137,8 @@ private:
     std::unique_ptr<QRhiBuffer> m_lightsUbuf; // the frame's lights, binding 1 of every mesh SRB
     std::unique_ptr<QRhiBuffer> m_envUbuf;    // environment rotation and parameters, binding 2 of every mesh SRB
     std::unique_ptr<QRhiBuffer> m_backgroundUbuf;
-    std::unique_ptr<QRhiBuffer> m_shadowUbuf; // light matrices and shadow parameters, binding 6 of every mesh SRB
 
-    // Shadow map: depth only, ShadowMapSize^2, sampled with a comparison sampler (binding 7).
-    std::unique_ptr<QRhiTexture> m_shadowMap;
-    std::unique_ptr<QRhiTextureRenderTarget> m_shadowRt;
-    std::unique_ptr<QRhiRenderPassDescriptor> m_shadowRp;
-    std::unique_ptr<QRhiSampler> m_shadowSampler;
+    ShadowMaps m_shadows; // shadow atlases, bindings 6..10 of every mesh SRB
 
     IblMaps m_ibl; // environment cubemaps and BRDF LUT, bindings 3..5 of every mesh SRB
 
@@ -160,13 +154,11 @@ private:
 
     std::unique_ptr<QRhiShaderResourceBindings> m_gridSrb, m_displaySrb, m_downSrb, m_compositeSrb, m_overlaySrb;
     std::unique_ptr<QRhiShaderResourceBindings> m_backgroundSrb;
-    std::unique_ptr<QRhiShaderResourceBindings> m_meshLayoutSrb;   // layout of the per-entity SRBs
-    std::unique_ptr<QRhiShaderResourceBindings> m_shadowLayoutSrb; // layout of the per-entity shadow SRBs
+    std::unique_ptr<QRhiShaderResourceBindings> m_meshLayoutSrb; // layout of the per-entity SRBs
     std::array<std::unique_ptr<QRhiShaderResourceBindings>, 4> m_blurSrbs;
 
     std::unique_ptr<QRhiGraphicsPipeline> m_gridPipe, m_meshPipe, m_outlinePipe, m_overlayPipe, m_backgroundPipe;
     std::unique_ptr<QRhiGraphicsPipeline> m_displayPipe, m_downPipe, m_blurPipe, m_compositePipe;
-    std::unique_ptr<QRhiGraphicsPipeline> m_shadowPipe;
 
     std::unordered_map<const Mesh *, GpuMesh> m_meshes;
     std::unordered_map<EntityId, GpuEntity> m_entities;

@@ -77,7 +77,8 @@ like the triangle count, are derived). Current components:
 | `Light` (only on lights) | `type` | `"directional"` or `"point"` |
 | | `color` | `"#rrggbb"` (sRGB) |
 | | `intensity` | number ≥ 0 (radiance; for point lights, at 1 unit of distance) |
-| | `shadows` | boolean (default true): casts shadows; directional lights only, for now |
+| | `shadows` | boolean (default true): casts shadows (up to 4 directional and 4 point lights) |
+| | `size` | number ≥ 0 (default 0.1): physical size for soft shadows; point = radius in units, directional = angular diameter in degrees |
 | | `softness` | number, 0–8 (default 1): shadow edge softness, filter radius in shadow map texels |
 | | `enabled` | boolean |
 | `Environment` (only on environments) | `image` | path of an equirectangular `.hdr`, relative to the scene file; `""` = gradient |

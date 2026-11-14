@@ -52,8 +52,9 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 ### Shadows
 
 - [x] Shadow map render target and light-space depth pass, `shadows` / `softness` light properties (Claude)
-- [ ] Shadow sampling and PCF filtering for the directional light (Author)
-- [ ] Point light shadows (cube shadow maps) (Claude: targets, Author: sampling)
+- [x] Shadows from every light: directional and point (cube faces) atlases, raw depth bindings, `size` property (Claude)
+- [ ] Shadow sampling and PCF filtering, directional and point lights (Author)
+- [ ] Contact-hardening soft shadows (PCSS) from the light's size (Author)
 - [ ] Cascaded shadow maps for large scenes (Author, later)
 
 ### Materials

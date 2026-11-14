@@ -27,7 +27,9 @@ struct Light
     Type type = Directional;
     QColor color { 0xFF, 0xFF, 0xFF }; // sRGB, like every color in the editor
     float intensity = 3.0f;            // directional: radiance; point: radiance at 1 unit
-    bool shadows = true;               // casts shadows (directional lights only, for now)
+    bool shadows = true;               // casts shadows
+    float size = 0.1f;                 // physical size, for soft shadows: point = radius in units,
+                                       // directional = angular diameter in degrees (the sun: ~0.5)
     float softness = 1.0f;             // shadow edge softness: filter radius in shadow map texels
     bool enabled = true;
 

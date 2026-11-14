@@ -26,6 +26,7 @@ add_library(lune_engine STATIC
     src/engine/render/camera.cpp
     src/engine/render/renderer.cpp
     src/engine/render/iblmaps.cpp
+    src/engine/render/shadowmaps.cpp
 )
 # Includes are relative to src/: "engine/scene/scene.h", "frontend/core/selection.h"
 target_include_directories(lune_engine PUBLIC src)

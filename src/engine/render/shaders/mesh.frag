@@ -42,21 +42,43 @@ layout(binding = 4) uniform samplerCube prefilteredMap;
 // Split-sum BRDF terms: texture(brdfLut, vec2(NdotV, roughness)).rg = (scale, bias) for F0.
 layout(binding = 5) uniform sampler2D brdfLut;
 
-// Shadows of one directional light: the first enabled one with shadows on (a scene without
-// lights: the default sun). Shared by every mesh.
+// Shadows (ShadowMaps), shared by every mesh. Every light with `shadows` on casts them, up
+// to MAX_DIR_SHADOWS directional and MAX_POINT_SHADOWS point lights (in scene order); the
+// others light without shadows. Each shadowed light has a slot: a tile in its type's atlas.
+//
+// Directional light, slot s:  p = (dirShadowMatrix[s] * vec4(v_world, 1.0)).xyz  (orthographic: w = 1)
+// Point light, slot s:        face = major axis of (v_world - light position), in the order
+//                             +X -X +Y -Y +Z -Z;  c = pointShadowMatrix[s * 6 + face] * vec4(v_world, 1.0),
+//                             p = c.xyz / c.w  (perspective: divide by w)
+// p.xy is the uv in the atlas, p.z the depth to compare. Each tile's uv rectangle is in
+// *ShadowTile (xy min, zw max): keep filter samples inside it (they'd read the neighbor tile),
+// and treat points outside a directional tile as lit. Point faces have PointFaceBorder extra
+// texels around the 90° view, so samples near a face's edge stay valid.
+#define MAX_DIR_SHADOWS 4
+#define MAX_POINT_SHADOWS 4
 layout(std140, binding = 6) uniform shadowBuf {
-    mat4 shadowMatrix;  // world -> shadow map: (shadowMatrix * vec4(v_world, 1.0)).xyz = (uv, depth)
-    mat4 lightViewProj; // world -> light clip space (used by shadow.vert)
-    vec4 shadowParams;  // x: 1 = shadows on, y: index of the shadowed light in lights[],
-                        // z: softness (filter radius in texels), w: texel size (1 / map size)
+    vec4 lightShadow[MAX_LIGHTS];                     // per lights[i]: x slot (-1 = no shadows), y size
+                                                      // (point: radius; directional: angular diameter, degrees),
+                                                      // z softness (filter radius in texels), w unused
+    mat4 dirShadowMatrix[MAX_DIR_SHADOWS];            // world -> (atlas uv, depth)
+    vec4 dirShadowTile[MAX_DIR_SHADOWS];              // uv rectangle of the slot's tile
+    vec4 dirShadowRange[MAX_DIR_SHADOWS];             // x: world distance covered by depth 0..1 (depth is linear),
+                                                      // y: world size of one texel
+    mat4 pointShadowMatrix[MAX_POINT_SHADOWS * 6];    // world -> (atlas uv, depth), per face
+    vec4 pointShadowTile[MAX_POINT_SHADOWS * 6];      // uv rectangle of each face's tile
+    vec4 pointShadowRange[MAX_POINT_SHADOWS];         // x: near, y: far. Depth is perspective; distance along
+                                                      // the face's axis = near * far / (far - depth * (far - near))
+    vec4 shadowAtlas;                                 // xy: texel size (uv) of the directional atlas, zw: point atlas
 };
-// Depth of the scene seen from the light, read through a comparison sampler:
-//     texture(shadowMap, vec3(uv, depth))  ->  1 = lit (depth <= the stored one), 0 = in shadow,
-// already blended across the 4 nearest texels. Outside 0..1 in uv it repeats the border:
-// treat that as lit. The shadow pass already applies a slope-scaled depth bias.
-// TODO (author): in the light loop, for the shadowed light only, multiply its contribution by
-// a filtered (PCF) shadow factor; a small normal offset or bias on top fixes the remaining acne.
-layout(binding = 7) uniform sampler2DShadow shadowMap;
+// Each atlas twice. The comparison sampler gives the filtered shadow test:
+//     texture(dirShadowMap, vec3(uv, depth))  ->  1 = lit (depth <= the stored one), 0 = in shadow,
+// already blended across the 4 nearest texels. The raw one gives the stored depth itself
+// (texture(dirShadowDepth, uv).r), e.g. to search for blockers (PCSS). The shadow passes
+// already apply a slope-scaled depth bias.
+layout(binding = 7) uniform sampler2DShadow dirShadowMap;
+layout(binding = 8) uniform sampler2D dirShadowDepth;
+layout(binding = 9) uniform sampler2DShadow pointShadowMap;
+layout(binding = 10) uniform sampler2D pointShadowDepth;
 
 // Direction in the world -> direction to sample the environment maps with.
 vec3 toEnvironment(vec3 dir)
@@ -105,6 +127,112 @@ vec3 FresnelRoughness(float NdotV, vec3 F0, float roughness)
     return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(1.0 - NdotV, 5.0);
 }
 
+float Shadow(int i, int type, vec3 N)
+{
+    float lit = 0.0;
+
+    int slot = int(lightShadow[i].x);
+    float size = lightShadow[i].y;
+    float softness = lightShadow[i].z;
+
+    float dReceiver;
+    float texelWorld;
+    vec3 pos;
+    vec3 p;
+    vec4 tile;
+    vec2 texel;
+    float spread = 2.0 * tan(radians(size) / 2.0);
+
+    const vec2 poisson[16] = vec2[](
+        vec2(-0.94201624, -0.39906216),
+        vec2( 0.94558609, -0.76890725),
+        vec2(-0.09418410, -0.92938870),
+        vec2( 0.34495938,  0.29387760),
+        vec2(-0.91588581,  0.45771432),
+        vec2(-0.81544232, -0.87912464),
+        vec2(-0.38277543,  0.27676845),
+        vec2( 0.97484398,  0.75648379),
+        vec2( 0.44323325, -0.97511554),
+        vec2( 0.53742981, -0.47373420),
+        vec2(-0.26496911, -0.41893023),
+        vec2( 0.79197514,  0.19090188),
+        vec2(-0.24188840,  0.99706507),
+        vec2(-0.81409955,  0.91437590),
+        vec2( 0.19984126,  0.78641367),
+        vec2( 0.14383161, -0.14100790)
+    );
+
+    float angle = 6.2831853 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    mat2 rot = mat2(cos(angle), sin(angle), -sin(angle), cos(angle));
+
+    float sum = 0.0;
+    int count = 0;
+    
+    if (type == 0)
+    {        
+        texelWorld = dirShadowRange[slot].y;
+        pos = v_world + N * texelWorld * 2.0; 
+
+        p = (dirShadowMatrix[slot] * vec4(pos, 1.0)).xyz;
+        tile = dirShadowTile[slot];
+     
+        if (any(lessThan(p.xy, tile.xy)) || any(greaterThan(p.xy, tile.zw))) return 1.0;
+     
+        texel = shadowAtlas.xy;
+        
+        dReceiver = p.z * dirShadowRange[slot].x;
+    }
+    else
+    {
+        vec3 d = v_world - lights[i].position.xyz;
+        vec3 a = abs(d);
+        int face;
+        if (a.x >= a.y && a.x >= a.z) face = d.x > 0.0 ? 0 : 1;   // +X / -X
+        else if (a.y >= a.z)          face = d.y > 0.0 ? 2 : 3;   // +Y / -Y
+        else                          face = d.z > 0.0 ? 4 : 5;   // +Z / -Z
+        int t = slot * 6 + face;                                  // index of this face's tile
+
+        const float tanHalf = 512.0 / 496.0;   // PointFaceSize / (PointFaceSize - 2 * PointFaceBorder)
+        float axisDist = max(a.x, max(a.y, a.z));                  // distance along the face's axis
+        texelWorld = 2.0 * axisDist * tanHalf / 512.0;
+        pos = v_world + N * texelWorld * 2.0;
+
+        vec4 c = pointShadowMatrix[t] * vec4(pos, 1.0);
+        p = c.xyz / c.w;                       // perspective: divide by w
+        tile = pointShadowTile[t];
+        texel = shadowAtlas.zw;                // point atlas, not .xy
+        dReceiver = axisDist;
+    }
+
+    float searchTexels = type == 0 ? min(dReceiver * spread / texelWorld, 16.0) : 16.0;
+    vec2  searchUV = searchTexels * texel;
+    float near = pointShadowRange[slot].x, far = pointShadowRange[slot].y;
+
+    for (int k = 0; k < 16; k++)
+    {
+        vec2 uv = clamp(p.xy + rot * poisson[k] * searchUV, tile.xy, tile.zw);
+        float z = type == 0 ? texture(dirShadowDepth, uv).r : texture(pointShadowDepth, uv).r;
+        float dist = type == 0 ? z * dirShadowRange[slot].x
+                               : near * far / (far - z * (far - near));
+        if (z < p.z) { sum += dist; count++; }
+    }
+
+    if (count == 0) return 1.0;
+
+    float dBlocker = sum / float(count);
+    float penumbraWorld = type == 0 ? (dReceiver - dBlocker) * spread : 2.0 * size * (dReceiver - dBlocker) / dBlocker;
+    float penumbraTexels = penumbraWorld / texelWorld;
+    float radius = max(penumbraTexels, softness);
+
+    for (int k = 0; k < 16; k++)
+    {
+        vec2 uv = clamp(p.xy + rot * poisson[k] * radius * texel, tile.xy, tile.zw);
+        lit += type == 0 ? texture(dirShadowMap, vec3(uv, p.z)) : texture(pointShadowMap, vec3(uv, p.z));
+    }
+
+    return lit / 16.0;
+}
+
 // Cook-Torrance PBR Model
 void main()
 {
@@ -135,10 +263,11 @@ void main()
     {
         vec3 radiance = lights[i].color.rgb * lights[i].color.w;
         vec3 L;
+        float dist2;
         if (lights[i].position.w > 0.5) // point
         {
             vec3 toLight = lights[i].position.xyz - v_world;
-            float dist2 = max(dot(toLight, toLight), 1e-4);
+            dist2 = max(dot(toLight, toLight), 1e-4);
             L = toLight * inversesqrt(dist2);
             radiance /= dist2;
         }
@@ -156,7 +285,12 @@ void main()
         
         vec3 kD = (1.0 - F) * (1.0 - metallic);
 
-        final += (kD * albedo / PI + spec) * radiance * NdotL;
+        float shadow = 1.0;
+        int slot = int(lightShadow[i].x);
+        if (slot >= 0) // directional; point lights: TODO (author)
+            shadow = Shadow(i, int(lights[i].position.w), N);
+
+        final += (kD * albedo / PI + spec) * radiance * NdotL * shadow;
     }
 
     vec3 kD = (1.0 - kS) * (1.0 - metallic);

@@ -20,8 +20,8 @@ flowchart LR
     subgraph P0["0 &middot; IBL maps (only when the environment changes)"]
         conv[Equirect to cube] --> irr[Irradiance] --> pre[Prefiltered specular]
     end
-    subgraph PS["Shadow map (depth only, 2048²)"]
-        shadow[Meshes from the light]
+    subgraph PS["Shadow atlases (depth only)"]
+        sdir[Directional lights] --> spoint[Point lights, 6 faces each]
     end
     subgraph P1["1 &middot; Scene (HDR, linear, color + depth)"]
         bg[Environment background] --> grid[World grid] --> meshes[Meshes] --> outline[Selection outline]
@@ -42,7 +42,7 @@ flowchart LR
 | Pass | Target | Shaders | Notes |
 |---|---|---|---|
 | IBL maps | environment cubemaps, BRDF LUT | `cube.vert` + `equirect_to_cube.frag`, `irradiance.frag`, `prefilter.frag`; `fullscreen.vert` + `brdf_lut.frag` | Only when the environment's source changes (the LUT once): see [Image-based lighting](#image-based-lighting). |
-| Shadow map | shadow map (depth) | `shadow.vert` + `shadow.frag` | Every visible mesh's depth from the shadowed directional light; see [Shadows](#shadows). Always cleared, drawn only when a light casts shadows. |
+| Shadow atlases | two depth atlases | `shadow.vert` + `shadow.frag` | Every visible mesh's depth from each shadowed light, one tile (viewport) per view; see [Shadows](#shadows). Always cleared. |
 | Background | scene (RGBA16F) | `background.vert` + `background.frag` | Only when the Environment's `background` is on: the environment in each view ray's direction. |
 | Grid | scene | `fullscreen.vert` + `grid.frag` | Fullscreen triangle; each pixel intersects its view ray with y = 0. No depth write: it's the background. Premultiplied alpha: opaque with its own sky, or only the lines over an environment background. Colors converted to linear on the CPU. |
 | Meshes | scene | `mesh.vert` + `mesh.frag` | Depth tested, two-sided, Cook-Torrance (GGX) shading with the scene lights and the environment maps. Writes linear values (can exceed 1). |
@@ -70,9 +70,10 @@ Resources:
   light gets one default sun, so older scenes and empty ones stay visible.
 - The environment goes in one more buffer (binding 2: rotation and parameters) and three
   textures (bindings 3–5: irradiance, prefiltered, BRDF LUT), shared by every mesh.
-- Shadows: binding 6 (light matrices and parameters) and 7 (the shadow map). The shadow
-  pass has its own binding sets (entity and shadow uniforms only), since the scene's ones
-  sample the texture it writes.
+- Shadows: binding 6 (matrices and parameters) and 7–10 (both atlases, each with a
+  comparison and a raw-depth sampler). The shadow passes have their own binding sets
+  (entity uniforms and the tile's view matrix, at a dynamic offset), since the scene's
+  ones sample the textures they write.
 - Size-dependent textures are recreated on resize. Render pass descriptors are created
   once and reused, so the pipelines built with them stay valid.
 
@@ -110,24 +111,30 @@ inverse of the entity's rotation. Its position doesn't matter.
 
 ## Shadows
 
-One directional light casts shadows: the first enabled one with `shadows` on (in a scene
-without lights, the default sun). Point lights don't cast shadows yet.
+`ShadowMaps` (`src/engine/render/shadowmaps.h`) renders the shadow maps of every light
+with `shadows` on, up to 4 directional and 4 point lights in scene order (the others light
+without shadows; a scene without lights gets the default sun, which casts them).
 
-- **Shadow map**: a 2048² depth texture (`D32F`, or `D24`/`D16` where unsupported),
-  rendered with no color target before the scene pass.
-- **Light view**: an orthographic projection along the light's direction that covers the
-  bounding sphere of every visible mesh. It doesn't depend on the camera, so shadows
-  don't move while orbiting; a larger scene spreads the same texels over more space
-  (cascades are on the roadmap).
-- **Bias**: the shadow pass uses a slope-scaled depth bias (`kShadowSlopeBias` in
-  `renderer.cpp`), which removes most acne; the shader can add a normal offset on top.
-- **Sampling**: `mesh.frag` gets `shadowMatrix`, which turns a world position straight
-  into `(uv, depth)` of the shadow map on every backend (texture orientation and clip
-  depth range already handled), and the map through a comparison sampler
-  (`sampler2DShadow`): `texture(shadowMap, vec3(uv, depth))` is 1 when lit, 0 in shadow,
-  bilinearly blended across the 4 nearest texels. `shadowParams` holds whether shadows
-  are on, the shadowed light's index in `lights[]`, the light's `softness` (filter radius
-  in texels) and the texel size.
+| Atlas | Size | Tiles | Projection |
+|---|---|---|---|
+| directional | 4096² | 2 × 2 of 2048², one per light | orthographic along the light, covering the bounding sphere of every visible mesh |
+| point | 3072 × 2048 | 6 × 4 of 512², one row per light, one cube face (+X −X +Y −Y +Z −Z) per column | perspective from the light, a little wider than 90° (8 border texels), far plane at the farthest mesh |
+
+- **Passes**: one per atlas, one viewport per tile; each mesh is drawn once per tile. The
+  views don't depend on the camera, so shadows don't move while orbiting; a larger scene
+  spreads the same texels over more space (cascades are on the roadmap).
+- **Format**: `D32F` (or `D24`/`D16` where unsupported).
+- **Bias**: the shadow passes use a slope-scaled depth bias, which removes most acne; the
+  shader can add a normal offset on top.
+- **Sampling** (`mesh.frag`): `lightShadow[i]` gives the slot of `lights[i]` (−1 = no
+  shadows), its `size` and `softness`. Per slot, a matrix turns a world position into
+  `(uv, depth)` in the atlas on every backend (texture orientation, clip depth range and
+  tile placement handled; point faces need the division by w), plus the tile's uv
+  rectangle and what's needed to turn depth back into distance. Each atlas is bound twice:
+  through a comparison sampler (`sampler2DShadow`: 1 = lit, 0 = in shadow, blended across
+  4 texels) and as raw depth (`sampler2D`, nearest), for blocker searches like PCSS.
+- **OpenGL**: the same texture bound with two samplers may not get both sampler states
+  there; Direct3D 11 (the default), Vulkan and Metal are fine.
 
 ## Glass panels
 
@@ -175,10 +182,10 @@ the root `CMakeLists.txt`.
 
 Uniform blocks use `std140`, binding 0; textures start at binding 1. Meshes use binding 1
 for the lights block, 2 for the environment block, 3–5 for the environment maps, 6 for
-the shadow block and 7 for the shadow map. A
+the shadow block and 7–10 for the shadow atlases. A
 block shared by several shaders must be declared identically in each (see `mesh.vert`,
 `mesh.frag`, `outline.vert`, `outline.frag`, `shadow.vert`; `mesh.frag` and `background.frag` for
-the environment block; `mesh.frag` and `shadow.vert` for the shadow block).
+the environment block).
 
 ## Limits (current)
 
