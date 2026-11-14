@@ -40,12 +40,12 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 - [x] Environment component: HDRI, gradient fallback, rotation, intensity, saved in the scene (Claude)
 - [x] Cubemap targets, mip chain, precompute passes run when the source changes (Claude)
 - [x] Background pass and toggle, grid drawn over it (Claude)
-- [ ] Equirectangular to cubemap conversion, `equirect_to_cube.frag` (Author)
-- [ ] Diffuse irradiance convolution, `irradiance.frag` (Author)
-- [ ] Prefiltered specular cubemap, one roughness level per mip, `prefilter.frag` (Author)
-- [ ] BRDF integration LUT, `brdf_lut.frag` (Author)
-- [ ] Split-sum ambient in `mesh.frag`, replacing the constant ambient (Author)
-- [ ] Environment background with blur, `background.frag` (Author)
+- [x] Equirectangular to cubemap conversion, `equirect_to_cube.frag` (Author)
+- [x] Diffuse irradiance convolution, `irradiance.frag` (Author)
+- [x] Prefiltered specular cubemap, one roughness level per mip, `prefilter.frag` (Author)
+- [x] BRDF integration LUT, `brdf_lut.frag` (Author)
+- [x] Split-sum ambient in `mesh.frag`, replacing the constant ambient (Author)
+- [x] Environment background with blur, `background.frag` (Author)
 - [ ] `.exr` environment images (Claude, with the EXR writer of phase 6)
 - [ ] Load large HDRIs off the render thread (Claude)
 
@@ -112,3 +112,7 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 - Screen-space reflections and ambient occlusion (Author)
 - Mesh sequences or Alembic import for animated geometry (Claude)
 - Node-based material or particle graphs (both)
+- USD import / export: scenes, meshes, cameras, lights, UsdPreviewSurface materials (Claude)
+- Hydra render delegate, so Lune can render inside Houdini Solaris and other Hydra hosts;
+  needs the renderer fed by an adapter instead of reading the editor's `Scene` directly
+  (Claude: delegate and adapter, Author: anything the shading needs)

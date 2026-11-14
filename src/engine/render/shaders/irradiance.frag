@@ -18,8 +18,30 @@ const float PI = 3.14159265359;
 void main()
 {
     vec3 N = normalize(v_dir);
+    
+    vec3 irradiance = vec3(0.0);
+    
+    vec3 up = abs(N.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
+    vec3 right = normalize(cross(up, N));
+    up = normalize(cross(N, right));
 
-    // TODO (author): integrate the environment over the hemisphere around N
-    // (a tangent frame around N, then a loop over the hemisphere's angles).
-    fragColor = vec4(0.0, 0.0, 0.0, 1.0);
+    float sampleDelta = 0.05;
+    float nSamples = 0.0;
+    float lod = log2(face.w * sampleDelta / (0.5 * PI));
+
+    for (float phi = 0.0; phi < 2.0 * PI; phi += sampleDelta)
+    {
+        for (float theta = 0.0; theta < 0.5 * PI; theta += sampleDelta)
+        {
+            vec3 tangentSample = vec3(sin(theta) * cos(phi), sin(theta) * sin(phi), cos(theta));
+            vec3 sampleVec = tangentSample.x * right + tangentSample.y * up + tangentSample.z * N;
+
+            irradiance += textureLod(environment, sampleVec, lod).rgb * cos(theta) * sin(theta);
+            nSamples++;
+        }
+    }
+
+    irradiance = PI * irradiance * (1.0 / nSamples);
+
+    fragColor = vec4(irradiance, 1.0);
 }

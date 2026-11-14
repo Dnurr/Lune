@@ -84,6 +84,11 @@ vec3 Fresnel(float cosTheta, vec3 F0)
     return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
 }
 
+vec3 FresnelRoughness(float NdotV, vec3 F0, float roughness)
+{
+    return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(1.0 - NdotV, 5.0);
+}
+
 // Cook-Torrance PBR Model
 void main()
 {
@@ -101,6 +106,13 @@ void main()
 
     float NdotV = max(dot(N, V), 0.0);
     
+    vec3 kS = FresnelRoughness(NdotV, F0, roughness);
+
+    vec3 R = reflect(-V, N);
+    vec3 prefiltered = textureLod(prefilteredMap, toEnvironment(R), roughness * envParams.y).rgb;
+    vec3 lut = texture(brdfLut, vec2(NdotV, roughness)).rgb;
+    vec3 ambientSpec = prefiltered * (kS * lut.r + lut.g) * envParams.x;
+
     vec3 final = vec3(0.0);
 
     for (int i = 0; i < lightCount.x; i++)
@@ -130,6 +142,10 @@ void main()
 
         final += (kD * albedo / PI + spec) * radiance * NdotL;
     }
-    
-    fragColor = vec4(final + 0.03 * albedo, 1.0);
+
+    vec3 kD = (1.0 - kS) * (1.0 - metallic);
+    vec3 irradiance = texture(irradianceMap, toEnvironment(N)).rgb;
+    vec3 ambient = kD * albedo * irradiance * envParams.x;
+
+    fragColor = vec4(final + ambient + ambientSpec, 1.0);
 }

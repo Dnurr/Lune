@@ -18,7 +18,14 @@ void main()
 {
     vec3 dir = normalize(v_dir);
 
-    // TODO (author): turn `dir` into equirectangular (u, v) and sample `equirect`.
+    float longitude = atan(dir.z, dir.x);
+    float latitude = asin(clamp(dir.y, -1.0, 1.0));
+
+    vec2 uv = vec2(
+        longitude / (2.0 * PI) + 0.5,
+        0.5 - latitude / PI
+    );
+
     // The longitude around Y gives u, the angle from +Y gives v.
-    fragColor = vec4(0.0, 0.0, 0.0, 1.0);
+    fragColor = vec4(texture(equirect, uv).rgb, 1.0);
 }

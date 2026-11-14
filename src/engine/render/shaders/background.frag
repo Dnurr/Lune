@@ -21,8 +21,12 @@ layout(binding = 3) uniform samplerCube prefiltered; // blurred by roughness, on
 void main()
 {
     vec3 dir = mat3(envRotation) * normalize(v_dir);
+    vec3 color;
+    if (envParams.z > 0.0)
+        color = textureLod(prefiltered, dir, envParams.z * envParams.y).rgb;
+    else
+        color = texture(environment, dir).rgb;
 
-    // TODO (author): sample the environment in `dir`, times the intensity.
     // With blur > 0, the prefiltered map gives a smooth blur (blur as roughness -> mip).
-    fragColor = vec4(0.0, 0.0, 0.0, 1.0);
+    fragColor = vec4(color * envParams.x, 1.0);
 }
