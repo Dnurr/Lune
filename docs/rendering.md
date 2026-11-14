@@ -17,8 +17,11 @@ renderer.release();                 // when the QRhi goes away
 
 ```mermaid
 flowchart LR
+    subgraph P0["0 &middot; IBL maps (only when the environment changes)"]
+        conv[Equirect to cube] --> irr[Irradiance] --> pre[Prefiltered specular]
+    end
     subgraph P1["1 &middot; Scene (HDR, linear, color + depth)"]
-        grid[World grid] --> meshes[Meshes] --> outline[Selection outline]
+        bg[Environment background] --> grid[World grid] --> meshes[Meshes] --> outline[Selection outline]
     end
     subgraph P2["2 &middot; Display (8 bit, sRGB)"]
         disp[Linear to sRGB<br/>future tonemapping] --> overlay[2D overlay: gizmo]
@@ -29,14 +32,16 @@ flowchart LR
     subgraph P4["4 &middot; Final (widget target)"]
         comp[Composite: display image, blurred copy inside glass rects]
     end
-    P1 --> P2 --> P3 --> P4
+    P0 --> P1 --> P2 --> P3 --> P4
     P2 --> P4
 ```
 
 | Pass | Target | Shaders | Notes |
 |---|---|---|---|
-| Grid | scene (RGBA16F) | `fullscreen.vert` + `grid.frag` | Fullscreen triangle; each pixel intersects its view ray with y = 0. No depth write: it's the background. Colors converted to linear on the CPU. |
-| Meshes | scene | `mesh.vert` + `mesh.frag` | Depth tested, two-sided, Cook-Torrance (GGX) shading with the scene lights and a small ambient. Writes linear values (can exceed 1). |
+| IBL maps | environment cubemaps, BRDF LUT | `cube.vert` + `equirect_to_cube.frag`, `irradiance.frag`, `prefilter.frag`; `fullscreen.vert` + `brdf_lut.frag` | Only when the environment's source changes (the LUT once): see [Image-based lighting](#image-based-lighting). |
+| Background | scene (RGBA16F) | `background.vert` + `background.frag` | Only when the Environment's `background` is on: the environment in each view ray's direction. |
+| Grid | scene | `fullscreen.vert` + `grid.frag` | Fullscreen triangle; each pixel intersects its view ray with y = 0. No depth write: it's the background. Premultiplied alpha: opaque with its own sky, or only the lines over an environment background. Colors converted to linear on the CPU. |
+| Meshes | scene | `mesh.vert` + `mesh.frag` | Depth tested, two-sided, Cook-Torrance (GGX) shading with the scene lights and the environment maps. Writes linear values (can exceed 1). |
 | Outline | scene | `outline.vert` + `outline.frag` | Selected entity only. "Inverted hull": back faces pushed outwards in screen space, front faces culled. |
 | Display | display (RGBA8) | `fullscreen.vert` + `display.frag` | Converts the linear HDR scene to sRGB for the screen. Exposure and tonemapping go here: `params.x` = exposure (EV), `params.y` = operator index (0 none, 1 Reinhard, 2 ACES, 3 AgX), set with `Renderer::setDisplayParams()` from the editor's `DisplaySettings`. |
 | Overlay | display | `overlay.vert` + `overlay.frag` | Triangles in widget pixels with premultiplied alpha (the gizmo), in display colors: interface, so exposure/tonemapping never touch it; still blurred behind panels. |
@@ -59,11 +64,42 @@ Resources:
   up to `Renderer::MaxLights` (8) enabled lights, each as position + type, direction and
   linear color + intensity (see the `Light` block in `mesh.frag`). A scene with no enabled
   light gets one default sun, so older scenes and empty ones stay visible.
+- The environment goes in one more buffer (binding 2: rotation and parameters) and three
+  textures (bindings 3–5: irradiance, prefiltered, BRDF LUT), shared by every mesh.
 - Size-dependent textures are recreated on resize. Render pass descriptors are created
   once and reused, so the pipelines built with them stay valid.
 
 The renderer reports per-frame numbers in `FrameStats` (draw calls, passes, triangles,
 meshes), shown by the stats overlay (F12).
+
+## Image-based lighting
+
+`IblMaps` (`src/engine/render/iblmaps.h`) turns the environment into the maps the shaders
+sample, on the GPU. The source is the first enabled `Environment` in the scene: its
+equirectangular `.hdr` image (downscaled to at most 4096 pixels wide) or, without one, a
+sky/ground gradient made on the CPU; a scene without an Environment uses the default
+gradient, so the maps are always valid.
+
+| Map | Size | Written by | Holds |
+|---|---|---|---|
+| environment | cube, 512, full mip chain | `equirect_to_cube.frag` | The source as a cubemap; mips generated for filtered sampling |
+| irradiance | cube, 32 | `irradiance.frag` | Diffuse lighting per normal, cosine-weighted and divided by π |
+| prefiltered | cube, 128, 5 mips | `prefilter.frag` | Specular reflection, roughness = mip / 4 |
+| BRDF LUT | 2D, 256 | `brdf_lut.frag` | Split-sum scale and bias for F0, per (N·V, roughness) |
+
+All are RGBA16F. The maps are recomputed only when the source changes (image path, or the
+gradient colors when there's no image): 6 + 6 + 30 passes, plus the LUT once at startup.
+Intensity, rotation and background blur are uniforms, so changing them costs nothing.
+
+Each cube pass is a fullscreen triangle per face (and per mip) drawn with `cube.vert`,
+which hands the fragment shader `v_dir`, the direction through the texel, in the
+standard cubemap face order and orientation, so `texture(cube, dir)` later reads what was
+written for `dir`. The equirectangular image has V = 0 at the top row (straight up, +Y)
+and wraps around in U.
+
+The Environment entity's rotation turns the environment: shaders sample the maps with
+`mat3(envRotation) * dir` (`toEnvironment()` in `mesh.frag`), where `envRotation` is the
+inverse of the entity's rotation. Its position doesn't matter.
 
 ## Glass panels
 
@@ -109,17 +145,17 @@ Shader Tools) into `.qsb` files with SPIR-V, GLSL 300 es/330, HLSL 5.0 and MSL 1
 embedded as resources at `:/shaders/<name>.qsb`. The list is in `qt6_add_shaders()` in
 the root `CMakeLists.txt`.
 
-Uniform blocks use `std140`, binding 0; textures start at binding 1 (meshes use binding 1
-for the lights block). A block shared by
-several shaders must be declared identically in each (see `mesh.vert`, `mesh.frag`,
-`outline.vert`, `outline.frag`).
+Uniform blocks use `std140`, binding 0; textures start at binding 1. Meshes use binding 1
+for the lights block, 2 for the environment block and 3–5 for the environment maps. A
+block shared by several shaders must be declared identically in each (see `mesh.vert`,
+`mesh.frag`, `outline.vert`, `outline.frag`; `mesh.frag` and `background.frag` for the
+environment block).
 
 ## Limits (current)
 
 - No anti-aliasing on mesh edges (no MSAA yet).
 - The grid doesn't hide the parts of meshes below the ground plane.
 - The outline is designed for convex meshes centered on their origin.
-- No tonemapping yet: values above 1 are clipped in the display pass.
 - The selection outline is drawn in the HDR scene, so it will follow exposure.
 - GPU timings aren't available: `QRhiWidget` doesn't expose the flag that enables GPU
   timestamps on its `QRhi`.

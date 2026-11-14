@@ -140,6 +140,16 @@ by its transform. Lights have no mesh, so the viewport draws them as screen-spac
 the overlay (`LightIcons`), and a click on an icon selects the light before mesh picking.
 The renderer collects the enabled lights into one uniform buffer per frame.
 
+### Environment
+
+The environment (image-based lighting) is also an entity, with an `Environment`
+component, like Godot's WorldEnvironment: it gets the Inspector, undo, saving and the Add
+menu for free, and its rotation turns the environment with the gizmo. Only the first
+enabled one is used. Its image is a `File` property: the Inspector shows a file picker,
+scene files store the path relative to the scene. The renderer's `IblMaps` recomputes
+the environment maps when the image or the gradient colors change (see
+[Rendering](rendering.md#image-based-lighting)).
+
 ### Display settings
 
 `DisplaySettings` (`frontend/core/displaysettings.h`) holds the viewport exposure and

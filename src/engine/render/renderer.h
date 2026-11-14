@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "engine/scene/entity.h"
+#include "iblmaps.h"
 
 class OrbitCamera;
 class Scene;
@@ -21,6 +22,7 @@ class QRhiRenderPassDescriptor;
 class QRhiRenderTarget;
 class QRhiResourceUpdateBatch;
 class QRhiSampler;
+class QRhiShaderResourceBinding;
 class QRhiShaderResourceBindings;
 class QRhiTexture;
 class QRhiTextureRenderTarget;
@@ -46,7 +48,9 @@ struct FrameStats
 // (an editor viewport today, an offline render target tomorrow).
 //
 // Frame:
-//   1. scene   -> world grid, meshes (depth tested), selection outline       [HDR, linear]
+//   0. ibl     -> environment maps, only when the environment changed (IblMaps)
+//   1. scene   -> environment background (optional), world grid, meshes (depth tested),
+//                 selection outline                                         [HDR, linear]
 //   2. display -> scene converted for the screen (future tonemapping), then
 //                 the 2D overlay (gizmo) on top, in display colors            [8 bit, sRGB]
 //   3. blur    -> display image downsampled and blurred (Gaussian, 2 iterations)
@@ -102,6 +106,8 @@ private:
     void createPipelines(QRhiRenderTarget *target);
     GpuMesh &gpuMesh(const MeshPtr &mesh, QRhiResourceUpdateBatch *rub);
     GpuEntity &gpuEntity(EntityId id);
+    // Bindings of every mesh SRB: entity uniforms, then what the whole scene shares.
+    QList<QRhiShaderResourceBinding> meshBindings(QRhiBuffer *entityUniforms) const;
 
     QRhi *m_rhi = nullptr;
     QSize m_pixelSize;
@@ -124,6 +130,10 @@ private:
     std::unique_ptr<QRhiBuffer> m_overlayVbuf;
     std::unique_ptr<QRhiBuffer> m_layoutUbuf; // only gives m_meshLayoutSrb a buffer to point to
     std::unique_ptr<QRhiBuffer> m_lightsUbuf; // the frame's lights, binding 1 of every mesh SRB
+    std::unique_ptr<QRhiBuffer> m_envUbuf;    // environment rotation and parameters, binding 2 of every mesh SRB
+    std::unique_ptr<QRhiBuffer> m_backgroundUbuf;
+
+    IblMaps m_ibl; // environment cubemaps and BRDF LUT, bindings 3..5 of every mesh SRB
 
     // Offscreen targets:
     //   scene   full size, HDR (RGBA16F) + depth, linear values
@@ -136,10 +146,11 @@ private:
     std::unique_ptr<QRhiRenderPassDescriptor> m_ldrRp;   // RGBA8 color only: display and blur targets
 
     std::unique_ptr<QRhiShaderResourceBindings> m_gridSrb, m_displaySrb, m_downSrb, m_compositeSrb, m_overlaySrb;
+    std::unique_ptr<QRhiShaderResourceBindings> m_backgroundSrb;
     std::unique_ptr<QRhiShaderResourceBindings> m_meshLayoutSrb; // layout of the per-entity SRBs
     std::array<std::unique_ptr<QRhiShaderResourceBindings>, 4> m_blurSrbs;
 
-    std::unique_ptr<QRhiGraphicsPipeline> m_gridPipe, m_meshPipe, m_outlinePipe, m_overlayPipe;
+    std::unique_ptr<QRhiGraphicsPipeline> m_gridPipe, m_meshPipe, m_outlinePipe, m_overlayPipe, m_backgroundPipe;
     std::unique_ptr<QRhiGraphicsPipeline> m_displayPipe, m_downPipe, m_blurPipe, m_compositePipe;
 
     std::unordered_map<const Mesh *, GpuMesh> m_meshes;

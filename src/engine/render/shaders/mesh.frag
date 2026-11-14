@@ -29,6 +29,25 @@ layout(std140, binding = 1) uniform lightsBuf {
     Light lights[MAX_LIGHTS];
 };
 
+// Image-based lighting (IblMaps), shared by every mesh. Without an Environment entity
+// the maps hold a sky/ground gradient, so they're always valid.
+layout(std140, binding = 2) uniform environmentBuf {
+    mat4 envRotation; // world direction -> environment direction: mat3(envRotation) * dir
+    vec4 envParams;   // x: intensity, y: prefiltered max mip (levels - 1), z: background blur, w: background shown
+};
+// Diffuse irradiance per normal direction (already divided by PI): kD * albedo * irradiance.
+layout(binding = 3) uniform samplerCube irradianceMap;
+// Specular reflection, blurred per roughness: mip = roughness * envParams.y (textureLod).
+layout(binding = 4) uniform samplerCube prefilteredMap;
+// Split-sum BRDF terms: texture(brdfLut, vec2(NdotV, roughness)).rg = (scale, bias) for F0.
+layout(binding = 5) uniform sampler2D brdfLut;
+
+// Direction in the world -> direction to sample the environment maps with.
+vec3 toEnvironment(vec3 dir)
+{
+    return mat3(envRotation) * dir;
+}
+
 const float PI = 3.14159265359;
 
 float DistGGX(vec3 N, vec3 H, float a)
@@ -111,7 +130,6 @@ void main()
 
         final += (kD * albedo / PI + spec) * radiance * NdotL;
     }
-    fragColor = vec4(final + 0.03 * albedo, 1.0);
     
-    fragColor = vec4(final, 1.0);
+    fragColor = vec4(final + 0.03 * albedo, 1.0);
 }

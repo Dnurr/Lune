@@ -2,6 +2,8 @@
 
 #include <QVector3D>
 
+#include "engine/io/hdrimage.h"
+
 namespace
 {
 ComponentDesc transformComponent()
@@ -130,10 +132,64 @@ ComponentDesc lightComponent()
     };
     return c;
 }
+ComponentDesc environmentComponent()
+{
+    ComponentDesc c;
+    c.name = QStringLiteral("Environment");
+    PropertyDesc image { QStringLiteral("image"), PropertyType::File };
+    image.fileFilter = HdrIO::FileFilter;
+    PropertyDesc intensity { QStringLiteral("intensity"), PropertyType::Float, 0.01, 0.0, 100.0 };
+    PropertyDesc blur { QStringLiteral("blur"), PropertyType::Float, 0.005, 0.0, 1.0 };
+    c.properties = {
+        image,
+        intensity,
+        { QStringLiteral("sky"), PropertyType::Color },
+        { QStringLiteral("ground"), PropertyType::Color },
+        { QStringLiteral("background"), PropertyType::Bool },
+        blur,
+        { QStringLiteral("enabled"), PropertyType::Bool },
+    };
+    c.present = [](const Entity &e) { return e.environment.has_value(); };
+    c.get = [](const Entity &e, int i) -> QVariant {
+        if (!e.environment)
+            return {};
+        const Environment &env = *e.environment;
+        switch (i) {
+        case 0: return env.image;
+        case 1: return double(env.intensity);
+        case 2: return env.skyColor;
+        case 3: return env.groundColor;
+        case 4: return env.background;
+        case 5: return double(env.blur);
+        case 6: return env.enabled;
+        }
+        return {};
+    };
+    c.set = [](Entity &e, int i, const QVariant &v) {
+        if (!e.environment)
+            return;
+        Environment &env = *e.environment;
+        switch (i) {
+        case 0: env.image = v.toString(); break;
+        case 1: env.intensity = float(qMax(0.0, v.toDouble())); break;
+        case 2: env.skyColor = v.value<QColor>(); break;
+        case 3: env.groundColor = v.value<QColor>(); break;
+        case 4: env.background = v.toBool(); break;
+        case 5: env.blur = float(qBound(0.0, v.toDouble(), 1.0)); break;
+        case 6: env.enabled = v.toBool(); break;
+        }
+    };
+    c.add = [](Entity &e) {
+        if (!e.environment)
+            e.environment = Environment {};
+    };
+    return c;
+}
 } // namespace
 
 const std::vector<ComponentDesc> &components()
 {
-    static const std::vector<ComponentDesc> all = { transformComponent(), meshComponent(), materialComponent(), lightComponent() };
+    static const std::vector<ComponentDesc> all = { transformComponent(), meshComponent(), materialComponent(), lightComponent(),
+                                                    environmentComponent() };
     return all;
 }

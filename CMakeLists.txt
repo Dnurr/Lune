@@ -21,9 +21,11 @@ add_library(lune_engine STATIC
     src/engine/io/objloader.cpp
     src/engine/io/gltfloader.cpp
     src/engine/io/meshimport.cpp
+    src/engine/io/hdrimage.cpp
     src/engine/io/sceneio.cpp
     src/engine/render/camera.cpp
     src/engine/render/renderer.cpp
+    src/engine/render/iblmaps.cpp
 )
 # Includes are relative to src/: "engine/scene/scene.h", "frontend/core/selection.h"
 target_include_directories(lune_engine PUBLIC src)
@@ -87,6 +89,13 @@ qt6_add_shaders(Lune "shaders"
         src/engine/render/shaders/outline.frag
         src/engine/render/shaders/overlay.vert
         src/engine/render/shaders/overlay.frag
+        src/engine/render/shaders/cube.vert
+        src/engine/render/shaders/equirect_to_cube.frag
+        src/engine/render/shaders/irradiance.frag
+        src/engine/render/shaders/prefilter.frag
+        src/engine/render/shaders/brdf_lut.frag
+        src/engine/render/shaders/background.vert
+        src/engine/render/shaders/background.frag
 )
 
 if(WIN32)

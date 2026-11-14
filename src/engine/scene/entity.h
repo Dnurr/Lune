@@ -40,6 +40,23 @@ struct Light
     }
 };
 
+// Image-based lighting: light coming from every direction, from an HDR image of the
+// surroundings (an equirectangular .hdr) or, without one, from a sky/ground gradient.
+// The entity's rotation turns the environment; its position doesn't matter.
+// Only the first enabled environment in the scene is used.
+struct Environment
+{
+    QString image;                           // absolute path of an .hdr file; empty = gradient
+    float intensity = 1.0f;                  // multiplies the radiance
+    QColor skyColor { 0x95, 0xA2, 0xB3 };    // gradient, from above (sRGB)
+    QColor groundColor { 0x59, 0x55, 0x50 }; // gradient, from below (sRGB)
+    bool background = true;                  // shown behind the scene instead of the editor sky
+    float blur = 0.0f;                       // background blur, 0..1
+    bool enabled = true;
+
+    bool operator==(const Environment &) const = default;
+};
+
 struct Entity
 {
     EntityId id = InvalidEntity;
@@ -56,5 +73,6 @@ struct Entity
     float roughness = 0.5f; // 0 = mirror-like, 1 = fully diffuse highlight
     float metallic = 0.0f;  // 0 = dielectric (plastic, stone...), 1 = metal
 
-    std::optional<Light> light; // set = this entity is a light
+    std::optional<Light> light;             // set = this entity is a light
+    std::optional<Environment> environment; // set = this entity is the scene's environment
 };

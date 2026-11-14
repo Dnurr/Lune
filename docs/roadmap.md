@@ -32,20 +32,22 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 - [x] Material component: roughness, metallic (Claude)
 - [x] Cook-Torrance BRDF: GGX, Smith, Schlick (Author)
 - [x] Light component, directional and point, lights buffer, viewport icons (Claude)
-- [~] Light loop in `mesh.frag` (Author). Left to do: add the ambient term once, after
-  the loop, not once per light.
+- [x] Light loop in `mesh.frag` (Author)
 
 ### Image-based lighting
 
-- [ ] Load equirectangular HDR images (`.hdr`, later `.exr`) (Claude)
-- [ ] World / Environment settings: HDRI, rotation, intensity, saved in the scene (Claude)
-- [ ] Cubemap targets, mip chain, one-off precompute passes in the Renderer (Claude)
-- [ ] Equirectangular to cubemap conversion shader (Author)
-- [ ] Diffuse irradiance convolution (Author)
-- [ ] Prefiltered specular cubemap, one roughness level per mip (Author)
-- [ ] BRDF integration LUT (Author)
+- [x] Load equirectangular HDR images (`.hdr`) (Claude)
+- [x] Environment component: HDRI, gradient fallback, rotation, intensity, saved in the scene (Claude)
+- [x] Cubemap targets, mip chain, precompute passes run when the source changes (Claude)
+- [x] Background pass and toggle, grid drawn over it (Claude)
+- [ ] Equirectangular to cubemap conversion, `equirect_to_cube.frag` (Author)
+- [ ] Diffuse irradiance convolution, `irradiance.frag` (Author)
+- [ ] Prefiltered specular cubemap, one roughness level per mip, `prefilter.frag` (Author)
+- [ ] BRDF integration LUT, `brdf_lut.frag` (Author)
 - [ ] Split-sum ambient in `mesh.frag`, replacing the constant ambient (Author)
-- [ ] Environment as the viewport background, with a blur option (Author: shader, Claude: toggle)
+- [ ] Environment background with blur, `background.frag` (Author)
+- [ ] `.exr` environment images (Claude, with the EXR writer of phase 6)
+- [ ] Load large HDRIs off the render thread (Claude)
 
 ### Shadows
 

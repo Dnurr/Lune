@@ -21,6 +21,9 @@ constexpr int kOverlayVertexSize = int(sizeof(OverlayVertex));
 // Lights uniform block (mesh.frag, binding 1): ivec4 header + MaxLights * 3 vec4.
 constexpr int kLightSize = 3 * 16;
 constexpr int kLightsUbufSize = 16 + Renderer::MaxLights * kLightSize;
+// Environment uniform block (mesh.frag binding 2, background.frag binding 1): mat4 + vec4.
+constexpr int kEnvUbufSize = 64 + 16;
+constexpr int kBackgroundUbufSize = 64 + 2 * 16;
 
 // Editor look of meshes.
 const QColor kOutlineColor("#8FB0F2"); // palette primary (navy accent)
@@ -131,13 +134,25 @@ void Renderer::initialize(QRhi *rhi, QRhiRenderTarget *target)
         m_overlayUbuf = ubuf(16);
         m_layoutUbuf = ubuf(kEntityUbufSize);
         m_lightsUbuf = ubuf(kLightsUbufSize);
+        m_envUbuf = ubuf(kEnvUbufSize);
+        m_backgroundUbuf = ubuf(kBackgroundUbufSize);
+
+        m_ibl.initialize(m_rhi);
 
         using B = QRhiShaderResourceBinding;
         const auto stages = B::VertexStage | B::FragmentStage;
         m_meshLayoutSrb.reset(m_rhi->newShaderResourceBindings());
-        m_meshLayoutSrb->setBindings({ B::uniformBuffer(0, stages, m_layoutUbuf.get()),
-                                       B::uniformBuffer(1, B::FragmentStage, m_lightsUbuf.get()) });
+        {
+            const auto b = meshBindings(m_layoutUbuf.get());
+            m_meshLayoutSrb->setBindings(b.cbegin(), b.cend());
+        }
         m_meshLayoutSrb->create();
+        m_backgroundSrb.reset(m_rhi->newShaderResourceBindings());
+        m_backgroundSrb->setBindings({ B::uniformBuffer(0, stages, m_backgroundUbuf.get()),
+                                       B::uniformBuffer(1, B::FragmentStage, m_envUbuf.get()),
+                                       B::sampledTexture(2, B::FragmentStage, m_ibl.environment(), m_ibl.cubeSampler()),
+                                       B::sampledTexture(3, B::FragmentStage, m_ibl.prefiltered(), m_ibl.cubeSampler()) });
+        m_backgroundSrb->create();
         m_overlaySrb.reset(m_rhi->newShaderResourceBindings());
         m_overlaySrb->setBindings({ B::uniformBuffer(0, B::VertexStage, m_overlayUbuf.get()) });
         m_overlaySrb->create();
@@ -263,6 +278,9 @@ void Renderer::createPipelines(QRhiRenderTarget *target)
     mesh.cull = QRhiGraphicsPipeline::None; // two-sided: imported meshes may have mixed winding
     Options outline = mesh;
     outline.cull = QRhiGraphicsPipeline::Front; // inverted hull: only the back faces
+    Options background; // opaque, then the grid blends over it
+    Options grid;
+    grid.blend = true; // premultiplied: opaque with its own sky, only the lines over an environment
     Options overlay;
     overlay.input.setBindings({ { quint32(kOverlayVertexSize) } });
     overlay.input.setAttributes({ { 0, 0, QRhiVertexInputAttribute::Float2, 0 },
@@ -271,7 +289,9 @@ void Renderer::createPipelines(QRhiRenderTarget *target)
 
     // Rebuilt on every initialize(): they reference SRBs and the target's render pass,
     // which can be recreated on resize. Cheap enough at this scale.
-    m_gridPipe = pipeline(fullscreen, QStringLiteral("grid.frag"), m_gridSrb.get(), m_sceneRp.get(), 1);
+    m_backgroundPipe = pipeline(loadShader(QStringLiteral("background.vert")), QStringLiteral("background.frag"),
+                                m_backgroundSrb.get(), m_sceneRp.get(), 1, background);
+    m_gridPipe = pipeline(fullscreen, QStringLiteral("grid.frag"), m_gridSrb.get(), m_sceneRp.get(), 1, grid);
     m_meshPipe = pipeline(loadShader(QStringLiteral("mesh.vert")), QStringLiteral("mesh.frag"), m_meshLayoutSrb.get(),
                           m_sceneRp.get(), 1, mesh);
     m_outlinePipe = pipeline(loadShader(QStringLiteral("outline.vert")), QStringLiteral("outline.frag"),
@@ -292,6 +312,7 @@ void Renderer::release()
     m_meshes.clear();
     m_entities.clear();
     m_gridPipe.reset();
+    m_backgroundPipe.reset();
     m_meshPipe.reset();
     m_outlinePipe.reset();
     m_overlayPipe.reset();
@@ -305,6 +326,7 @@ void Renderer::release()
     m_compositeSrb.reset();
     m_overlaySrb.reset();
     m_meshLayoutSrb.reset();
+    m_backgroundSrb.reset();
     for (auto &s : m_blurSrbs)
         s.reset();
     m_sceneRt.reset();
@@ -328,6 +350,9 @@ void Renderer::release()
     m_overlayVbuf.reset();
     m_layoutUbuf.reset();
     m_lightsUbuf.reset();
+    m_envUbuf.reset();
+    m_backgroundUbuf.reset();
+    m_ibl.release();
     m_sampler.reset();
     m_rhi = nullptr;
     m_pixelSize = {};
@@ -364,10 +389,22 @@ Renderer::GpuEntity &Renderer::gpuEntity(EntityId id)
     g.uniforms.reset(m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, kEntityUbufSize));
     g.uniforms->create();
     g.srb.reset(m_rhi->newShaderResourceBindings());
-    g.srb->setBindings({ B::uniformBuffer(0, B::VertexStage | B::FragmentStage, g.uniforms.get()),
-                         B::uniformBuffer(1, B::FragmentStage, m_lightsUbuf.get()) }); // shared by every entity
+    const auto bindings = meshBindings(g.uniforms.get());
+    g.srb->setBindings(bindings.cbegin(), bindings.cend());
     g.srb->create();
     return m_entities.emplace(id, std::move(g)).first->second;
+}
+
+QList<QRhiShaderResourceBinding> Renderer::meshBindings(QRhiBuffer *entityUniforms) const
+{
+    using B = QRhiShaderResourceBinding;
+    const auto fs = B::FragmentStage;
+    return { B::uniformBuffer(0, B::VertexStage | fs, entityUniforms),
+             B::uniformBuffer(1, fs, m_lightsUbuf.get()),
+             B::uniformBuffer(2, fs, m_envUbuf.get()),
+             B::sampledTexture(3, fs, m_ibl.irradiance(), m_ibl.cubeSampler()),
+             B::sampledTexture(4, fs, m_ibl.prefiltered(), m_ibl.cubeSampler()),
+             B::sampledTexture(5, fs, m_ibl.brdfLut(), m_ibl.lutSampler()) };
 }
 
 // ---------------------------------------------------------------------------
@@ -377,6 +414,26 @@ Renderer::GpuEntity &Renderer::gpuEntity(EntityId id)
 void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const OrbitCamera &camera, const Scene *scene,
                       EntityId selected)
 {
+    // --- Environment: the first enabled one, or the default gradient ---
+    Environment environment;
+    QMatrix4x4 envRotation; // world direction -> environment direction
+    bool hasEnvironment = false;
+    if (scene) {
+        for (const Entity &e : scene->entities()) {
+            if (e.environment && e.environment->enabled) {
+                environment = *e.environment;
+                Transform rotationOnly;
+                rotationOnly.rotation = e.transform.rotation;
+                envRotation = rotationOnly.matrix().transposed(); // inverse of a rotation
+                hasEnvironment = true;
+                break;
+            }
+        }
+    }
+    const bool showBackground = hasEnvironment && environment.background;
+    // Recomputes the maps (before anything samples them) only when the source changed.
+    const int iblPasses = m_ibl.update(cb, { environment.image, environment.skyColor, environment.groundColor });
+
     QRhiResourceUpdateBatch *rub = m_rhi->nextResourceUpdateBatch();
     const QSize blurSize = m_blurA->pixelSize();
     const QVector3D eye = camera.eye();
@@ -395,7 +452,8 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         v[2] = 1.0f;
         v[3] = 10.0f;
         v += 4;
-        v = putLinearColor(v, QColor("#1C1C20"), 1.0f); // sky top
+        // Sky top alpha = sky opacity: 0 over an environment background, so only the lines are drawn
+        v = putLinearColor(v, QColor("#1C1C20"), showBackground ? 0.0f : 1.0f); // sky top
         v = putLinearColor(v, QColor("#121214"), 1.0f); // sky bottom / horizon
         v = putLinearColor(v, QColor("#2E2E34"), 1.0f); // minor lines
         v = putLinearColor(v, QColor("#46464E"), 1.0f); // major lines
@@ -431,6 +489,23 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         const qint32 header[4] = { count, 0, 0, 0 };
         std::memcpy(data, header, sizeof(header));
         rub->updateDynamicBuffer(m_lightsUbuf.get(), 0, kLightsUbufSize, data);
+    }
+
+    // --- Environment uniforms (meshes and background) ---
+    {
+        float data[kEnvUbufSize / 4] = {};
+        float *v = putMat4(data, envRotation);
+        v[0] = environment.intensity;
+        v[1] = float(IblMaps::PrefilterLevels - 1);
+        v[2] = environment.blur;
+        v[3] = showBackground ? 1.0f : 0.0f;
+        rub->updateDynamicBuffer(m_envUbuf.get(), 0, kEnvUbufSize, data);
+
+        float bg[kBackgroundUbufSize / 4] = {};
+        v = putMat4(bg, viewProj.inverted());
+        v[0] = eye.x(); v[1] = eye.y(); v[2] = eye.z(); v[3] = 1.0f;
+        v[4] = m_rhi->isYUpInNDC() ? 1.0f : -1.0f;
+        rub->updateDynamicBuffer(m_backgroundUbuf.get(), 0, kBackgroundUbufSize, bg);
     }
 
     // --- Meshes: upload new ones, per-entity uniforms ---
@@ -547,16 +622,18 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
     // Stats: grid + display + downsample + 4 blur + composite = 8 fullscreen draws in 8 passes.
     m_stats = {};
     m_stats.meshes = int(draws.size());
-    m_stats.renderPasses = 8;
-    m_stats.drawCalls = 8 + (overlayCount > 0 ? 1 : 0);
+    m_stats.renderPasses = 8 + iblPasses;
+    m_stats.drawCalls = 8 + iblPasses + (overlayCount > 0 ? 1 : 0) + (showBackground ? 1 : 0);
     for (const Draw &d : draws) {
         const int times = d.selected ? 2 : 1; // the outline draws the mesh again
         m_stats.drawCalls += times;
         m_stats.triangles += quint64(d.mesh->indexCount / 3) * quint64(times);
     }
 
-    // 1. Scene (HDR, linear): grid as background (no depth), meshes, selection outline
+    // 1. Scene (HDR, linear): environment and grid as background (no depth), meshes, selection outline
     cb->beginPass(m_sceneRt.get(), black, { 1.0f, 0 }, rub);
+    if (showBackground)
+        fullscreen(m_backgroundPipe.get(), m_backgroundSrb.get(), m_pixelSize);
     fullscreen(m_gridPipe.get(), m_gridSrb.get(), m_pixelSize);
     for (const Draw &d : draws)
         drawMesh(m_meshPipe.get(), d);

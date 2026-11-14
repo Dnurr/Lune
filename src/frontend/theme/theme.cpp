@@ -166,6 +166,13 @@ QLabel#PanelTitle { color: @onSurfaceVariant; font-weight: 600; background: tran
 Panel Panel { background-color: @glassNested; border-radius: 10px; }
 /* Read-only values in the Inspector */
 QLabel#PropertyValue { color: @onSurfaceVariant; }
+/* File properties in the Inspector: a field-like button with the file name, and a clear button */
+QPushButton#FileButton, QPushButton#FileClearButton {
+    background-color: @surfaceContainerLow; color: @onSurface; border: 1px solid @outline;
+    border-radius: 8px; padding: 4px 8px; min-height: 18px; font-weight: normal; text-align: left;
+}
+QPushButton#FileClearButton { padding: 4px 0; text-align: center; color: @onSurfaceVariant; }
+QPushButton#FileButton:hover, QPushButton#FileClearButton:hover { border-color: @primary; background-color: @surfaceContainerLow; }
 
 /* Command palette (components/palette): glass, a bit more opaque than panels */
 QFrame#CommandPalette {

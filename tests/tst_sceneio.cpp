@@ -131,6 +131,55 @@ private slots:
         QVERIFY(!loaded.entities()[2].light); // no Light component: not a light
     }
 
+    void environmentRoundTripWithRelativeImage()
+    {
+        QTemporaryDir dir;
+        writeFile(dir.filePath("project/hdri/sky.hdr"), "#?RADIANCE\n\n-Y 1 +X 1\n\x80\x80\x80\x81");
+        const QString path = dir.filePath("project/scene.lune");
+
+        Scene scene;
+        Entity world;
+        world.name = QStringLiteral("World");
+        world.environment = Environment {};
+        world.environment->image = QDir::cleanPath(dir.filePath("project/hdri/sky.hdr"));
+        world.environment->intensity = 0.5f;
+        world.environment->skyColor = QColor("#102030");
+        world.environment->background = false;
+        world.environment->blur = 0.25f;
+        scene.createEntity(world);
+        QString error;
+        QVERIFY2(SceneIO::save(scene, path, {}, &error), qPrintable(error));
+        const QJsonObject saved = readJson(path)["entities"].toArray()[0].toObject()["components"].toObject()["Environment"].toObject();
+        QCOMPARE(saved["image"].toString(), QStringLiteral("hdri/sky.hdr"));
+
+        // The relative path follows the project folder.
+        QVERIFY(QDir(dir.path()).rename("project", "moved"));
+        Scene loaded;
+        QStringList warnings;
+        QVERIFY2(SceneIO::load(loaded, dir.filePath("moved/scene.lune"), nullptr, &warnings, &error), qPrintable(error));
+        QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join('\n')));
+        Environment expected = *world.environment;
+        expected.image = QDir::cleanPath(dir.filePath("moved/hdri/sky.hdr"));
+        QCOMPARE(loaded.entities()[0].environment, expected);
+    }
+
+    void missingFilePropertyIsKeptWithAWarning()
+    {
+        QTemporaryDir dir;
+        const QString path = dir.filePath("scene.lune");
+        writeFile(path, R"({"format": "lune-scene", "version": 1, "entities": [
+            {"id": 1, "name": "World", "components": {"Environment": {"image": "gone.hdr"}}},
+            {"id": 2, "name": "Plain", "components": {"Environment": {"image": ""}}}]})");
+        Scene scene;
+        QStringList warnings;
+        QVERIFY(SceneIO::load(scene, path, nullptr, &warnings));
+        QCOMPARE(warnings.size(), 1);
+        QVERIFY(warnings[0].contains(QStringLiteral("gone.hdr")));
+        // Kept, so saving again doesn't lose the reference.
+        QCOMPARE(scene.entities()[0].environment->image, QDir::cleanPath(dir.filePath("gone.hdr")));
+        QVERIFY(scene.entities()[1].environment->image.isEmpty());
+    }
+
     void unknownEnumValueIsAWarning()
     {
         QTemporaryDir dir;

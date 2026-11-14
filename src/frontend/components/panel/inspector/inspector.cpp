@@ -5,6 +5,8 @@
 #include <QColorDialog>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QLabel>
 #include <QPushButton>
 #include <QUndoStack>
@@ -192,6 +194,47 @@ void InspectorPanel::rebuild()
                         edit(ci, pi, index);
                 });
                 row.show = [combo](const QVariant &x) { combo->setCurrentIndex(x.toInt()); };
+                alignLabel(label);
+                section->contentLayout()->addWidget(w);
+                break;
+            }
+            case PropertyType::File: {
+                // File name as a button that opens the file dialog, plus a button to clear it.
+                auto *w = new QWidget(section);
+                auto *l = rowLayout(w);
+                auto *label = new QLabel(prop.name, w);
+                auto *pick = new QPushButton(w);
+                pick->setObjectName("FileButton");
+                pick->setCursor(Qt::PointingHandCursor);
+                pick->setEnabled(!prop.readOnly);
+                auto *clear = new QPushButton(QStringLiteral("×"), w); // multiplication sign
+                clear->setObjectName("FileClearButton");
+                clear->setCursor(Qt::PointingHandCursor);
+                clear->setToolTip(QStringLiteral("Remove"));
+                clear->setFixedWidth(24);
+                l->addWidget(label);
+                l->addWidget(pick, 1);
+                l->addWidget(clear);
+                const QString title = prop.name;
+                const QString filter = prop.fileFilter;
+                connect(pick, &QPushButton::clicked, this, [this, ci, pi, pick, title, filter] {
+                    const QString current = pick->property("path").toString();
+                    const QString path = QFileDialog::getOpenFileName(
+                        this, QStringLiteral("Choose ") + title, current.isEmpty() ? QString() : QFileInfo(current).absolutePath(),
+                        filter);
+                    if (!path.isEmpty() && path != current)
+                        edit(ci, pi, QDir::cleanPath(path));
+                });
+                connect(clear, &QPushButton::clicked, this, [this, ci, pi] { edit(ci, pi, QString()); });
+                row.show = [pick, clear](const QVariant &x) {
+                    const QString path = x.toString();
+                    pick->setProperty("path", path);
+                    const QString name = path.isEmpty() ? QStringLiteral("None") : QFileInfo(path).fileName();
+                    // Long names are elided, the full path is in the tooltip.
+                    pick->setText(pick->fontMetrics().elidedText(name, Qt::ElideMiddle, 150));
+                    pick->setToolTip(path.isEmpty() ? QStringLiteral("Choose a file") : QDir::toNativeSeparators(path));
+                    clear->setVisible(!path.isEmpty());
+                };
                 alignLabel(label);
                 section->contentLayout()->addWidget(w);
                 break;

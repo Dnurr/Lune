@@ -22,6 +22,7 @@ enum class PropertyType
     Bool,    // bool
     Text,    // QString
     Enum,    // int: index into PropertyDesc::options
+    File,    // QString: absolute path (empty = none); relative to the scene in files
 };
 
 struct PropertyDesc
@@ -33,6 +34,7 @@ struct PropertyDesc
     double maximum = 1e6;
     bool readOnly = false;
     QStringList options; // Enum: one id per value, used in files and shown in the Inspector
+    QString fileFilter;  // File: filter of the open dialog, e.g. "HDR images (*.hdr)"
 };
 
 struct ComponentDesc

@@ -44,15 +44,25 @@ QJsonValue toJson(PropertyType type, const QVariant &v)
     case PropertyType::Text:
         return v.toString();
     case PropertyType::Enum:
-        break; // needs the option ids: see propertyToJson
+    case PropertyType::File:
+        break; // need more context: see propertyToJson
     }
     return {};
 }
 
-QJsonValue propertyToJson(const PropertyDesc &p, const QVariant &v)
+// Relative to the scene file, so a project folder can be moved as a whole.
+// (On another drive relativeFilePath returns the absolute path.)
+QString relativePath(const QString &path, const QDir &sceneDir)
+{
+    return QDir::fromNativeSeparators(sceneDir.relativeFilePath(path));
+}
+
+QJsonValue propertyToJson(const PropertyDesc &p, const QVariant &v, const QDir &sceneDir)
 {
     if (p.type == PropertyType::Enum)
         return p.options.value(v.toInt());
+    if (p.type == PropertyType::File)
+        return v.toString().isEmpty() ? QString() : relativePath(v.toString(), sceneDir);
     return toJson(p.type, v);
 }
 
@@ -77,16 +87,22 @@ QVariant fromJson(PropertyType type, const QJsonValue &j)
     case PropertyType::Text:
         return j.isString() ? QVariant(j.toString()) : QVariant();
     case PropertyType::Enum:
-        break; // needs the option ids: see propertyFromJson
+    case PropertyType::File:
+        break; // need more context: see propertyFromJson
     }
     return {};
 }
 
-QVariant propertyFromJson(const PropertyDesc &p, const QJsonValue &j)
+QVariant propertyFromJson(const PropertyDesc &p, const QJsonValue &j, const QDir &sceneDir)
 {
     if (p.type == PropertyType::Enum) {
         const int index = p.options.indexOf(j.toString());
         return index >= 0 ? QVariant(index) : QVariant();
+    }
+    if (p.type == PropertyType::File) {
+        if (!j.isString())
+            return {};
+        return j.toString().isEmpty() ? QString() : QDir::cleanPath(sceneDir.absoluteFilePath(j.toString()));
     }
     return fromJson(p.type, j);
 }
@@ -95,9 +111,7 @@ QString meshReference(const MeshPtr &mesh, const QDir &sceneDir)
 {
     if (mesh->source.startsWith(QLatin1String("primitive:")))
         return mesh->source;
-    // Relative to the scene file, so a project folder can be moved as a whole.
-    // (On another drive relativeFilePath returns the absolute path.)
-    return QDir::fromNativeSeparators(sceneDir.relativeFilePath(mesh->source));
+    return relativePath(mesh->source, sceneDir);
 }
 } // namespace
 
@@ -123,7 +137,7 @@ bool save(const Scene &scene, const QString &path, const QJsonObject &editorStat
             for (int i = 0; i < int(c.properties.size()); ++i) {
                 const PropertyDesc &p = c.properties[size_t(i)];
                 if (!p.readOnly) // read-only values are derived (e.g. triangle count)
-                    props[p.name] = propertyToJson(p, c.get(e, i));
+                    props[p.name] = propertyToJson(p, c.get(e, i), sceneDir);
             }
             jc[c.name] = props;
         }
@@ -235,10 +249,13 @@ bool load(Scene &scene, const QString &path, QJsonObject *editorState, QStringLi
                 const PropertyDesc &p = c.properties[size_t(i)];
                 if (p.readOnly || !props.contains(p.name))
                     continue;
-                const QVariant value = propertyFromJson(p, props[p.name]);
-                if (value.isValid())
+                const QVariant value = propertyFromJson(p, props[p.name], sceneDir);
+                if (value.isValid()) {
                     c.set(e, i, value);
-                else
+                    // Kept anyway: the file may come back, and saving must not lose the reference.
+                    if (p.type == PropertyType::File && !value.toString().isEmpty() && !QFileInfo::exists(value.toString()))
+                        warn(QStringLiteral("%1: file not found: %2").arg(e.name, QDir::toNativeSeparators(value.toString())));
+                } else
                     warn(QStringLiteral("%1: invalid value for %2.%3").arg(e.name, c.name, p.name));
             }
         }

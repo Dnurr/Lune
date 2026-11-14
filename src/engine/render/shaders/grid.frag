@@ -10,7 +10,7 @@ layout(std140, binding = 0) uniform buf {
     mat4 invViewProj;   // inverse of proj * view (OpenGL clip-space convention)
     vec4 cameraPos;     // xyz
     vec4 params;        // x: NDC y sign (1 or -1), y: fade distance, z: minor cell size, w: major cell size
-    vec4 skyTop;        // background looking up
+    vec4 skyTop;        // background looking up; a: sky opacity
     vec4 skyBottom;     // background towards the horizon / down
     vec4 minorColor;    // rgb + strength
     vec4 majorColor;    // rgb + strength
@@ -65,11 +65,13 @@ void main()
     // At grazing angles lines crowd together: soften them near the horizon.
     fade *= smoothstep(0.0, 0.08, abs(ndir.y));
 
-    vec3 col = sky;
-    col = mix(col, minorColor.rgb, minor * minorColor.a * minorFade * fade);
-    col = mix(col, majorColor.rgb, major * majorColor.a * fade);
-    col = mix(col, axisXColor.rgb, axisX * axisXColor.a * fade);
-    col = mix(col, axisZColor.rgb, axisZ * axisZColor.a * fade);
+    // Premultiplied alpha: skyTop.a is the sky's opacity, 0 over an environment background
+    // (then only the lines are drawn, blended over it).
+    vec4 col = vec4(sky * skyTop.a, skyTop.a);
+    col = mix(col, vec4(minorColor.rgb, 1.0), minor * minorColor.a * minorFade * fade);
+    col = mix(col, vec4(majorColor.rgb, 1.0), major * majorColor.a * fade);
+    col = mix(col, vec4(axisXColor.rgb, 1.0), axisX * axisXColor.a * fade);
+    col = mix(col, vec4(axisZColor.rgb, 1.0), axisZ * axisZColor.a * fade);
 
-    fragColor = vec4(col, 1.0);
+    fragColor = col;
 }

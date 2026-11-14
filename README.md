@@ -26,6 +26,9 @@ Most actions are one keystroke or one search in the command palette away.
 - **Scene files** (`.lune`, JSON) and mesh import (OBJ, glTF 2.0 / GLB).
 - **Lights and PBR shading**: directional and point lights, Cook-Torrance materials
   (roughness, metallic).
+- **Image-based lighting**: an Environment from an HDR image (`.hdr`) or a sky/ground
+  gradient, precomputed on the GPU into irradiance and prefiltered cubemaps; optionally
+  shown as the background.
 - **HDR viewport**: linear lighting in a 16-bit float scene, with exposure and tonemapping
   chosen from the Display menu in the viewport corner.
 - **Stats overlay** (F12): FPS, CPU frame time, draw calls, triangles.
@@ -94,7 +97,7 @@ Third-party libraries are downloaded on the first configure into `build/_deps`
 | Shortcut | Action |
 |---|---|
 | Ctrl+K | Command palette |
-| Shift+A | Add menu at the cursor (empty, cube, sphere, plane, lights, import) |
+| Shift+A | Add menu at the cursor (empty, cube, sphere, plane, lights, environment, import) |
 | W / E / R | Move / rotate / scale gizmo |
 | Delete | Delete the selection |
 | F2 / double click | Rename in the outliner |

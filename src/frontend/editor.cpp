@@ -163,6 +163,12 @@ void Editor::createMenus()
     m_addMenu->addSeparator();
     m_addMenu->addAction("Directional Light", this, [this] { addLight(Light::Directional); });
     m_addMenu->addAction("Point Light", this, [this] { addLight(Light::Point); });
+    m_addMenu->addAction("Environment", this, [this] {
+        Entity e;
+        e.name = m_scene->uniqueName(QStringLiteral("Environment"));
+        e.environment = Environment {};
+        m_undo->push(new AddEntityCommand(m_scene, m_selection, e));
+    });
     m_addMenu->addSeparator();
     m_addMenu->addAction(importAction);
 

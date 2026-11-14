@@ -21,8 +21,9 @@ class Scene;
 // Components are written generically from their descriptors (engine/scene/components.h):
 // every editable property of every component the entity has. Unknown components or
 // properties in a file are skipped, missing ones keep their default, so the format
-// survives new fields. Imported meshes are stored by path, relative to the scene file
-// when possible; each file is loaded once even if many entities use it.
+// survives new fields. Imported meshes and file properties (an environment's image) are
+// stored by path, relative to the scene file when possible; each mesh file is loaded once
+// even if many entities use it.
 namespace SceneIO
 {
 constexpr int Version = 1;

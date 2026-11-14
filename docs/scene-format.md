@@ -78,14 +78,27 @@ like the triangle count, are derived). Current components:
 | | `color` | `"#rrggbb"` (sRGB) |
 | | `intensity` | number ≥ 0 (radiance; for point lights, at 1 unit of distance) |
 | | `enabled` | boolean |
+| `Environment` (only on environments) | `image` | path of an equirectangular `.hdr`, relative to the scene file; `""` = gradient |
+| | `intensity` | number ≥ 0 (default 1) |
+| | `sky` | `"#rrggbb"` (sRGB): gradient color from above, used without an image |
+| | `ground` | `"#rrggbb"` (sRGB): gradient color from below, used without an image |
+| | `background` | boolean: show the environment behind the scene |
+| | `blur` | number, 0–1: background blur |
+| | `enabled` | boolean |
 
 An entity with a `Light` component is a light. Its transform places it: a point light
 shines from its position, a directional light along its local −Y axis (straight down
 with no rotation).
 
+An entity with an `Environment` component lights the scene from every direction. Its
+rotation turns the environment; its position doesn't matter. Only the first enabled one
+is used.
+
 Value types by property type: `Float` → number, `Vector3` → array of 3 numbers,
 `Color` → `"#rrggbb"` string, `Bool` → boolean, `Text` → string, `Enum` → the option id
-string (an unknown id keeps the default and is reported as a warning). Numbers are written
+string (an unknown id keeps the default and is reported as a warning), `File` → a path
+relative to the scene file, like mesh references (`""` = none; a missing file is reported
+as a warning and the path is kept). Numbers are written
 with at most 7 significant digits (all a `float` holds).
 
 ### Editor state

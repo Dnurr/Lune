@@ -50,6 +50,9 @@ Notes:
 - A choice between a few values is `PropertyType::Enum`: the value is an `int` index into
   `PropertyDesc::options`, the Inspector shows a drop-down, files store the option id
   (`"point"`), so reordering options doesn't break old files.
+- A file reference is `PropertyType::File`: the value is an absolute path (`QString`, empty
+  = none), the Inspector shows a file picker filtered by `PropertyDesc::fileFilter`, files
+  store the path relative to the scene.
 - An optional component (present only on some entities) needs `add`: loading a file that
   has the component calls it before setting the properties.
 - Property and component names are part of the file format: renaming them makes old
