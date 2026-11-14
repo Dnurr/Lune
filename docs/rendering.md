@@ -133,8 +133,16 @@ without shadows; a scene without lights gets the default sun, which casts them).
   a growing share of pixels to the next one, so the change of resolution isn't a visible line.
 - **Point lights**: views don't depend on the camera; the far plane reaches the farthest mesh.
 - **Format**: `D32F` (or `D24`/`D16` where unsupported).
-- **Bias**: the shadow passes use a slope-scaled depth bias, which removes most acne; the
-  shader can add a normal offset on top.
+- **Closed meshes** (`Mesh::closed`, watertight: computed when a mesh is built or imported)
+  write only their back faces, as seen from the light. Their depth is that of the object's
+  far side, which near a contact (a cube on the floor) is close to the receiver's, so a
+  blocker search (PCSS) gives a penumbra that shrinks to the contact instead of measuring
+  from the top of the object. Open meshes (the plane) are drawn two-sided. A mirrored model
+  matrix (negative scale) flips which faces are culled.
+- **Bias**: slope-scaled depth bias in the shadow passes: pushed away from the light for
+  open meshes (removes most acne), pulled toward it for back faces (so a back face touching
+  the floor doesn't leak a line of light along the contact). The shader can add a normal
+  offset on top.
 - **Sampling** (`mesh.frag`): `lightShadow[i]` gives the slot of `lights[i]` (−1 = no
   shadows), its `size` and `softness`. Per slot (and cascade), a matrix turns a world position into
   `(uv, depth)` in the atlas on every backend (texture orientation, clip depth range and

@@ -30,6 +30,11 @@ class QRhiTextureRenderTarget;
 //                per column (+X -X +Y -Y +Z -Z), perspective from the light's position
 //
 // Each atlas is rendered in one pass, with one viewport per tile, before the scene pass.
+// Closed meshes (Mesh::closed) write only their back faces, as seen from the light: the
+// depth of the far side of a solid object. Near a contact (a cube on the floor) that depth
+// is close to the receiver's, so a blocker search (PCSS) finds a small distance and the
+// penumbra shrinks to the contact, instead of measuring from the top of the object. It
+// also keeps acne off lit surfaces. Open meshes (a plane) have no far side: both faces.
 // mesh.frag reads both atlases twice: through a comparison sampler (filtered shadow tests)
 // and as raw depth (for blocker searches, e.g. PCSS). See the shadow block in mesh.frag.
 class ShadowMaps
@@ -80,6 +85,8 @@ public:
         QRhiBuffer *indices = nullptr;
         quint32 indexCount = 0;
         QRhiShaderResourceBindings *srb = nullptr;
+        bool closed = false;   // Mesh::closed: back faces only
+        bool mirrored = false; // the model matrix flips the winding (negative determinant)
     };
 
     ShadowMaps();
@@ -116,7 +123,9 @@ private:
         QRectF viewport;        // in the atlas, QRhi convention (pixels, origin bottom-left)
     };
 
-    void createPipeline();
+    enum Cull { CullNone, CullFront, CullBack, CullModes };
+    static Cull cullFor(const Caster &c);
+    void createPipelines();
     QRectF tileViewport(bool point, int tile, int directionalCount) const;
     QMatrix4x4 clipToTile(const QRectF &viewport, const QSize &atlas) const;
 
@@ -129,7 +138,7 @@ private:
     std::unique_ptr<QRhiBuffer> m_viewUbuf; // one aligned view matrix per tile (dynamic offsets)
     std::unique_ptr<QRhiBuffer> m_layoutUbuf;
     std::unique_ptr<QRhiShaderResourceBindings> m_layoutSrb;
-    std::unique_ptr<QRhiGraphicsPipeline> m_pipeline;
+    std::unique_ptr<QRhiGraphicsPipeline> m_pipelines[CullModes];
     quint32 m_viewStride = 0;
     std::vector<View> m_views;
 };

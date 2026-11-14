@@ -27,7 +27,12 @@ constexpr int kUniformSize = kUniformFloats * 4;
 constexpr int kLayoutUbufSize = 512; // at least the entity block of mesh.vert
 // Hardware depth bias of the shadow passes, growing with the surface's slope as seen from
 // the light: removes most shadow acne on its own. The shader can add its own on top.
+// Open meshes (both faces) are pushed away from the light, so lit surfaces don't shadow
+// themselves. Closed meshes (back faces) are pulled toward it: where a back face touches
+// another surface (the bottom of a cube on the floor) the floor stays in shadow instead
+// of leaking a line of light along the contact.
 constexpr float kSlopeBias = 1.5f;
+constexpr float kBackFaceSlopeBias = -1.5f;
 constexpr float kPointNear = 0.05f;
 
 QShader loadShader(const QString &name)
@@ -110,31 +115,46 @@ void ShadowMaps::initialize(QRhi *rhi)
     m_layoutSrb->setBindings(b.cbegin(), b.cend());
     m_layoutSrb->create();
 
-    createPipeline();
+    createPipelines();
 }
 
-void ShadowMaps::createPipeline()
+void ShadowMaps::createPipelines()
 {
     QRhiVertexInputLayout input; // positions only
     input.setBindings({ { quint32(sizeof(MeshVertex)) } });
     input.setAttributes({ { 0, 0, QRhiVertexInputAttribute::Float3, 0 } });
+    const QShader vs = loadShader(QStringLiteral("shadow.vert")), fs = loadShader(QStringLiteral("shadow.frag"));
 
-    m_pipeline.reset(m_rhi->newGraphicsPipeline());
-    m_pipeline->setShaderStages({ { QRhiShaderStage::Vertex, loadShader(QStringLiteral("shadow.vert")) },
-                                  { QRhiShaderStage::Fragment, loadShader(QStringLiteral("shadow.frag")) } });
-    m_pipeline->setVertexInputLayout(input);
-    m_pipeline->setShaderResourceBindings(m_layoutSrb.get());
-    m_pipeline->setRenderPassDescriptor(m_rp.get());
-    m_pipeline->setCullMode(QRhiGraphicsPipeline::None); // two-sided, like the meshes
-    m_pipeline->setDepthTest(true);
-    m_pipeline->setDepthWrite(true);
-    m_pipeline->setSlopeScaledDepthBias(kSlopeBias);
-    m_pipeline->create();
+    for (int cull = 0; cull < CullModes; ++cull) {
+        auto &p = m_pipelines[cull];
+        p.reset(m_rhi->newGraphicsPipeline());
+        p->setShaderStages({ { QRhiShaderStage::Vertex, vs }, { QRhiShaderStage::Fragment, fs } });
+        p->setVertexInputLayout(input);
+        p->setShaderResourceBindings(m_layoutSrb.get());
+        p->setRenderPassDescriptor(m_rp.get());
+        // Open meshes: two-sided, like in the scene pass. Closed meshes: back faces only
+        // (front faces culled; with a mirrored model matrix the winding flips, cull back).
+        p->setCullMode(cull == CullFront  ? QRhiGraphicsPipeline::Front
+                       : cull == CullBack ? QRhiGraphicsPipeline::Back
+                                          : QRhiGraphicsPipeline::None);
+        p->setDepthTest(true);
+        p->setDepthWrite(true);
+        p->setSlopeScaledDepthBias(cull == CullNone ? kSlopeBias : kBackFaceSlopeBias);
+        p->create();
+    }
+}
+
+ShadowMaps::Cull ShadowMaps::cullFor(const Caster &c)
+{
+    if (!c.closed)
+        return CullNone;
+    return c.mirrored ? CullBack : CullFront;
 }
 
 void ShadowMaps::release()
 {
-    m_pipeline.reset();
+    for (auto &p : m_pipelines)
+        p.reset();
     m_layoutSrb.reset();
     m_layoutUbuf.reset();
     m_viewUbuf.reset();
@@ -373,23 +393,32 @@ void ShadowMaps::render(QRhiCommandBuffer *cb, QRhiResourceUpdateBatch *rub, con
     const QColor black(Qt::black);
     for (bool point : { false, true }) {
         cb->beginPass(point ? m_pointRt.get() : m_directionalRt.get(), black, { 1.0f, 0 }, point ? nullptr : rub);
-        bool bound = false;
-        for (const View &v : m_views) {
-            if (v.point != point)
-                continue;
-            if (!bound) {
-                cb->setGraphicsPipeline(m_pipeline.get());
-                bound = true;
-            }
-            cb->setViewport({ float(v.viewport.x()), float(v.viewport.y()), float(v.viewport.width()),
-                              float(v.viewport.height()) });
-            const quint32 offset = quint32(point ? DirectionalViews + v.tile : v.tile) * m_viewStride;
-            const QRhiCommandBuffer::DynamicOffset dynamicOffset(1, offset);
-            for (const Caster &c : casters) {
-                cb->setShaderResources(c.srb, 1, &dynamicOffset);
-                const QRhiCommandBuffer::VertexInput vin(c.vertices, 0);
-                cb->setVertexInput(0, 1, &vin, c.indices, 0, QRhiCommandBuffer::IndexUInt32);
-                cb->drawIndexed(c.indexCount);
+        // Grouped by pipeline (cull mode), then by tile.
+        for (int cull = 0; cull < CullModes; ++cull) {
+            bool bound = false;
+            for (const View &v : m_views) {
+                if (v.point != point)
+                    continue;
+                const quint32 offset = quint32(point ? DirectionalViews + v.tile : v.tile) * m_viewStride;
+                const QRhiCommandBuffer::DynamicOffset dynamicOffset(1, offset);
+                bool viewportSet = false;
+                for (const Caster &c : casters) {
+                    if (cullFor(c) != cull)
+                        continue;
+                    if (!bound) {
+                        cb->setGraphicsPipeline(m_pipelines[cull].get());
+                        bound = true;
+                    }
+                    if (!viewportSet) {
+                        cb->setViewport({ float(v.viewport.x()), float(v.viewport.y()), float(v.viewport.width()),
+                                          float(v.viewport.height()) });
+                        viewportSet = true;
+                    }
+                    cb->setShaderResources(c.srb, 1, &dynamicOffset);
+                    const QRhiCommandBuffer::VertexInput vin(c.vertices, 0);
+                    cb->setVertexInput(0, 1, &vin, c.indices, 0, QRhiCommandBuffer::IndexUInt32);
+                    cb->drawIndexed(c.indexCount);
+                }
             }
         }
         cb->endPass();

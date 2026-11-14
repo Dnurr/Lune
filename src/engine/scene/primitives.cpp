@@ -29,6 +29,7 @@ MeshPtr makeCube()
     addQuad(*m, Z, X, Y, Z.normalized());
     addQuad(*m, -Z, Y, X, -Z.normalized());
     m->computeBounds();
+    m->computeClosed();
     return m;
 }
 
@@ -56,6 +57,7 @@ MeshPtr makeSphere()
         }
     }
     m->computeBounds();
+    m->computeClosed();
     return m;
 }
 
@@ -66,6 +68,7 @@ MeshPtr makePlane()
     m->source = QStringLiteral("primitive:plane");
     addQuad(*m, QVector3D(), QVector3D(0, 0, 0.5f), QVector3D(0.5f, 0, 0), QVector3D(0, 1, 0));
     m->computeBounds();
+    m->computeClosed();
     return m;
 }
 } // namespace

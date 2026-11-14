@@ -237,6 +237,7 @@ float Shadow(int i, int type, vec3 N)
     }
 
     float searchTexels = type == 0 ? min(dReceiver * spread / texelWorld, 16.0) : 16.0;
+    searchTexels = max(searchTexels, softness);
     vec2  searchUV = searchTexels * texel;
 
     for (int k = 0; k < 16; k++)

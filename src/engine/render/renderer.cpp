@@ -539,6 +539,7 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         QRhiShaderResourceBindings *shadowSrb;
         QRhiShaderResourceBindings *outlineSrb;
         bool selected;
+        bool mirrored; // negative scale: the model matrix flips the triangles' winding
     };
     std::vector<Draw> draws;
     QVector3D boundsMin(1e30f, 1e30f, 1e30f), boundsMax(-1e30f, -1e30f, -1e30f); // of every drawn mesh, world space
@@ -568,7 +569,8 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
                 v[0] = e.roughness; v[1] = e.metallic;
                 rub->updateDynamicBuffer(ge.uniforms.get(), 0, kEntityUbufSize, data);
 
-                draws.push_back({ &gm, ge.srb.get(), ge.shadowSrb.get(), ge.outlineSrb.get(), e.id == selected });
+                draws.push_back({ &gm, ge.srb.get(), ge.shadowSrb.get(), ge.outlineSrb.get(), e.id == selected,
+                                  model.determinant() < 0.0 });
 
                 const QVector3D &lo = e.mesh->boundsMin, &hi = e.mesh->boundsMax;
                 for (int c = 0; c < 8; ++c) {
@@ -691,7 +693,8 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         std::vector<ShadowMaps::Caster> casters;
         casters.reserve(draws.size());
         for (const Draw &d : draws)
-            casters.push_back({ d.mesh->vertices.get(), d.mesh->indices.get(), d.mesh->indexCount, d.shadowSrb });
+            casters.push_back({ d.mesh->vertices.get(), d.mesh->indices.get(), d.mesh->indexCount, d.shadowSrb,
+                                d.mesh->mesh->closed, d.mirrored });
         m_shadows.render(cb, rub, casters);
     }
 

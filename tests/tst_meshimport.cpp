@@ -5,6 +5,7 @@
 #include <QTest>
 
 #include "engine/io/meshimport.h"
+#include "engine/scene/primitives.h"
 
 namespace
 {
@@ -135,6 +136,34 @@ private slots:
         const QString path = writeFile(dir, QStringLiteral("modello_città.gltf"), triangleGltf(QVector3D()));
         QString error;
         QVERIFY2(importMesh(path, &error), qPrintable(error));
+    }
+
+    void closedMeshes()
+    {
+        // Primitives: the cube's faces have their own vertices (split normals), the sphere
+        // has a seam and degenerate triangles at the poles; both are still closed.
+        QVERIFY(Primitives::cube()->closed);
+        QVERIFY(Primitives::sphere()->closed);
+        QVERIFY(!Primitives::plane()->closed);
+
+        QTemporaryDir dir;
+        const QByteArray cube = "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nv 0 0 1\nv 1 0 1\nv 1 1 1\nv 0 1 1\n"
+                                "f 1 4 3 2\nf 5 6 7 8\nf 1 2 6 5\nf 2 3 7 6\nf 3 4 8 7\nf 4 1 5 8\n";
+        const MeshPtr closed = importMesh(writeFile(dir, "cube.obj", cube));
+        QVERIFY(closed);
+        QVERIFY(closed->closed);
+
+        // A missing face leaves a hole.
+        const MeshPtr open = importMesh(writeFile(dir, "box.obj", cube.left(cube.lastIndexOf("f 4"))));
+        QVERIFY(open);
+        QVERIFY(!open->closed);
+
+        // One face wound the wrong way: not consistently oriented, treated as open.
+        QByteArray flipped = cube;
+        flipped.replace("f 5 6 7 8", "f 8 7 6 5");
+        const MeshPtr bad = importMesh(writeFile(dir, "flipped.obj", flipped));
+        QVERIFY(bad);
+        QVERIFY(!bad->closed);
     }
 
     void unsupportedExtension()

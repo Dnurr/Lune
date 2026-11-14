@@ -175,5 +175,6 @@ MeshPtr loadGltf(const QString &path, QString *error)
     if (mesh->indices.empty())
         return fail(QStringLiteral("%1 contains no triangles").arg(QFileInfo(path).fileName()));
     mesh->computeBounds();
+    mesh->computeClosed();
     return mesh;
 }
