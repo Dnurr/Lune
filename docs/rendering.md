@@ -118,7 +118,7 @@ without shadows; a scene without lights gets the default sun, which casts them).
 | Atlas | Size | Tiles | Projection |
 |---|---|---|---|
 | directional | 4096² | 2 × 2 of 2048², one per light | orthographic along the light, covering the bounding sphere of every visible mesh |
-| point | 3072 × 2048 | 6 × 4 of 512², one row per light, one cube face (+X −X +Y −Y +Z −Z) per column | perspective from the light, a little wider than 90° (8 border texels), far plane at the farthest mesh |
+| point | 3072 × 2048 | 6 × 4 of 512², one row per light, one cube face (+X −X +Y −Y +Z −Z) per column | perspective from the light, a little wider than 90° (24 border texels, `pointShadowRange.zw` gives tan(fov/2) and the face size), far plane at the farthest mesh |
 
 - **Passes**: one per atlas, one viewport per tile; each mesh is drawn once per tile. The
   views don't depend on the camera, so shadows don't move while orbiting; a larger scene

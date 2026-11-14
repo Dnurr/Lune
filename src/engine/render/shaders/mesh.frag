@@ -52,8 +52,9 @@ layout(binding = 5) uniform sampler2D brdfLut;
 //                             p = c.xyz / c.w  (perspective: divide by w)
 // p.xy is the uv in the atlas, p.z the depth to compare. Each tile's uv rectangle is in
 // *ShadowTile (xy min, zw max): keep filter samples inside it (they'd read the neighbor tile),
-// and treat points outside a directional tile as lit. Point faces have PointFaceBorder extra
-// texels around the 90° view, so samples near a face's edge stay valid.
+// and treat points outside a directional tile as lit. Point faces have PointFaceBorder (24)
+// extra texels around the 90° view, so samples up to 24 texels away stay valid near a face's
+// edge; keep point light search and filter radii within that.
 #define MAX_DIR_SHADOWS 4
 #define MAX_POINT_SHADOWS 4
 layout(std140, binding = 6) uniform shadowBuf {
@@ -67,7 +68,10 @@ layout(std140, binding = 6) uniform shadowBuf {
     mat4 pointShadowMatrix[MAX_POINT_SHADOWS * 6];    // world -> (atlas uv, depth), per face
     vec4 pointShadowTile[MAX_POINT_SHADOWS * 6];      // uv rectangle of each face's tile
     vec4 pointShadowRange[MAX_POINT_SHADOWS];         // x: near, y: far. Depth is perspective; distance along
-                                                      // the face's axis = near * far / (far - depth * (far - near))
+                                                      // the face's axis = near * far / (far - depth * (far - near)).
+                                                      // z: tan of half the face's field of view (a bit over 1),
+                                                      // w: face size in texels. World size of one texel at
+                                                      // distance d along the axis = 2 * d * z / w
     vec4 shadowAtlas;                                 // xy: texel size (uv) of the directional atlas, zw: point atlas
 };
 // Each atlas twice. The comparison sampler gives the filtered shadow test:
@@ -167,6 +171,7 @@ float Shadow(int i, int type, vec3 N)
 
     float sum = 0.0;
     int count = 0;
+    float near = pointShadowRange[slot].x, far = pointShadowRange[slot].y;
     
     if (type == 0)
     {        
@@ -187,31 +192,30 @@ float Shadow(int i, int type, vec3 N)
         vec3 d = v_world - lights[i].position.xyz;
         vec3 a = abs(d);
         int face;
-        if (a.x >= a.y && a.x >= a.z) face = d.x > 0.0 ? 0 : 1;   // +X / -X
-        else if (a.y >= a.z)          face = d.y > 0.0 ? 2 : 3;   // +Y / -Y
-        else                          face = d.z > 0.0 ? 4 : 5;   // +Z / -Z
-        int t = slot * 6 + face;                                  // index of this face's tile
+        if (a.x >= a.y && a.x >= a.z) face = d.x > 0.0 ? 0 : 1;
+        else if (a.y >= a.z)          face = d.y > 0.0 ? 2 : 3;
+        else                          face = d.z > 0.0 ? 4 : 5;
+        int t = slot * 6 + face;
 
-        const float tanHalf = 512.0 / 496.0;   // PointFaceSize / (PointFaceSize - 2 * PointFaceBorder)
-        float axisDist = max(a.x, max(a.y, a.z));                  // distance along the face's axis
-        texelWorld = 2.0 * axisDist * tanHalf / 512.0;
+        float tanHalf = pointShadowRange[slot].z;
+        float axisDist = max(a.x, max(a.y, a.z));
+        texelWorld = 2.0 * axisDist * tanHalf / pointShadowRange[slot].w;
         pos = v_world + N * texelWorld * 2.0;
 
         vec4 c = pointShadowMatrix[t] * vec4(pos, 1.0);
-        p = c.xyz / c.w;                       // perspective: divide by w
+        p = c.xyz / c.w;
         tile = pointShadowTile[t];
-        texel = shadowAtlas.zw;                // point atlas, not .xy
-        dReceiver = axisDist;
+        texel = shadowAtlas.zw;
+        dReceiver = near * far / (far - p.z * (far - near));
     }
 
     float searchTexels = type == 0 ? min(dReceiver * spread / texelWorld, 16.0) : 16.0;
     vec2  searchUV = searchTexels * texel;
-    float near = pointShadowRange[slot].x, far = pointShadowRange[slot].y;
 
     for (int k = 0; k < 16; k++)
     {
         vec2 uv = clamp(p.xy + rot * poisson[k] * searchUV, tile.xy, tile.zw);
-        float z = type == 0 ? texture(dirShadowDepth, uv).r : texture(pointShadowDepth, uv).r;
+        float z = type == 0 ? textureLod(dirShadowDepth, uv, 0.0).r : textureLod(pointShadowDepth, uv, 0.0).r;
         float dist = type == 0 ? z * dirShadowRange[slot].x
                                : near * far / (far - z * (far - near));
         if (z < p.z) { sum += dist; count++; }
@@ -222,12 +226,12 @@ float Shadow(int i, int type, vec3 N)
     float dBlocker = sum / float(count);
     float penumbraWorld = type == 0 ? (dReceiver - dBlocker) * spread : 2.0 * size * (dReceiver - dBlocker) / dBlocker;
     float penumbraTexels = penumbraWorld / texelWorld;
-    float radius = max(penumbraTexels, softness);
+    float radius = max(min(penumbraTexels, searchTexels), softness);
 
     for (int k = 0; k < 16; k++)
     {
         vec2 uv = clamp(p.xy + rot * poisson[k] * radius * texel, tile.xy, tile.zw);
-        lit += type == 0 ? texture(dirShadowMap, vec3(uv, p.z)) : texture(pointShadowMap, vec3(uv, p.z));
+        lit += type == 0 ? textureLod(dirShadowMap, vec3(uv, p.z), 0.0) : textureLod(pointShadowMap, vec3(uv, p.z), 0.0);
     }
 
     return lit / 16.0;

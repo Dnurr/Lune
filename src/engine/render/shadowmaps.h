@@ -40,8 +40,9 @@ public:
     static constexpr int DirectionalAtlasSize = 2 * DirectionalSize;
     static constexpr int PointFaceSize = 512;
     // Extra texels rendered around each cube face (a field of view a bit wider than 90°),
-    // so filters near a face's edge still read valid depth inside the tile.
-    static constexpr int PointFaceBorder = 8;
+    // so filters near a face's edge still read valid depth inside the tile: filter and
+    // search radii up to this many texels never need clamping.
+    static constexpr int PointFaceBorder = 24;
     static constexpr int ViewCount = MaxDirectional + 6 * MaxPoint;
 
     // One light of the frame, at index `lightIndex` in mesh.frag's lights[].

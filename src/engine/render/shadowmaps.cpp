@@ -286,7 +286,7 @@ void ShadowMaps::prepare(QRhiResourceUpdateBatch *rub, const std::vector<Light> 
                         qMax(a.y(), b.y()));
                 m_views.push_back(v);
             }
-            putVec4(data + kPointRange + 4 * slot, kPointNear, far, 0.0f, 0.0f);
+            putVec4(data + kPointRange + 4 * slot, kPointNear, far, tanHalf, float(PointFaceSize));
             putVec4(ls, float(slot), light.size, light.softness, 0.0f);
         }
     }
