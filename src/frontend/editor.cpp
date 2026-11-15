@@ -37,6 +37,7 @@
 #include "core/selection.h"
 #include "engine/io/meshimport.h"
 #include "engine/io/sceneio.h"
+#include "engine/scene/components.h"
 #include "engine/scene/primitives.h"
 #include "engine/scene/scene.h"
 
@@ -237,6 +238,10 @@ void Editor::createPanels()
     m_assets->setPanelHeight(220);
     connect(m_assets, &AssetsPanel::fileActivated, this, &Editor::openAsset);
 
+    // Drag and drop onto the viewport (from the Assets panel or the file manager).
+    m_viewport->setDropSuffixes({ "obj", "gltf", "glb", "hdr", "lune" });
+    connect(m_viewport, &Viewport::filesDropped, this, &Editor::dropFiles);
+
     // Created last so it sits above the panels.
     // Display dropdown in the top-right corner of the free viewport area.
     new DisplayMenu(m_display, m_viewport);
@@ -246,11 +251,12 @@ void Editor::createPanels()
     m_palette = new CommandPalette(this, m_viewport);
 }
 
-void Editor::addEntity(const QString &name, const MeshPtr &mesh)
+void Editor::addEntity(const QString &name, const MeshPtr &mesh, const QVector3D &position)
 {
     Entity e;
     e.name = m_scene->uniqueName(name);
     e.mesh = mesh;
+    e.transform.position = position;
     m_undo->push(new AddEntityCommand(m_scene, m_selection, e));
 }
 
@@ -570,7 +576,77 @@ void Editor::openAsset(const QString &path)
         }
         addEntity(mesh->name.isEmpty() ? QFileInfo(path).completeBaseName() : mesh->name, mesh);
     }
-    // Images: used by materials and environments (from the Inspector) for now.
+    if (suffix == QLatin1String("hdr"))
+        useEnvironmentImage(path);
+    // Other images: used by materials (from the Inspector) for now.
+}
+
+void Editor::dropFiles(const QStringList &paths, const QPointF &pos)
+{
+    // A scene replaces everything: alone, it opens; mixed with other files, it's skipped.
+    if (paths.size() == 1 && QFileInfo(paths.first()).suffix().toLower() == QLatin1String("lune")) {
+        if (maybeSave())
+            loadScene(paths.first());
+        return;
+    }
+    bool onGround = false;
+    const QVector3D point = m_viewport->dropPoint(pos, &onGround);
+    QStringList errors;
+    m_undo->beginMacro(QStringLiteral("Drop files"));
+    for (const QString &path : paths) {
+        const QString suffix = QFileInfo(path).suffix().toLower();
+        if (suffix == QLatin1String("hdr")) {
+            useEnvironmentImage(path);
+            continue;
+        }
+        if (suffix == QLatin1String("lune"))
+            continue;
+        QString error;
+        const MeshPtr mesh = importMesh(path, &error);
+        if (!mesh) {
+            errors.append(error);
+            continue;
+        }
+        // On the ground: resting on it (its lowest point at the drop point).
+        QVector3D position = point;
+        if (onGround)
+            position.setY(point.y() - mesh->boundsMin.y());
+        addEntity(mesh->name.isEmpty() ? QFileInfo(path).completeBaseName() : mesh->name, mesh, position);
+    }
+    m_undo->endMacro();
+    if (!errors.isEmpty())
+        QMessageBox::warning(this, "Import Mesh", errors.join('\n'));
+}
+
+void Editor::useEnvironmentImage(const QString &path)
+{
+    // The selected environment, else the first one in the scene, else a new one.
+    const Entity *target = m_scene->entity(m_selection->current());
+    if (!target || !target->environment) {
+        target = nullptr;
+        for (const Entity &e : m_scene->entities()) {
+            if (e.environment) {
+                target = &e;
+                break;
+            }
+        }
+    }
+    if (!target) {
+        Entity e;
+        e.name = m_scene->uniqueName(QStringLiteral("Environment"));
+        e.environment = Environment {};
+        e.environment->image = path;
+        m_undo->push(new AddEntityCommand(m_scene, m_selection, e));
+        return;
+    }
+    const auto &all = components();
+    for (int ci = 0; ci < int(all.size()); ++ci) {
+        if (all[ci].name == QLatin1String("Environment")) {
+            m_undo->push(new SetPropertyCommand(m_scene, target->id, ci, 0, path)); // 0 = image
+            m_selection->select(target->id);
+            return;
+        }
+    }
 }
 
 void Editor::deleteSelected()

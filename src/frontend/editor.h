@@ -54,9 +54,13 @@ private:
     void restoreLayout();
     void setPanelsCollapsed(bool collapsed);
     void openAsset(const QString &path); // double-click in the assets browser
+    // Files dropped on the viewport: meshes land where they're dropped, an .hdr becomes
+    // the environment, a scene opens.
+    void dropFiles(const QStringList &paths, const QPointF &pos);
+    void useEnvironmentImage(const QString &path);
     void followScene(const QString &path); // assets root: the scene's folder, unless already inside the root
 
-    void addEntity(const QString &name, const MeshPtr &mesh);
+    void addEntity(const QString &name, const MeshPtr &mesh, const QVector3D &position = QVector3D());
     void addLight(Light::Type type);
     static Entity lightPrototype(Light::Type type); // name, transform and light of a new light
     void importMeshFile();

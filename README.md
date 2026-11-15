@@ -20,7 +20,9 @@ Most actions are one keystroke or one search in the command palette away.
   edge and resize from their inner edge; the viewport renders a blurred copy of the scene
   behind them. Tab over the viewport hides them all; the layout is restored at startup.
 - **Assets browser**: folder tree and folder contents side by side, on the open scene's
-  folder (or any folder); double-click a mesh to add it, a scene to open it.
+  folder (or any folder); double-click a mesh to add it, a scene to open it, or drag
+  files onto the viewport: meshes land where they're dropped, an `.hdr` becomes the
+  environment.
 - **Scene editing**: click to select, move / rotate / scale gizmo, outliner, rename.
 - **Automatic Inspector**: built from component descriptors, one editor per property
   type; drag a property's label to scrub its value.
@@ -100,6 +102,7 @@ Third-party libraries are downloaded on the first configure into `build/_deps`
 | Move a panel | Drag its title; it snaps to the nearest edge |
 | Resize a panel | Drag its inner edge (the one facing the viewport) |
 | Add a mesh / open a scene | Double-click it in the Assets panel |
+| Place a mesh / set the environment | Drag a mesh or an `.hdr` from the Assets panel (or the file manager) onto the viewport |
 | Exposure / tonemapping | Display menu, top-right corner of the viewport (drag "exposure" to scrub) |
 
 ### Keyboard

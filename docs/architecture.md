@@ -145,6 +145,12 @@ top-level item), and the files the editor can use (scenes, meshes, images) for t
 contents. The root follows the open scene's folder unless the scene is already inside it,
 or is picked with the Folder button. Double-clicking a file goes to `Editor::openAsset`.
 
+Files dragged out of the contents are plain file URLs, so the viewport takes them the
+same way from the Assets panel or the system's file manager. It accepts the suffixes set
+by the editor and emits `filesDropped`; `Editor::dropFiles` puts meshes on the ground
+under the cursor (`Viewport::dropPoint`, resting on their lowest point) in one undo step,
+gives an `.hdr` to the selected or first Environment (or a new one), and opens a scene.
+
 ### Viewport
 
 `Viewport` (`frontend/components/viewport/viewport.h`) is a `QRhiWidget` and a thin

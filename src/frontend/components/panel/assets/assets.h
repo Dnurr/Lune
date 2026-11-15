@@ -14,7 +14,8 @@ class QTreeView;
 //   folders   the root folder and its subfolders, as a tree
 //   contents  the files and folders inside the folder picked in the tree, as icons
 // Only files the editor can use are listed (scenes, meshes, images). Double-clicking a
-// folder in the contents opens it; double-clicking a file emits fileActivated().
+// folder in the contents opens it; double-clicking a file emits fileActivated(). Files
+// can be dragged out as file URLs (e.g. onto the viewport).
 //
 // The root is the open scene's folder, or one picked with the folder button.
 class AssetsPanel : public Panel

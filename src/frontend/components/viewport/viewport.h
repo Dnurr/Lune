@@ -11,6 +11,7 @@
 #include "gizmo.h"
 
 class DisplaySettings;
+class QMimeData;
 class QUndoStack;
 class StatsOverlay;
 class Scene;
@@ -39,6 +40,9 @@ class Selection;
 //                     W/S forward/back, A/D left/right, E/Q up/down, Shift = faster,
 //                     wheel = flying speed
 //   wheel             move forward / back,  middle drag = pan
+//
+// Drag and drop: local files (from the Assets panel or the system's file manager) whose
+// suffix is in setDropSuffixes() can be dropped; filesDropped() tells where.
 class Viewport : public QRhiWidget
 {
     Q_OBJECT
@@ -79,7 +83,15 @@ public:
     static constexpr float MinFlySpeed = 0.1f;
     static constexpr float MaxFlySpeed = 200.0f;
 
+    // File suffixes (lower case, no dot) accepted by drag and drop.
+    void setDropSuffixes(const QStringList &suffixes) { m_dropSuffixes = suffixes; }
+    // Where something dropped at `pos` (widget pixels) goes in the world: on the ground
+    // plane (y = 0) under the cursor, or in front of the camera when the ground isn't
+    // under it. `onGround` tells which.
+    QVector3D dropPoint(const QPointF &pos, bool *onGround = nullptr) const;
+
 signals:
+    void filesDropped(const QStringList &paths, const QPointF &pos);
     void cameraModeChanged(CameraMode mode);
     void flySpeedChanged(float speed);
 
@@ -88,6 +100,9 @@ protected:
     void keyPressEvent(QKeyEvent *event) override;
     void keyReleaseEvent(QKeyEvent *event) override;
     void focusOutEvent(QFocusEvent *event) override;
+    void dragEnterEvent(QDragEnterEvent *event) override;
+    void dragMoveEvent(QDragMoveEvent *event) override;
+    void dropEvent(QDropEvent *event) override;
     void initialize(QRhiCommandBuffer *cb) override;
     void render(QRhiCommandBuffer *cb) override;
     void releaseResources() override;
@@ -107,6 +122,7 @@ private:
     bool layoutGizmo();
     void redraw();
     void stopFlying();
+    QStringList droppableFiles(const QMimeData *mime) const;
     // Once per frame, before drawing: flies the goal by the held keys, then moves the
     // drawn camera towards the goal. Returns true while it's still moving.
     bool advanceCamera();
@@ -125,6 +141,7 @@ private:
     Qt::MouseButton m_dragButton = Qt::NoButton; // camera drag
     QPoint m_lastMouse;
 
+    QStringList m_dropSuffixes;
     CameraMode m_cameraMode = CameraMode::Orbit;
     float m_flySpeed = 4.0f;
     bool m_flying = false;   // free camera, right button held

@@ -122,6 +122,10 @@ AssetsPanel::AssetsPanel(QWidget *parent, Side side)
     m_contents->setWordWrap(true);
     m_contents->setTextElideMode(Qt::ElideMiddle);
     m_contents->setSelectionMode(QAbstractItemView::SingleSelection);
+    // Files can be dragged out (to the viewport); the model gives them as file URLs.
+    m_contents->setDragEnabled(true);
+    m_contents->setDragDropMode(QAbstractItemView::DragOnly);
+    m_contents->setDefaultDropAction(Qt::CopyAction);
     connect(m_contents, &QListView::activated, this, [this](const QModelIndex &index) {
         const QString path = clean(m_files->filePath(index));
         if (m_files->isDir(index))

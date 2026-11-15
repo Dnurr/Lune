@@ -2,6 +2,9 @@
 
 #include <QChildEvent>
 #include <QCursor>
+#include <QDropEvent>
+#include <QFileInfo>
+#include <QMimeData>
 #include <QElapsedTimer>
 #include <QKeyEvent>
 #include <QtMath>
@@ -25,6 +28,7 @@ Viewport::Viewport(QWidget *parent)
     // Clicking the viewport takes the keyboard focus away from text fields
     // (so Ctrl+Z undoes the scene, and the command palette closes).
     setFocusPolicy(Qt::ClickFocus);
+    setAcceptDrops(true); // files from the Assets panel or the file manager
 
     m_stats = new StatsOverlay(this);
 }
@@ -380,6 +384,71 @@ void Viewport::wheelEvent(QWheelEvent *event)
         m_goal.zoom(steps);
     redraw();
     event->accept();
+}
+
+// ---------------------------------------------------------------------------
+// Drag and drop
+// ---------------------------------------------------------------------------
+
+QStringList Viewport::droppableFiles(const QMimeData *mime) const
+{
+    QStringList files;
+    if (!mime || !mime->hasUrls())
+        return files;
+    for (const QUrl &url : mime->urls()) {
+        const QString path = url.toLocalFile();
+        if (!path.isEmpty() && m_dropSuffixes.contains(QFileInfo(path).suffix().toLower()))
+            files.append(path);
+    }
+    return files;
+}
+
+void Viewport::dragEnterEvent(QDragEnterEvent *event)
+{
+    if (!droppableFiles(event->mimeData()).isEmpty())
+        event->acceptProposedAction();
+    else
+        event->ignore();
+}
+
+void Viewport::dragMoveEvent(QDragMoveEvent *event)
+{
+    // Not over a panel: those aren't drop targets (yet).
+    if (childAt(event->position().toPoint()) == nullptr && !droppableFiles(event->mimeData()).isEmpty())
+        event->acceptProposedAction();
+    else
+        event->ignore();
+}
+
+void Viewport::dropEvent(QDropEvent *event)
+{
+    const QStringList files = droppableFiles(event->mimeData());
+    if (files.isEmpty()) {
+        event->ignore();
+        return;
+    }
+    event->acceptProposedAction();
+    activateWindow(); // the drag may come from another application
+    emit filesDropped(files, event->position());
+}
+
+QVector3D Viewport::dropPoint(const QPointF &pos, bool *onGround) const
+{
+    QVector3D origin, direction;
+    m_camera.screenRay(pos, QSizeF(size()), &origin, &direction);
+    const QVector3D d = direction.normalized();
+    // Ground plane, if the ray reaches it in front of the camera and not too far away.
+    if (d.y() < -1e-4f) {
+        const float t = -origin.y() / d.y();
+        if (t > 0.0f && t < 20.0f * qMax(1.0f, m_camera.distance)) {
+            if (onGround)
+                *onGround = true;
+            return origin + d * t;
+        }
+    }
+    if (onGround)
+        *onGround = false;
+    return origin + d * m_camera.distance; // as far as the orbit target
 }
 
 // ---------------------------------------------------------------------------
