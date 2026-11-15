@@ -54,4 +54,10 @@ public:
     // and target by `move` = (right, world up, forward) in world units.
     void look(float deltaYaw, float deltaPitch);
     void fly(const QVector3D &move);
+
+    // Smoothing: moves this camera's target, angles and distance a fraction `amount`
+    // (0..1) of the way to `goal`'s. Lens settings are copied.
+    void moveTowards(const OrbitCamera &goal, float amount);
+    // Same view, within a tiny tolerance (relative to the distance).
+    bool isCloseTo(const OrbitCamera &other) const;
 };

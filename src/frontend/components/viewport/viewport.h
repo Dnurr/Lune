@@ -4,7 +4,6 @@
 #include <QPoint>
 #include <QRhiWidget>
 #include <QSet>
-#include <QTimer>
 #include <functional>
 
 #include "engine/render/camera.h"
@@ -67,7 +66,9 @@ public:
     void setStatsVisible(bool visible);
     bool isStatsVisible() const;
 
-    const OrbitCamera &camera() const { return m_camera; }
+    // Where the camera is going: input moves this one, and the camera drawn on screen
+    // follows it smoothly (see advanceCamera()). Jumps there in setCamera().
+    const OrbitCamera &camera() const { return m_goal; }
     void setCamera(const OrbitCamera &camera);
 
     void setCameraMode(CameraMode mode);
@@ -106,10 +107,13 @@ private:
     bool layoutGizmo();
     void redraw();
     void stopFlying();
-    void flyStep(); // timer: moves the free camera by the held keys
+    // Once per frame, before drawing: flies the goal by the held keys, then moves the
+    // drawn camera towards the goal. Returns true while it's still moving.
+    bool advanceCamera();
 
     Renderer m_renderer;
-    OrbitCamera m_camera;
+    OrbitCamera m_camera; // drawn (also used by picking and the gizmo: what you see)
+    OrbitCamera m_goal;   // where the input wants it
     Gizmo m_gizmo;
     StatsOverlay *m_stats = nullptr;
     DisplaySettings *m_display = nullptr;
@@ -126,6 +130,6 @@ private:
     bool m_flying = false;   // free camera, right button held
     QPoint m_lookAnchor;     // global cursor position, kept there while looking
     QSet<int> m_flyKeys;     // movement keys held
-    QTimer m_flyTimer;
-    QElapsedTimer m_flyClock;
+    QElapsedTimer m_frameClock; // time between animated frames
+    bool m_animating = false;   // the previous frame asked for another one
 };

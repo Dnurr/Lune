@@ -8,7 +8,7 @@
 namespace
 {
 constexpr qint64 kWindowMs = 500; // the text is refreshed (and averages reset) twice a second
-constexpr int kTopMargin = 12;
+constexpr int kTopMargin = 56; // below the camera bar
 } // namespace
 
 StatsOverlay::StatsOverlay(QWidget *viewport)

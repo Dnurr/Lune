@@ -27,10 +27,6 @@ Viewport::Viewport(QWidget *parent)
     setFocusPolicy(Qt::ClickFocus);
 
     m_stats = new StatsOverlay(this);
-
-    m_flyTimer.setInterval(10);
-    m_flyTimer.setTimerType(Qt::PreciseTimer);
-    connect(&m_flyTimer, &QTimer::timeout, this, &Viewport::flyStep);
 }
 
 Viewport::~Viewport() = default;
@@ -76,6 +72,7 @@ void Viewport::setEditorContext(Scene *scene, Selection *selection, QUndoStack *
 void Viewport::setCamera(const OrbitCamera &camera)
 {
     m_camera = camera;
+    m_goal = camera;
     redraw();
 }
 
@@ -149,6 +146,7 @@ void Viewport::render(QRhiCommandBuffer *cb)
 {
     QElapsedTimer cpu;
     cpu.start();
+    const bool moving = advanceCamera();
     updateGlassRects();
 
     std::vector<OverlayVertex> overlay;
@@ -172,6 +170,8 @@ void Viewport::render(QRhiCommandBuffer *cb)
                                renderTarget()->pixelSize(), entities);
         QRhiWidget::update(); // keep rendering: FPS only means something with continuous frames
     }
+    if (moving)
+        QRhiWidget::update(); // next frame continues the camera's motion
 }
 
 void Viewport::releaseResources()
@@ -286,8 +286,6 @@ void Viewport::mousePressEvent(QMouseEvent *event)
         m_flyKeys.clear();
         setFocus(Qt::MouseFocusReason); // the movement keys come here
         setCursor(Qt::BlankCursor);
-        m_flyClock.start();
-        m_flyTimer.start();
         event->accept();
         return;
     }
@@ -315,7 +313,7 @@ void Viewport::mouseMoveEvent(QMouseEvent *event)
     if (m_flying) {
         const QPoint d = event->globalPosition().toPoint() - m_lookAnchor;
         if (!d.isNull()) {
-            m_camera.look(-d.x() * 0.2f, d.y() * 0.2f);
+            m_goal.look(-d.x() * 0.2f, d.y() * 0.2f);
             QCursor::setPos(m_lookAnchor); // its own move event has no motion
             redraw();
         }
@@ -338,9 +336,9 @@ void Viewport::mouseMoveEvent(QMouseEvent *event)
     const QPoint d = p - m_lastMouse;
     m_lastMouse = p;
     if (m_dragButton == Qt::RightButton)
-        m_camera.orbit(-d.x() * 0.3f, d.y() * 0.3f);
+        m_goal.orbit(-d.x() * 0.3f, d.y() * 0.3f);
     else
-        m_camera.pan(float(d.x()), float(d.y()));
+        m_goal.pan(float(d.x()), float(d.y()));
     redraw();
     event->accept();
 }
@@ -377,9 +375,9 @@ void Viewport::wheelEvent(QWheelEvent *event)
     if (m_flying)
         setFlySpeed(m_flySpeed * qPow(1.2f, steps)); // while looking: flying speed
     else if (m_cameraMode == CameraMode::Free)
-        m_camera.fly(QVector3D(0, 0, steps * qMax(0.25f, m_flySpeed * 0.25f))); // forward / back
+        m_goal.fly(QVector3D(0, 0, steps * qMax(0.25f, m_flySpeed * 0.25f))); // forward / back
     else
-        m_camera.zoom(steps);
+        m_goal.zoom(steps);
     redraw();
     event->accept();
 }
@@ -425,6 +423,7 @@ void Viewport::keyPressEvent(QKeyEvent *event)
     if (m_flying && isFlyKey(event->key())) {
         if (!event->isAutoRepeat())
             m_flyKeys.insert(event->key());
+        redraw(); // the frame loop moves the camera while the key is held
         event->accept();
         return;
     }
@@ -454,13 +453,27 @@ void Viewport::stopFlying()
         return;
     m_flying = false;
     m_flyKeys.clear();
-    m_flyTimer.stop();
     unsetCursor();
 }
 
-void Viewport::flyStep()
+namespace
 {
-    const float dt = qMin(0.1f, float(m_flyClock.restart()) / 1000.0f); // no jump after a stall
+// Time constant of the camera smoothing: the drawn camera covers ~63% of the remaining way
+// to the goal in this time. Short enough to feel direct; long enough to even out mouse
+// events that don't line up with the frames (e.g. a 125 Hz mouse on a 60 Hz screen gives
+// 2 or 3 events per frame, so unsmoothed motion speeds up and slows down every frame).
+constexpr float kSmoothingSeconds = 0.03f;
+} // namespace
+
+bool Viewport::advanceCamera()
+{
+    // First frame of a motion: the time since the last frame means nothing (idle), use
+    // one nominal frame. Long stalls are capped so nothing jumps.
+    const float elapsed = m_frameClock.isValid() ? float(m_frameClock.restart()) / 1000.0f : 0.0f;
+    if (!m_frameClock.isValid())
+        m_frameClock.start();
+    const float dt = m_animating ? qBound(0.0f, elapsed, 0.1f) : 1.0f / 60.0f;
+
     QVector3D dir;
     if (m_flyKeys.contains(Qt::Key_W)) dir.setZ(dir.z() + 1);
     if (m_flyKeys.contains(Qt::Key_S)) dir.setZ(dir.z() - 1);
@@ -468,11 +481,20 @@ void Viewport::flyStep()
     if (m_flyKeys.contains(Qt::Key_A)) dir.setX(dir.x() - 1);
     if (m_flyKeys.contains(Qt::Key_E)) dir.setY(dir.y() + 1);
     if (m_flyKeys.contains(Qt::Key_Q)) dir.setY(dir.y() - 1);
-    if (dir.isNull())
-        return;
-    const float boost = m_flyKeys.contains(Qt::Key_Shift) ? 3.0f : 1.0f;
-    m_camera.fly(dir.normalized() * (m_flySpeed * boost * dt));
-    redraw();
+    const bool flying = m_flying && !dir.isNull();
+    if (flying) {
+        const float boost = m_flyKeys.contains(Qt::Key_Shift) ? 3.0f : 1.0f;
+        m_goal.fly(dir.normalized() * (m_flySpeed * boost * dt));
+    }
+
+    if (m_camera.isCloseTo(m_goal))
+        m_camera = m_goal;
+    else
+        m_camera.moveTowards(m_goal, 1.0f - std::exp(-dt / kSmoothingSeconds));
+
+    // Keep animating while catching up, or while a movement key is held.
+    m_animating = flying || !m_camera.isCloseTo(m_goal);
+    return m_animating;
 }
 
 void Viewport::leaveEvent(QEvent *event)

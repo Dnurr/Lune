@@ -57,6 +57,25 @@ private slots:
         c.fly(QVector3D(0, 1.5f, 0)); // world up, whatever the pitch
         QVERIFY(near(c.eye(), eye + forward * 2.0f + QVector3D(0, 1.5f, 0)));
     }
+
+    void smoothingReachesTheGoal()
+    {
+        OrbitCamera drawn, goal;
+        goal.target = QVector3D(3, 1, -2);
+        goal.yaw = 120.0f;
+        goal.pitch = -20.0f;
+        goal.distance = 2.0f;
+        drawn.moveTowards(goal, 0.5f);
+        QVERIFY(near(drawn.target, QVector3D(1.5f, 0.5f, -1.0f)));
+        QCOMPARE(drawn.yaw, (45.0f + 120.0f) / 2.0f);
+        QVERIFY(qAbs(drawn.distance - 4.0f) < 1e-4f); // halfway in log space: sqrt(8 * 2)
+        QVERIFY(!drawn.isCloseTo(goal));
+        for (int i = 0; i < 40; ++i)
+            drawn.moveTowards(goal, 0.5f);
+        QVERIFY(drawn.isCloseTo(goal));
+        drawn.moveTowards(goal, 1.0f);
+        QVERIFY(near(drawn.eye(), goal.eye()));
+    }
 };
 
 QTEST_GUILESS_MAIN(TestCamera)

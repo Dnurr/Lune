@@ -91,6 +91,26 @@ void OrbitCamera::look(float deltaYaw, float deltaPitch)
     target += e - eye(); // the eye stays, the target moves around it
 }
 
+void OrbitCamera::moveTowards(const OrbitCamera &goal, float amount)
+{
+    const float t = qBound(0.0f, amount, 1.0f);
+    target += (goal.target - target) * t;
+    yaw += (goal.yaw - yaw) * t;
+    pitch += (goal.pitch - pitch) * t;
+    // Distance: in log space, so zooming feels the same near and far.
+    distance *= qPow(goal.distance / distance, t);
+    fieldOfView = goal.fieldOfView;
+    nearPlane = goal.nearPlane;
+    farPlane = goal.farPlane;
+}
+
+bool OrbitCamera::isCloseTo(const OrbitCamera &other) const
+{
+    const float eps = 1e-4f * qMax(1.0f, distance);
+    return (target - other.target).length() < eps && qAbs(yaw - other.yaw) < 0.01f
+        && qAbs(pitch - other.pitch) < 0.01f && qAbs(distance - other.distance) < eps;
+}
+
 void OrbitCamera::fly(const QVector3D &move)
 {
     target += right() * move.x() + QVector3D(0, 1, 0) * move.y() + forward() * move.z();

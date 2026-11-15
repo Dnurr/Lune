@@ -164,7 +164,15 @@ The **camera** is one `OrbitCamera` (target, yaw, pitch, distance) driven two wa
 ahead. Renderer, gizmo, picking and the scene file see the same camera either way, and
 switching mode never moves the view. While the right button is held in Free mode the
 viewport takes W/A/S/D/Q/E (overriding the tool shortcuts), hides the cursor and keeps it
-in place, and a timer moves the camera by the held keys at `flySpeed` units per second.
+in place, and each frame moves the camera by the held keys at `flySpeed` units per second.
+
+Input never moves the drawn camera directly: it moves a goal camera, and once per frame
+(`Viewport::advanceCamera()`, at the start of `render()`) the drawn camera covers part of
+the way to it (exponential smoothing, 30 ms time constant), requesting frames until it
+arrives. Mouse events rarely line up with frames (a 125 Hz mouse on a 60 Hz screen gives
+2 or 3 events per frame), so moving the camera per event looks jerky; per-frame steps
+with smoothing look even. Picking and the gizmo use the drawn camera (what you see); the
+scene file stores the goal.
 `CameraMenu` is the Orbit / Free bar at the top center of the free area.
 
 ### Lights
