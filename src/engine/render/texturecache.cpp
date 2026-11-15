@@ -2,8 +2,11 @@
 
 #include "engine/io/imageloader.h"
 
+#include <QThread>
+#include <QThreadPool>
 #include <rhi/qrhi.h>
 
+#include <algorithm>
 #include <chrono>
 
 namespace
@@ -11,9 +14,16 @@ namespace
 // Frames a texture may go unused before it's released (a few seconds at 60 fps): picking
 // an image, then another, then the first again doesn't reload it.
 constexpr int kKeepUnusedFrames = 600;
+// Image bytes uploaded per frame at most (at least one image): two 4096 x 4096 images.
+constexpr qint64 kUploadBytesPerFrame = 128ll << 20;
 } // namespace
 
-TextureCache::TextureCache() = default;
+TextureCache::TextureCache()
+    : m_pool(std::make_unique<QThreadPool>())
+{
+    // Each decode holds a full image (64 MB for 4096 x 4096) until it's uploaded.
+    m_pool->setMaxThreadCount(std::clamp(QThread::idealThreadCount() / 2, 1, 4));
+}
 
 TextureCache::~TextureCache()
 {
@@ -36,10 +46,9 @@ void TextureCache::initialize(QRhi *rhi)
 
 void TextureCache::release()
 {
-    for (auto &[key, e] : m_entries) {
-        if (e.pending.valid())
-            e.pending.wait(); // the worker must not outlive the cache
-    }
+    // Workers must not outlive the cache. Queued decodes are dropped (their futures break).
+    m_pool->clear();
+    m_pool->waitForDone();
     m_entries.clear();
     for (auto &t : m_fallbacks)
         t.reset();
@@ -63,15 +72,15 @@ void TextureCache::beginFrame(QRhiResourceUpdateBatch *rub)
         m_fallbacksUploaded = true;
     }
 
+    // Uploads are spread over frames: each one needs staging memory as large as the image
+    // until the GPU has copied it, and dozens of 4K images in one frame take gigabytes.
+    qint64 uploadBudget = kUploadBytesPerFrame;
     for (auto it = m_entries.begin(); it != m_entries.end();) {
         Entry &e = it->second;
-        if (e.pending.valid() && e.pending.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+        if (uploadBudget > 0 && e.pending.valid()
+            && e.pending.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
             auto [image, error] = e.pending.get();
-            if (image.isNull()) {
-                e.error = error.isEmpty() ? QStringLiteral("Can't read the image") : error;
-                m_errorsChanged = true;
-                qWarning("Texture: %s", qPrintable(e.error));
-            } else {
+            if (!image.isNull()) {
                 QRhiTexture::Flags flags = QRhiTexture::MipMapped | QRhiTexture::UsedWithGenerateMips;
                 if (!it->first.second)
                     flags |= QRhiTexture::sRGB; // color: sampled as linear
@@ -79,10 +88,20 @@ void TextureCache::beginFrame(QRhiResourceUpdateBatch *rub)
                 if (e.texture->create()) {
                     rub->uploadTexture(e.texture.get(), image);
                     rub->generateMips(e.texture.get());
+                    uploadBudget -= image.sizeInBytes();
                 } else {
                     e.texture.reset();
-                    e.error = QStringLiteral("The texture couldn't be created (%1 x %2)").arg(image.width()).arg(image.height());
+                    error = QStringLiteral("The texture couldn't be created (%1 x %2, out of video memory?)")
+                                .arg(image.width())
+                                .arg(image.height());
                 }
+            } else if (error.isEmpty()) {
+                error = QStringLiteral("Can't read the image");
+            }
+            if (!e.texture) {
+                e.error = error;
+                m_errorsChanged = true;
+                qWarning("Texture: %s", qPrintable(e.error));
             }
         }
         // Count frames without use (texture() resets it); release the long unused ones.
@@ -102,11 +121,13 @@ QRhiTexture *TextureCache::texture(const TextureValue &value, TextureFallback fa
     if (it == m_entries.end()) {
         Entry e;
         const QString image = value.image;
-        e.pending = std::async(std::launch::async, [image] {
+        auto task = std::make_shared<std::packaged_task<std::pair<QImage, QString>()>>([image] {
             QString error;
             QImage decoded = loadImage(image, &error);
             return std::make_pair(std::move(decoded), error);
         });
+        e.pending = task->get_future();
+        m_pool->start([task] { (*task)(); });
         it = m_entries.emplace(key, std::move(e)).first;
     }
     it->second.unusedFrames = 0;

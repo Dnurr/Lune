@@ -2,6 +2,7 @@
 
 #include <QContextMenuEvent>
 #include <QFileInfo>
+#include <QFontMetricsF>
 #include <QMimeData>
 #include <QGraphicsItem>
 #include <QGraphicsPathItem>
@@ -176,8 +177,13 @@ public:
                     painter->setBrush(toColor(v));
                     painter->drawRoundedRect(swatch, 3, 3);
                 } else {
+                    // Right of the label, elided (long file names would cover it)
+                    const QFontMetricsF fm(painter->font());
+                    const qreal labelWidth = fm.horizontalAdvance(p.name) + 8;
+                    const QRectF valueRect = r.adjusted(labelWidth, 0, 0, 0);
                     painter->setPen(QColor("#9A9AA6"));
-                    painter->drawText(r, Qt::AlignVCenter | Qt::AlignRight, valueText(v, p));
+                    painter->drawText(valueRect, Qt::AlignVCenter | Qt::AlignRight,
+                                      fm.elidedText(valueText(v, p), Qt::ElideMiddle, valueRect.width()));
                 }
             }
             if (p.linkable)
