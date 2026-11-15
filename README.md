@@ -1,50 +1,89 @@
 # Lune
 
-A real-time renderer and editor for visual effects, built with C++20, Qt 6 and QRhi.
+A real-time renderer and editor for visual effects, built from scratch in C++20 with Qt 6
+and QRhi (Direct3D 11/12, Vulkan, Metal, OpenGL from one set of GLSL shaders).
 
-Lune keeps the interface as small as possible: the viewport fills the window, and the
-few panels float over it as translucent glass, with the scene blurred behind them.
-Most actions are one keystroke or one search in the command palette away.
+![Sponza in Lune: textured PBR materials, image-based lighting, soft shadows](docs/images/sponza.jpg)
 
-![Lune editor](docs/images/editor.png)
+<sub>Intel's Sponza scene (CC BY 4.0) imported from glTF: its materials become node graphs,
+lit by an HDR environment and a sun with contact-hardening shadows.</sub>
 
-> **Status:** early development. The editor foundations are in place (scene, selection,
-> undo, gizmo, files, tests); the rendering and VFX core is what comes next.
+Lune is two things: a **physically based renderer** whose shading, lighting and shadows
+are written by hand, and an **editor** around it that keeps the interface out of the way.
+The viewport fills the window; the few panels float over it as translucent glass, and most
+actions are one keystroke or one search in the command palette away.
 
-## Features
+> **Status:** active development. Rendering: PBR, image-based lighting, shadows and
+> textured node materials are done; post-processing, a timeline and GPU particles are next
+> (see the [roadmap](docs/roadmap.md)).
 
-- **Backend-agnostic rendering** through QRhi: Direct3D 11/12, Vulkan, Metal, OpenGL.
-  Shaders are written once in GLSL and compiled for every backend at build time.
-- **Infinite world grid**, shaded meshes with depth, selection outline.
-- **Glass panels**: floating, draggable panels that snap to the left, right or bottom
-  edge and resize from their inner edge; the viewport renders a blurred copy of the scene
-  behind them. Tab over the viewport hides them all; the layout is restored at startup.
-- **Workspaces**: Layout (outliner, inspector, assets) and Shading (node editor, with the
-  scene centered beside it), tabs in the menu bar; each remembers its panels.
-- **Node materials**: materials as node graphs, compiled to shaders at runtime; node types
-  are plain GLSL functions with a few annotations. Image textures (loaded in the
-  background, mipmapped, sRGB or data), one material slot per submesh, and glTF materials
-  imported as graphs.
-- **Assets browser**: folder tree and folder contents side by side, on the open scene's
-  folder (or any folder); double-click a mesh to add it, a scene to open it, or drag
-  files onto the viewport: meshes land where they're dropped, an `.hdr` becomes the
-  environment.
-- **Scene editing**: click to select, move / rotate / scale gizmo, outliner, rename.
-- **Automatic Inspector**: built from component descriptors, one editor per property
-  type; drag a property's label to scrub its value.
-- **Undo / redo** for every edit; drags collapse into a single step.
-- **Command palette** (Ctrl+K) with fuzzy search over every action.
-- **Scene files** (`.lune`, JSON) and mesh import (OBJ, glTF 2.0 / GLB).
-- **Lights and PBR shading**: directional and point lights, Cook-Torrance materials
-  (roughness, metallic); soft shadows from up to 4 directional lights (cascaded) and 4
-  point lights.
-- **Image-based lighting**: an Environment from an HDR image (`.hdr`) or a sky/ground
-  gradient, precomputed on the GPU into irradiance and prefiltered cubemaps; optionally
-  shown as the background.
-- **HDR viewport**: linear lighting in a 16-bit float scene, with exposure and tonemapping
-  chosen from the Display menu in the viewport corner.
-- **Stats overlay** (F12): FPS, CPU frame time, draw calls, triangles.
-- **Automated tests** for the scene model, undo, file formats, picking and gizmo.
+## Rendering
+
+Written by the author. How the frame is put together (passes, targets, conventions) is
+in [docs/rendering.md](docs/rendering.md).
+
+- **Cook-Torrance BRDF**: GGX distribution, Smith geometry (Schlick-GGX), Schlick Fresnel,
+  metallic-roughness workflow, any number of directional and point lights.
+- **Image-based lighting** with the split-sum approximation, precomputed on the GPU from an
+  HDR image: equirectangular to cubemap, diffuse irradiance convolution, prefiltered
+  specular cubemap (one roughness per mip), BRDF integration LUT; blurred environment
+  background.
+- **Soft shadows** from up to 4 directional and 4 point lights:
+  - PCSS (contact-hardening): a blocker search sizes the penumbra from the light's size,
+    then a rotated Poisson-disk PCF filters it;
+  - cascaded shadow maps for directional lights, with dithered blending across cascades;
+  - point lights through cube faces in a shared atlas, with guard borders between faces;
+  - normal-offset and slope-scaled bias against acne.
+- **HDR pipeline**: linear lighting in a 16-bit float target, exposure, tonemapping with
+  Reinhard, ACES (Hill fit) or AgX.
+- **Surface model** for node materials: base color, roughness, metallic, normal (from
+  normal maps), ambient occlusion and emission.
+
+## Editor and engine
+
+- **Node materials**: a material is a node graph, compiled to GLSL and then to every
+  backend at runtime. Node types are plain GLSL functions with a few annotations, so
+  adding one means writing one function. Typing a value or changing an image never
+  recompiles: values live in a uniform array, images in fixed sampler slots.
+- **Textures**: decoded on worker threads, uploaded with full mip chains a few per frame,
+  sRGB or linear per image, released when unused; materials draw at once with fallback
+  colors while images stream in. Dozens of 4K images load without stalling the editor.
+- **glTF 2.0 / GLB and OBJ import**: UVs, tangents (computed when missing), one material
+  slot per submesh; glTF materials (base color, metallic-roughness, occlusion, normal,
+  emissive) become node graphs, embedded images included.
+- **Backend-agnostic rendering** through QRhi; shaders written once in GLSL, compiled for
+  every backend at build time (and at runtime for materials).
+- **Glass panels** that blur the scene behind them, snap to the window's edges and hide
+  with Tab; **workspaces** (Layout, Shading) that remember their panels.
+- **Scene editing**: picking, move / rotate / scale gizmo with local and global axes,
+  outliner, automatic Inspector built from component descriptors, orbit and free camera.
+- **Undo / redo** for every edit, drags merged into one step; **command palette**
+  (Ctrl+K) with fuzzy search.
+- **Assets browser**, drag and drop of meshes, images and HDR environments.
+- **Scene files** (`.lune`, JSON, paths relative to the scene), a **stats overlay** (F12)
+  and **automated tests** for the scene model, undo, file formats, importers, picking,
+  gizmo and material compiler.
+
+![The Shading workspace: a glTF material as a node graph next to the viewport](docs/images/shading.jpg)
+
+## Who wrote what
+
+Lune is a personal project, developed with the help of
+[Claude Code](https://claude.com/claude-code). The work is split on purpose:
+
+| Part | Written by |
+|---|---|
+| Shading, lighting, BRDF, image-based lighting shaders | Author |
+| Shadow filtering: PCF, PCSS, cascade selection and blending | Author |
+| HDR display pass and tonemapping | Author |
+| Material nodes for shading (normal map, noise, ...) | Author |
+| GPU resource plumbing (render targets, atlases, cascades fitting, bindings) | Claude, with the author's review |
+| Editor UI, panels, gizmo, Inspector, undo, command palette | Claude |
+| Node material system: graph model, editor, GLSL codegen, texture cache | Claude |
+| Importers, scene format, build scripts, tests, documentation | Claude |
+
+Every item of the [roadmap](docs/roadmap.md) says who writes it. In the shaders the author
+owns, Claude only adds declarations (uniforms, bindings) and comments.
 
 ## Building
 
@@ -155,29 +194,13 @@ docs/                  documentation
 - [Troubleshooting](docs/troubleshooting.md): common build problems.
 - [Roadmap](docs/roadmap.md): planned features and who writes each part.
 
-## Roadmap
-
-1. ~~Editor foundations: scene, selection, undo, gizmo, files~~
-2. HDR and shading: PBR, lights, image-based lighting, shadows, textures, color management
-3. Post-processing: bloom, depth of field, anti-aliasing
-4. Timeline: playback, keyframes, curves
-5. GPU particles (compute), emitters and forces
-6. Image sequence output (EXR)
-
-The detailed checklist, with who writes each part, is in [docs/roadmap.md](docs/roadmap.md).
-
-## Development and AI assistance
-
-Lune is a personal project, developed with the help of [Claude Code](https://claude.com/claude-code).
-So far, the editor infrastructure was written together with Claude: build scripts,
-panels and theme, scene model and undo, gizmo and picking, Inspector, command palette,
-file formats, tests, stats overlay and this documentation. The rendering and VFX core
-(HDR pipeline, shading, particles and simulations) is written by the author.
-
 ## Third-party
 
 - [Qt 6](https://www.qt.io/) (LGPLv3, linked dynamically): UI, QRhi rendering, shader tools.
 - [cgltf](https://github.com/jkuhlmann/cgltf) (MIT): glTF 2.0 parsing.
+
+The screenshots show Intel's [Sponza](https://www.intel.com/content/www/us/en/developer/topic-technology/graphics-research/samples.html)
+sample scene (CC BY 4.0), which is not part of this repository.
 
 Techniques adapted in the shaders (`src/engine/render/shaders/display.frag`):
 
