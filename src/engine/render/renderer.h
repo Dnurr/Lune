@@ -1,8 +1,10 @@
 #pragma once
 
+#include <QHash>
 #include <QList>
 #include <QRectF>
 #include <QSize>
+#include <rhi/qshader.h>
 #include <array>
 #include <memory>
 #include <unordered_map>
@@ -92,6 +94,12 @@ public:
     const FrameStats &lastFrameStats() const { return m_stats; }
     const char *backendName() const;
 
+    // Node materials: why a material can't be drawn (graph or shader compile error, empty
+    // if it's fine or wasn't drawn yet). Entities using it fall back to their own values.
+    QString materialError(MaterialId id) const { return m_materialErrors.value(id); }
+    // True once after a frame that changed some material's error (e.g. to refresh the UI).
+    bool takeMaterialErrorsChanged();
+
 private:
     struct GpuMesh
     {
@@ -116,6 +124,24 @@ private:
     GpuEntity &gpuEntity(EntityId id);
     // Bindings of every mesh SRB: entity uniforms, then what the whole scene shares.
     QList<QRhiShaderResourceBinding> meshBindings(QRhiBuffer *entityUniforms) const;
+    // Mesh pipeline with another fragment shader (node materials); same state as m_meshPipe.
+    std::unique_ptr<QRhiGraphicsPipeline> createMeshPipeline(const QShader &fragment);
+    // The pipeline for a material's generated code: compiled on first use, then cached.
+    // nullptr (and `error` set) if it doesn't compile.
+    QRhiGraphicsPipeline *materialPipeline(const QString &code, QString *error);
+
+    // A node material shader, by generated code. The pipeline is rebuilt after initialize()
+    // (it references the scene render pass); the compiled shader is kept.
+    struct MaterialShader
+    {
+        QShader fragment;
+        QString error;
+        std::unique_ptr<QRhiGraphicsPipeline> pipeline;
+    };
+    std::unordered_map<QString, MaterialShader> m_materialShaders;
+    QString m_meshFragSource; // mesh.frag as GLSL, with the material markers
+    QHash<MaterialId, QString> m_materialErrors;
+    bool m_materialErrorsChanged = false;
 
 
     QRhi *m_rhi = nullptr;

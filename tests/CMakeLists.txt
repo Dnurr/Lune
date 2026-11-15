@@ -9,6 +9,7 @@ set(LUNE_QT_BIN "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_BINS}")
 function(lune_add_test name)
     add_executable(${name} ${name}.cpp)
     target_link_libraries(${name} PRIVATE lune_editor_core Qt6::Test)
+    target_compile_definitions(${name} PRIVATE LUNE_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     add_test(NAME ${name} COMMAND ${name})
     set_tests_properties(${name} PROPERTIES
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${LUNE_QT_BIN}"
@@ -26,3 +27,5 @@ lune_add_test(tst_displayhistory)
 lune_add_test(tst_lighticons)
 lune_add_test(tst_hdrimage)
 lune_add_test(tst_camera)
+lune_add_test(tst_material)
+target_link_libraries(tst_material PRIVATE Qt6::ShaderToolsPrivate) # compiles generated shaders

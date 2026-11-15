@@ -15,8 +15,12 @@ class Scene;
 //         "components": { "Transform": { "position": [0, 0.5, 0], ... },
 //                         "Mesh": { "color": "#b9bbc4", "visible": true } } }
 //     ],
+//     "materials": [ { "id": 1, "name": "Rust", "graph": { "nodes": [...], "links": [...] } } ],
 //     "editor": { ... }   // opaque to the engine: camera etc., written by the editor
 //   }
+//
+// An entity using a material has "material": <id>. Materials are written before the
+// entities that use them, but the order doesn't matter when loading.
 //
 // Components are written generically from their descriptors (engine/scene/components.h):
 // every editable property of every component the entity has. Unknown components or

@@ -128,6 +128,8 @@ bool save(const Scene &scene, const QString &path, const QJsonObject &editorStat
         je["id"] = double(e.id);
         je["name"] = e.name;
         je["mesh"] = e.mesh && !e.mesh->source.isEmpty() ? QJsonValue(meshReference(e.mesh, sceneDir)) : QJsonValue();
+        if (e.material != NoMaterial)
+            je["material"] = double(e.material);
 
         QJsonObject jc;
         for (const ComponentDesc &c : comps) {
@@ -145,10 +147,21 @@ bool save(const Scene &scene, const QString &path, const QJsonObject &editorStat
         entities.append(je);
     }
 
+    QJsonArray materials;
+    for (const Material &m : scene.materials()) {
+        QJsonObject jm;
+        jm["id"] = double(m.id);
+        jm["name"] = m.name;
+        jm["graph"] = m.graph.toJson();
+        materials.append(jm);
+    }
+
     QJsonObject root;
     root["format"] = kFormat;
     root["version"] = Version;
     root["entities"] = entities;
+    if (!materials.isEmpty())
+        root["materials"] = materials;
     if (!editorState.isEmpty())
         root["editor"] = editorState;
 
@@ -214,6 +227,7 @@ bool load(Scene &scene, const QString &path, QJsonObject *editorState, QStringLi
         else
             usedIds.insert(e.id, true);
         e.name = je["name"].toString(QStringLiteral("Entity"));
+        e.material = MaterialId(je["material"].toDouble());
 
         const QString meshRef = je["mesh"].toString();
         if (meshRef.startsWith(QLatin1String("primitive:"))) {
@@ -271,7 +285,31 @@ bool load(Scene &scene, const QString &path, QJsonObject *editorState, QStringLi
             e.id = next++;
     }
 
+    std::vector<Material> materials;
+    QHash<MaterialId, bool> usedMaterials;
+    for (const QJsonValue &v : root["materials"].toArray()) {
+        const QJsonObject jm = v.toObject();
+        Material m;
+        m.id = MaterialId(jm["id"].toDouble());
+        m.name = jm["name"].toString(QStringLiteral("Material"));
+        m.graph = NodeGraph::fromJson(jm["graph"].toObject());
+        if (m.id == NoMaterial || usedMaterials.contains(m.id)) {
+            warn(QStringLiteral("Material %1: missing or duplicate id, skipped").arg(m.name));
+            continue;
+        }
+        usedMaterials.insert(m.id, true);
+        materials.push_back(std::move(m));
+    }
+    for (Entity &e : entities) {
+        if (e.material != NoMaterial && !usedMaterials.contains(e.material)) {
+            warn(QStringLiteral("%1: unknown material %2").arg(e.name).arg(e.material));
+            e.material = NoMaterial;
+        }
+    }
+
     scene.clear();
+    for (const Material &m : materials)
+        scene.insertMaterial(m);
     for (const Entity &e : entities)
         scene.insertEntity(e);
     if (editorState)

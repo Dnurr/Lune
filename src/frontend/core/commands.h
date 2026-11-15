@@ -5,6 +5,7 @@
 #include <QVariant>
 
 #include "engine/scene/entity.h"
+#include "engine/scene/material.h"
 
 class Scene;
 class Selection;
@@ -109,4 +110,78 @@ private:
     TransformField m_field;
     bool m_mergeable = true;
     QElapsedTimer m_lastEdit;
+};
+
+// ---------------------------------------------------------------------------
+// Materials
+// ---------------------------------------------------------------------------
+
+// New material in the scene's library, optionally assigned to an entity in the same step.
+class AddMaterialCommand : public QUndoCommand
+{
+public:
+    AddMaterialCommand(Scene *scene, const Material &prototype, EntityId assignTo = InvalidEntity);
+
+    void redo() override;
+    void undo() override;
+
+    MaterialId materialId() const { return m_material.id; }
+
+private:
+    Scene *m_scene;
+    Material m_material; // id assigned on the first redo, then reused
+    EntityId m_entity;
+    MaterialId m_previous = NoMaterial; // the entity's material before
+};
+
+// Gives an entity a material (or none).
+class AssignMaterialCommand : public QUndoCommand
+{
+public:
+    AssignMaterialCommand(Scene *scene, EntityId entity, MaterialId material);
+
+    void redo() override;
+    void undo() override;
+
+private:
+    Scene *m_scene;
+    EntityId m_entity;
+    MaterialId m_before, m_after;
+};
+
+// Any edit of a material's node graph: the whole graph before and after (graphs are small).
+// Edits with the same non-empty `mergeKey` on the same material that arrive close together
+// (dragging a node, scrubbing a value) merge into one undo step.
+class SetMaterialGraphCommand : public QUndoCommand
+{
+public:
+    SetMaterialGraphCommand(Scene *scene, MaterialId material, const NodeGraph &after, const QString &text,
+                            const QString &mergeKey = QString());
+
+    void redo() override;
+    void undo() override;
+
+    int id() const override { return 4; }
+    bool mergeWith(const QUndoCommand *other) override;
+
+private:
+    Scene *m_scene;
+    MaterialId m_material;
+    NodeGraph m_before, m_after;
+    QString m_mergeKey;
+    QElapsedTimer m_lastEdit;
+};
+
+class RenameMaterialCommand : public QUndoCommand
+{
+public:
+    RenameMaterialCommand(Scene *scene, MaterialId material, const QString &name);
+
+    void redo() override;
+    void undo() override;
+
+private:
+    Scene *m_scene;
+    MaterialId m_material;
+    QString m_before, m_after;
 };

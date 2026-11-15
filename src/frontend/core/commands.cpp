@@ -208,3 +208,112 @@ bool SetTransformCommand::mergeWith(const QUndoCommand *other)
     setObsolete(m_after == m_before); // dragged back to where it started: no undo step
     return true;
 }
+
+// ---------------------------------------------------------------------------
+// Materials
+// ---------------------------------------------------------------------------
+
+AddMaterialCommand::AddMaterialCommand(Scene *scene, const Material &prototype, EntityId assignTo)
+    : m_scene(scene)
+    , m_material(prototype)
+    , m_entity(assignTo)
+{
+    setText(QStringLiteral("New material"));
+    if (const Entity *e = scene->entity(assignTo))
+        m_previous = e->material;
+}
+
+void AddMaterialCommand::redo()
+{
+    if (m_material.id == NoMaterial)
+        m_material.id = m_scene->addMaterial(m_material);
+    else
+        m_scene->insertMaterial(m_material);
+    if (m_entity != InvalidEntity)
+        m_scene->setEntityMaterial(m_entity, m_material.id);
+}
+
+void AddMaterialCommand::undo()
+{
+    if (m_entity != InvalidEntity)
+        m_scene->setEntityMaterial(m_entity, m_previous);
+    if (const Material *m = m_scene->material(m_material.id))
+        m_material = *m; // keep edits made since, for redo
+    m_scene->removeMaterial(m_material.id);
+}
+
+AssignMaterialCommand::AssignMaterialCommand(Scene *scene, EntityId entity, MaterialId material)
+    : m_scene(scene)
+    , m_entity(entity)
+    , m_before(NoMaterial)
+    , m_after(material)
+{
+    setText(QStringLiteral("Assign material"));
+    if (const Entity *e = scene->entity(entity))
+        m_before = e->material;
+}
+
+void AssignMaterialCommand::redo()
+{
+    m_scene->setEntityMaterial(m_entity, m_after);
+}
+
+void AssignMaterialCommand::undo()
+{
+    m_scene->setEntityMaterial(m_entity, m_before);
+}
+
+SetMaterialGraphCommand::SetMaterialGraphCommand(Scene *scene, MaterialId material, const NodeGraph &after,
+                                                 const QString &text, const QString &mergeKey)
+    : m_scene(scene)
+    , m_material(material)
+    , m_after(after)
+    , m_mergeKey(mergeKey)
+{
+    setText(text);
+    if (const Material *m = scene->material(material))
+        m_before = m->graph;
+    m_lastEdit.start();
+}
+
+void SetMaterialGraphCommand::redo()
+{
+    m_scene->setMaterialGraph(m_material, m_after);
+}
+
+void SetMaterialGraphCommand::undo()
+{
+    m_scene->setMaterialGraph(m_material, m_before);
+}
+
+bool SetMaterialGraphCommand::mergeWith(const QUndoCommand *other)
+{
+    const auto *o = static_cast<const SetMaterialGraphCommand *>(other);
+    if (m_mergeKey.isEmpty() || o->m_mergeKey != m_mergeKey || o->m_material != m_material
+        || m_lastEdit.elapsed() > kMergeWindowMs)
+        return false;
+    m_after = o->m_after;
+    m_lastEdit.restart();
+    setObsolete(m_after == m_before);
+    return true;
+}
+
+RenameMaterialCommand::RenameMaterialCommand(Scene *scene, MaterialId material, const QString &name)
+    : m_scene(scene)
+    , m_material(material)
+    , m_after(name)
+{
+    setText(QStringLiteral("Rename material"));
+    if (const Material *m = scene->material(material))
+        m_before = m->name;
+}
+
+void RenameMaterialCommand::redo()
+{
+    m_scene->setMaterialName(m_material, m_after);
+}
+
+void RenameMaterialCommand::undo()
+{
+    m_scene->setMaterialName(m_material, m_before);
+}

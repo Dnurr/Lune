@@ -47,6 +47,96 @@ void Scene::clear()
     while (!m_entities.empty())
         removeEntity(m_entities.back().id);
     m_nextId = 1;
+    while (!m_materials.empty())
+        removeMaterial(m_materials.back().id);
+    m_nextMaterialId = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Materials
+// ---------------------------------------------------------------------------
+
+NodeGraph Material::defaultGraph()
+{
+    NodeGraph g;
+    g.addNode(QStringLiteral("output"), QPointF(0, 0));
+    return g;
+}
+
+MaterialId Scene::addMaterial(Material prototype)
+{
+    prototype.id = m_nextMaterialId;
+    insertMaterial(prototype);
+    return prototype.id;
+}
+
+void Scene::insertMaterial(const Material &material)
+{
+    Q_ASSERT(material.id != NoMaterial && !this->material(material.id));
+    m_materials.push_back(material);
+    m_nextMaterialId = std::max(m_nextMaterialId, material.id + 1);
+    emit materialAdded(material.id);
+}
+
+bool Scene::removeMaterial(MaterialId id)
+{
+    const auto it = std::find_if(m_materials.begin(), m_materials.end(), [id](const Material &m) { return m.id == id; });
+    if (it == m_materials.end())
+        return false;
+    m_materials.erase(it);
+    emit materialRemoved(id);
+    return true;
+}
+
+const Material *Scene::material(MaterialId id) const
+{
+    for (const Material &m : m_materials)
+        if (m.id == id)
+            return &m;
+    return nullptr;
+}
+
+void Scene::setMaterialGraph(MaterialId id, const NodeGraph &graph)
+{
+    for (Material &m : m_materials) {
+        if (m.id == id && !(m.graph == graph)) {
+            m.graph = graph;
+            emit materialChanged(id);
+        }
+    }
+}
+
+void Scene::setMaterialName(MaterialId id, const QString &name)
+{
+    for (Material &m : m_materials) {
+        if (m.id == id && m.name != name) {
+            m.name = name;
+            emit materialChanged(id);
+        }
+    }
+}
+
+void Scene::setEntityMaterial(EntityId id, MaterialId material)
+{
+    Entity *e = find(id);
+    if (!e || e->material == material)
+        return;
+    e->material = material;
+    emit entityChanged(id);
+}
+
+QString Scene::uniqueMaterialName(const QString &base) const
+{
+    auto used = [this](const QString &name) {
+        return std::any_of(m_materials.begin(), m_materials.end(), [&](const Material &m) { return m.name == name; });
+    };
+    if (!used(base))
+        return base;
+    for (int i = 2;; ++i) {
+        const QString name = QStringLiteral("%1 %2").arg(base).arg(i);
+        if (!used(name))
+            return name;
+    }
 }
 
 const Entity *Scene::entity(EntityId id) const

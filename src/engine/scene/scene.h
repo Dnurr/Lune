@@ -5,8 +5,9 @@
 #include <vector>
 
 #include "entity.h"
+#include "material.h"
 
-// The scene: an ordered list of entities.
+// The scene: an ordered list of entities, and a library of materials they can use.
 // It knows nothing about the editor (no selection, no undo): it just holds the data and
 // notifies every change, so the UI and the renderer can follow it.
 class Scene : public QObject
@@ -39,14 +40,31 @@ public:
     // Name not used by any entity: "Entity", "Entity 2", "Entity 3"...
     QString uniqueName(const QString &base) const;
 
+    // Materials. Removing one doesn't touch the entities using it: they fall back to their
+    // own surface values until it comes back (undo) or they're given another one.
+    MaterialId addMaterial(Material prototype); // fresh id; returns it
+    void insertMaterial(const Material &material); // with its own id (undo)
+    bool removeMaterial(MaterialId id);
+    const std::vector<Material> &materials() const { return m_materials; }
+    const Material *material(MaterialId id) const;
+    void setMaterialGraph(MaterialId id, const NodeGraph &graph);
+    void setMaterialName(MaterialId id, const QString &name);
+    void setEntityMaterial(EntityId id, MaterialId material);
+    QString uniqueMaterialName(const QString &base) const;
+
 signals:
     void entityAdded(EntityId id, int index);
     void entityRemoved(EntityId id);
     void entityChanged(EntityId id); // name or transform
+    void materialAdded(MaterialId id);
+    void materialRemoved(MaterialId id);
+    void materialChanged(MaterialId id); // name or graph
 
 private:
     Entity *find(EntityId id);
 
     std::vector<Entity> m_entities;
     EntityId m_nextId = 1;
+    std::vector<Material> m_materials;
+    MaterialId m_nextMaterialId = 1;
 };

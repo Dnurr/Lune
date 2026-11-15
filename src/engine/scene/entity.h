@@ -13,6 +13,11 @@
 using EntityId = quint64;
 constexpr EntityId InvalidEntity = 0;
 
+// A material of the scene's library (Scene::materials()), shared by any number of
+// entities. 0 = none: the entity uses its own color, roughness and metallic.
+using MaterialId = quint64;
+constexpr MaterialId NoMaterial = 0;
+
 // A light source. Its position and direction come from the entity's transform:
 // a point light shines from the position in every direction; a directional light (the sun)
 // shines along the entity's local -Y axis, so with no rotation it points straight down.
@@ -76,6 +81,8 @@ struct Entity
     // The base color is displayColor.
     float roughness = 0.5f; // 0 = mirror-like, 1 = fully diffuse highlight
     float metallic = 0.0f;  // 0 = dielectric (plastic, stone...), 1 = metal
+    // Node material from the scene's library; when set, it replaces the three values above.
+    MaterialId material = NoMaterial;
 
     std::optional<Light> light;             // set = this entity is a light
     std::optional<Environment> environment; // set = this entity is the scene's environment

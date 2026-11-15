@@ -18,6 +18,9 @@ add_library(lune_engine STATIC
     src/engine/scene/components.cpp
     src/engine/scene/primitives.cpp
     src/engine/scene/picking.cpp
+    src/engine/material/nodegraph.cpp
+    src/engine/material/nodelibrary.cpp
+    src/engine/material/materialcompiler.cpp
     src/engine/io/objloader.cpp
     src/engine/io/gltfloader.cpp
     src/engine/io/meshimport.cpp
@@ -31,7 +34,8 @@ add_library(lune_engine STATIC
 # Includes are relative to src/: "engine/scene/scene.h", "frontend/core/selection.h"
 target_include_directories(lune_engine PUBLIC src)
 # QRhi headers (<rhi/qrhi.h>) are semi-public and ship with the GuiPrivate target
-target_link_libraries(lune_engine PUBLIC Qt6::Gui Qt6::GuiPrivate PRIVATE cgltf)
+# ShaderTools: node materials compile mesh.frag again at runtime (QShaderBaker)
+target_link_libraries(lune_engine PUBLIC Qt6::Gui Qt6::GuiPrivate PRIVATE cgltf Qt6::ShaderToolsPrivate)
 
 # ---------------------------------------------------------------------------
 # lune_editor_core: editor logic that doesn't need widgets (selection, undo
@@ -120,3 +124,13 @@ if(LUNE_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
+
+# GLSL sources needed at runtime: node materials put generated code into mesh.frag and
+# compile it again; the node types are read from material_nodes.glsl.
+qt6_add_resources(Lune "shadersrc"
+    PREFIX "/shadersrc"
+    BASE "src/engine/render/shaders"
+    FILES
+        src/engine/render/shaders/mesh.frag
+        src/engine/render/shaders/material_nodes.glsl
+)

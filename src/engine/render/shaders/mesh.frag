@@ -4,6 +4,7 @@ layout(location = 0) in vec3 v_normal;
 layout(location = 1) in vec3 v_world;
 layout(location = 0) out vec4 fragColor;
 
+#define MAX_MATERIAL_PARAMS 32 // MaterialCompiler::MaxParams
 layout(std140, binding = 0) uniform buf {
     mat4 mvp;
     mat4 model;
@@ -13,6 +14,7 @@ layout(std140, binding = 0) uniform buf {
     vec4 viewport;
     vec4 cameraPos;
     vec4 material;  // x: roughness, y: metallic (0..1)
+    vec4 materialParams[MAX_MATERIAL_PARAMS]; // node material: values typed into its nodes (see materialSurface())
 };
 
 // Scene lights, filled by the Renderer once per frame (binding 1, shared by every mesh).
@@ -100,6 +102,34 @@ vec3 toEnvironment(vec3 dir)
 }
 
 const float PI = 3.14159265359;
+
+// ---------------------------------------------------------------------------
+// Material: the surface at this pixel (Claude: declarations and the default).
+//
+// Without a node material, materialSurface() returns the entity's own values (below).
+// With one, the editor replaces everything between the two marker lines with the node
+// functions of material_nodes.glsl and a materialSurface() generated from the material's
+// graph, and compiles this shader again at runtime. Values typed into the nodes arrive in
+// materialParams[]. Don't remove the markers.
+//
+// main() takes the surface from here:  Surface surf = materialSurface();
+// ---------------------------------------------------------------------------
+struct Surface
+{
+    vec3 baseColor;  // linear
+    float roughness; // 0..1
+    float metallic;  // 0..1
+};
+//@material-begin
+Surface materialSurface()
+{
+    Surface s;
+    s.baseColor = color.rgb;
+    s.roughness = material.x;
+    s.metallic = material.y;
+    return s;
+}
+//@material-end
 
 float DistGGX(vec3 N, vec3 H, float a)
 {
