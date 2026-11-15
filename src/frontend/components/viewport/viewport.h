@@ -1,7 +1,10 @@
 #pragma once
 
+#include <QElapsedTimer>
 #include <QPoint>
 #include <QRhiWidget>
+#include <QSet>
+#include <QTimer>
 #include <functional>
 
 #include "engine/render/camera.h"
@@ -31,8 +34,16 @@ class Selection;
 //                     right click during the drag cancels it). The center handle moves
 //                     in the view plane (move) or scales uniformly (scale)
 //   right drag        orbit,  middle drag = pan,  wheel = zoom
+//
+// Free camera (setCameraMode(CameraMode::Free)):
+//   hold right button look around (cursor hidden), and meanwhile
+//                     W/S forward/back, A/D left/right, E/Q up/down, Shift = faster,
+//                     wheel = flying speed
+//   wheel             move forward / back,  middle drag = pan
 class Viewport : public QRhiWidget
 {
+    Q_OBJECT
+
 public:
     explicit Viewport(QWidget *parent = nullptr);
     ~Viewport() override;
@@ -59,7 +70,23 @@ public:
     const OrbitCamera &camera() const { return m_camera; }
     void setCamera(const OrbitCamera &camera);
 
+    void setCameraMode(CameraMode mode);
+    CameraMode cameraMode() const { return m_cameraMode; }
+    // Free camera speed, world units per second.
+    void setFlySpeed(float speed);
+    float flySpeed() const { return m_flySpeed; }
+    static constexpr float MinFlySpeed = 0.1f;
+    static constexpr float MaxFlySpeed = 200.0f;
+
+signals:
+    void cameraModeChanged(CameraMode mode);
+    void flySpeedChanged(float speed);
+
 protected:
+    bool event(QEvent *event) override;
+    void keyPressEvent(QKeyEvent *event) override;
+    void keyReleaseEvent(QKeyEvent *event) override;
+    void focusOutEvent(QFocusEvent *event) override;
     void initialize(QRhiCommandBuffer *cb) override;
     void render(QRhiCommandBuffer *cb) override;
     void releaseResources() override;
@@ -78,6 +105,8 @@ private:
     // Lays the gizmo out on the selected entity; false if nothing (or nothing visible) is selected.
     bool layoutGizmo();
     void redraw();
+    void stopFlying();
+    void flyStep(); // timer: moves the free camera by the held keys
 
     Renderer m_renderer;
     OrbitCamera m_camera;
@@ -91,4 +120,12 @@ private:
 
     Qt::MouseButton m_dragButton = Qt::NoButton; // camera drag
     QPoint m_lastMouse;
+
+    CameraMode m_cameraMode = CameraMode::Orbit;
+    float m_flySpeed = 4.0f;
+    bool m_flying = false;   // free camera, right button held
+    QPoint m_lookAnchor;     // global cursor position, kept there while looking
+    QSet<int> m_flyKeys;     // movement keys held
+    QTimer m_flyTimer;
+    QElapsedTimer m_flyClock;
 };

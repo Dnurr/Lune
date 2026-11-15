@@ -158,6 +158,15 @@ work along the world axes or the entity's own (`Gizmo::Space`, T); scale always 
 entity's axes, since scale is applied before rotation. The center handle moves the entity
 in the plane facing the camera (move) or scales it uniformly (scale).
 
+The **camera** is one `OrbitCamera` (target, yaw, pitch, distance) driven two ways
+(`CameraMode`): Orbit turns it around the target; Free turns it around the eye
+(`look()`) and moves eye and target together (`fly()`), keeping the target `distance`
+ahead. Renderer, gizmo, picking and the scene file see the same camera either way, and
+switching mode never moves the view. While the right button is held in Free mode the
+viewport takes W/A/S/D/Q/E (overriding the tool shortcuts), hides the cursor and keeps it
+in place, and a timer moves the camera by the held keys at `flySpeed` units per second.
+`CameraMenu` is the Orbit / Free bar at the top center of the free area.
+
 ### Lights
 
 A light is an entity with a `Light` component (`std::optional<Light>` in `Entity`), placed

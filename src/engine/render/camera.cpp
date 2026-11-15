@@ -10,6 +10,17 @@ QVector3D OrbitCamera::eye() const
     return target + offset * distance;
 }
 
+QVector3D OrbitCamera::forward() const
+{
+    return (target - eye()).normalized();
+}
+
+QVector3D OrbitCamera::right() const
+{
+    const float y = qDegreesToRadians(yaw);
+    return QVector3D(qCos(y), 0.0f, -qSin(y)); // forward x world up, flattened
+}
+
 QMatrix4x4 OrbitCamera::view() const
 {
     QMatrix4x4 m;
@@ -71,4 +82,16 @@ void OrbitCamera::pan(float dx, float dy)
 void OrbitCamera::zoom(float steps)
 {
     distance = qBound(0.5f, distance * qPow(0.88f, steps), 500.0f);
+}
+
+void OrbitCamera::look(float deltaYaw, float deltaPitch)
+{
+    const QVector3D e = eye();
+    orbit(deltaYaw, deltaPitch);
+    target += e - eye(); // the eye stays, the target moves around it
+}
+
+void OrbitCamera::fly(const QVector3D &move)
+{
+    target += right() * move.x() + QVector3D(0, 1, 0) * move.y() + forward() * move.z();
 }

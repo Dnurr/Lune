@@ -207,6 +207,16 @@ QFrame#DisplayMenu QAbstractSpinBox, QFrame#DisplayMenu QComboBox { padding: 4px
 QFrame#DisplayMenu QAbstractSpinBox:focus, QFrame#DisplayMenu QComboBox:focus,
 QFrame#DisplayMenu QComboBox:on { padding: 3px 7px; }
 QFrame#DisplayMenu QComboBox { padding-right: 30px; }
+/* MSVC limits one string literal to ~16 KB: the style sheet is split in pieces. */
+)QSS" R"QSS(
+/* Camera mode bar, top center of the viewport */
+QFrame#CameraMenu {
+    background-color: @glassStrong; color: @onSurface;
+    border: 1px solid @glassBorder; border-radius: 10px;
+}
+QToolButton#CameraMenuButton { color: @onSurfaceVariant; padding: 3px 10px; border-radius: 7px; font-weight: 600; }
+QToolButton#CameraMenuButton:checked { background-color: @secondaryContainer; color: @onSecondaryContainer; }
+QLabel#CameraMenuSpeed { color: @onSurfaceVariant; padding: 0 8px 0 6px; background: transparent; }
 
 /* Lists inside a panel sit directly on the glass */
 Panel QAbstractItemView { background: transparent; border: none; padding: 0; }

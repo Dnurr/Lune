@@ -113,6 +113,8 @@ Written by the editor (`Editor::editorState()`):
 | `camera.target` | Orbit center `[x, y, z]`. |
 | `camera.yaw`, `camera.pitch` | Degrees; pitch is clamped to ±89. |
 | `camera.distance` | Distance from the target, clamped to 0.5–500. |
+| `camera.mode` | `"orbit"` (default) or `"free"`. Both use the fields above: the free camera looks from the same eye. |
+| `camera.flySpeed` | Free camera speed in world units per second (default 4, clamped to 0.1–200). |
 | `display.exposure` | Viewport exposure in EV, clamped to ±10. |
 | `display.tonemapper` | `"none"`, `"reinhard"`, `"aces"` or `"agx"`; unknown values fall back to `"none"`. |
 

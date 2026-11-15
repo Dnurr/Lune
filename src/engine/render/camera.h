@@ -5,7 +5,17 @@
 #include <QSizeF>
 #include <QVector3D>
 
+// How the editor moves the camera. Both drive the same OrbitCamera, so switching keeps
+// the view exactly where it is.
+enum class CameraMode
+{
+    Orbit, // turn around the target (right drag), zoom towards it
+    Free,  // turn around the eye and fly (right drag + WASD), like a game engine
+};
+
 // Camera orbiting around a target point (editor-style).
+// The free camera uses the same state: it turns around the eye (look) and moves eye and
+// target together (fly), so the target stays `distance` ahead of the eye.
 // Angles in degrees; projection in the OpenGL clip-space convention
 // (the renderer corrects it per backend where needed).
 class OrbitCamera
@@ -21,6 +31,8 @@ public:
     float farPlane = 1000.0f;
 
     QVector3D eye() const;
+    QVector3D forward() const; // unit, from the eye towards the target
+    QVector3D right() const;   // unit, horizontal
     QMatrix4x4 view() const;
     QMatrix4x4 projection(float aspect) const;
 
@@ -37,4 +49,9 @@ public:
     void pan(float dx, float dy);
     // Positive steps move closer (one mouse-wheel notch = 1 step).
     void zoom(float steps);
+
+    // Free camera: turn around the eye (same angle convention as orbit()), and move eye
+    // and target by `move` = (right, world up, forward) in world units.
+    void look(float deltaYaw, float deltaPitch);
+    void fly(const QVector3D &move);
 };

@@ -28,6 +28,7 @@
 #include "components/panel/assets/assets.h"
 #include "components/panel/inspector/inspector.h"
 #include "components/panel/outliner/outliner.h"
+#include "components/viewport/cameramenu.h"
 #include "components/viewport/displaymenu.h"
 #include "components/viewport/viewport.h"
 #include "core/commands.h"
@@ -159,8 +160,18 @@ void Editor::createMenus()
     m_collapsePanels = new QAction("Hide Panels\tTab", this);
     m_collapsePanels->setCheckable(true);
     connect(m_collapsePanels, &QAction::toggled, this, &Editor::setPanelsCollapsed);
+    // Camera: orbit around the target, or fly (also in the bar at the top of the viewport).
+    auto *freeCamera = new QAction("Free Camera", this);
+    freeCamera->setCheckable(true);
+    connect(freeCamera, &QAction::toggled, this, [this](bool on) {
+        m_viewport->setCameraMode(on ? CameraMode::Free : CameraMode::Orbit);
+    });
+    connect(m_viewport, &Viewport::cameraModeChanged, freeCamera,
+            [freeCamera](CameraMode mode) { freeCamera->setChecked(mode == CameraMode::Free); });
+
     QMenu *view = menuBar()->addMenu("View");
     view->addAction(m_collapsePanels);
+    view->addAction(freeCamera);
     view->addAction(stats);
     view->addSeparator();
 
@@ -229,6 +240,8 @@ void Editor::createPanels()
     // Created last so it sits above the panels.
     // Display dropdown in the top-right corner of the free viewport area.
     new DisplayMenu(m_display, m_viewport);
+    // Orbit / Free camera, top center.
+    new CameraMenu(m_viewport);
 
     m_palette = new CommandPalette(this, m_viewport);
 }
@@ -312,6 +325,7 @@ void Editor::newScene()
     m_scene->clear();
     createDefaultScene();
     m_viewport->setCamera(OrbitCamera {});
+    m_viewport->setCameraMode(CameraMode::Orbit);
     m_display->reset();
     resetDocument(QString());
 }
@@ -412,6 +426,8 @@ QJsonObject Editor::editorState() const
     camera["yaw"] = c.yaw;
     camera["pitch"] = c.pitch;
     camera["distance"] = c.distance;
+    camera["mode"] = m_viewport->cameraMode() == CameraMode::Free ? QStringLiteral("free") : QStringLiteral("orbit");
+    camera["flySpeed"] = m_viewport->flySpeed();
     QJsonObject display;
     display["exposure"] = m_display->exposure();
     display["tonemapper"] = DisplaySettings::tonemapperIds().value(m_display->tonemapper());
@@ -432,6 +448,8 @@ void Editor::applyEditorState(const QJsonObject &state)
     c.pitch = qBound(-89.0f, float(camera["pitch"].toDouble(c.pitch)), 89.0f);
     c.distance = qBound(0.5f, float(camera["distance"].toDouble(c.distance)), 500.0f);
     m_viewport->setCamera(c);
+    m_viewport->setCameraMode(camera["mode"].toString() == QLatin1String("free") ? CameraMode::Free : CameraMode::Orbit);
+    m_viewport->setFlySpeed(float(camera["flySpeed"].toDouble(4.0)));
 
     // Missing or unknown values (older files, operators removed later): defaults.
     const QJsonObject display = state["display"].toObject();

@@ -55,6 +55,7 @@ add_executable(Lune
     src/frontend/components/viewport/viewport.cpp
     src/frontend/components/viewport/statsoverlay.cpp
     src/frontend/components/viewport/displaymenu.cpp
+    src/frontend/components/viewport/cameramenu.cpp
     src/frontend/components/widgets/draglabel.cpp
     src/frontend/components/widgets/vector3.cpp
     src/frontend/components/panel/panel.cpp

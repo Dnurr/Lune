@@ -22,6 +22,7 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 - [x] Picking, move / rotate / scale gizmo (Claude)
 - [x] Stats overlay, automated tests, documentation (Claude)
 - [x] Assets browser (folder tree + contents), resizable panels, Tab to hide them, layout saved between sessions (Claude)
+- [x] Free camera (fly with right button + WASD) next to the orbit camera, mode bar in the viewport (Claude)
 
 ## 2. HDR and shading (current phase)
 

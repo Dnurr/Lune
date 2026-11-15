@@ -1,7 +1,10 @@
 #include "viewport.h"
 
 #include <QChildEvent>
+#include <QCursor>
 #include <QElapsedTimer>
+#include <QKeyEvent>
+#include <QtMath>
 #include <rhi/qrhi.h>
 #include <QMouseEvent>
 #include <QUndoStack>
@@ -24,6 +27,10 @@ Viewport::Viewport(QWidget *parent)
     setFocusPolicy(Qt::ClickFocus);
 
     m_stats = new StatsOverlay(this);
+
+    m_flyTimer.setInterval(10);
+    m_flyTimer.setTimerType(Qt::PreciseTimer);
+    connect(&m_flyTimer, &QTimer::timeout, this, &Viewport::flyStep);
 }
 
 Viewport::~Viewport() = default;
@@ -70,6 +77,25 @@ void Viewport::setCamera(const OrbitCamera &camera)
 {
     m_camera = camera;
     redraw();
+}
+
+void Viewport::setCameraMode(CameraMode mode)
+{
+    if (mode == m_cameraMode)
+        return;
+    stopFlying();
+    m_dragButton = Qt::NoButton;
+    m_cameraMode = mode;
+    emit cameraModeChanged(mode);
+}
+
+void Viewport::setFlySpeed(float speed)
+{
+    speed = qBound(MinFlySpeed, speed, MaxFlySpeed);
+    if (qFuzzyCompare(speed, m_flySpeed))
+        return;
+    m_flySpeed = speed;
+    emit flySpeedChanged(speed);
 }
 
 void Viewport::setDisplaySettings(DisplaySettings *settings)
@@ -253,6 +279,19 @@ void Viewport::mousePressEvent(QMouseEvent *event)
         return;
     }
 
+    if (event->button() == Qt::RightButton && m_cameraMode == CameraMode::Free) {
+        // Look around: the cursor hides and stays put, only its motion counts.
+        m_flying = true;
+        m_lookAnchor = event->globalPosition().toPoint();
+        m_flyKeys.clear();
+        setFocus(Qt::MouseFocusReason); // the movement keys come here
+        setCursor(Qt::BlankCursor);
+        m_flyClock.start();
+        m_flyTimer.start();
+        event->accept();
+        return;
+    }
+
     if (event->button() == Qt::RightButton || event->button() == Qt::MiddleButton) {
         m_dragButton = event->button();
         m_lastMouse = pos.toPoint();
@@ -269,6 +308,17 @@ void Viewport::mouseMoveEvent(QMouseEvent *event)
     if (m_gizmo.isDragging()) {
         // Live preview: the scene is changed directly, the undo step is pushed on release.
         m_scene->setTransform(m_selection->current(), m_gizmo.dragTo(pos));
+        event->accept();
+        return;
+    }
+
+    if (m_flying) {
+        const QPoint d = event->globalPosition().toPoint() - m_lookAnchor;
+        if (!d.isNull()) {
+            m_camera.look(-d.x() * 0.2f, d.y() * 0.2f);
+            QCursor::setPos(m_lookAnchor); // its own move event has no motion
+            redraw();
+        }
         event->accept();
         return;
     }
@@ -308,6 +358,11 @@ void Viewport::mouseReleaseEvent(QMouseEvent *event)
         event->accept();
         return;
     }
+    if (m_flying && event->button() == Qt::RightButton) {
+        stopFlying();
+        event->accept();
+        return;
+    }
     if (event->button() == m_dragButton) {
         m_dragButton = Qt::NoButton;
         event->accept();
@@ -318,9 +373,106 @@ void Viewport::mouseReleaseEvent(QMouseEvent *event)
 
 void Viewport::wheelEvent(QWheelEvent *event)
 {
-    m_camera.zoom(event->angleDelta().y() / 120.0f);
+    const float steps = event->angleDelta().y() / 120.0f;
+    if (m_flying)
+        setFlySpeed(m_flySpeed * qPow(1.2f, steps)); // while looking: flying speed
+    else if (m_cameraMode == CameraMode::Free)
+        m_camera.fly(QVector3D(0, 0, steps * qMax(0.25f, m_flySpeed * 0.25f))); // forward / back
+    else
+        m_camera.zoom(steps);
     redraw();
     event->accept();
+}
+
+// ---------------------------------------------------------------------------
+// Free camera
+// ---------------------------------------------------------------------------
+
+namespace
+{
+bool isFlyKey(int key)
+{
+    switch (key) {
+    case Qt::Key_W:
+    case Qt::Key_A:
+    case Qt::Key_S:
+    case Qt::Key_D:
+    case Qt::Key_Q:
+    case Qt::Key_E:
+    case Qt::Key_Shift:
+        return true;
+    default:
+        return false;
+    }
+}
+} // namespace
+
+bool Viewport::event(QEvent *event)
+{
+    // While flying, W / E / Q ... are movement keys, not the window's shortcuts (tools).
+    if (event->type() == QEvent::ShortcutOverride && m_flying) {
+        auto *key = static_cast<QKeyEvent *>(event);
+        if (isFlyKey(key->key()) && (key->modifiers() & ~Qt::ShiftModifier) == Qt::NoModifier) {
+            event->accept();
+            return true;
+        }
+    }
+    return QRhiWidget::event(event);
+}
+
+void Viewport::keyPressEvent(QKeyEvent *event)
+{
+    if (m_flying && isFlyKey(event->key())) {
+        if (!event->isAutoRepeat())
+            m_flyKeys.insert(event->key());
+        event->accept();
+        return;
+    }
+    QRhiWidget::keyPressEvent(event);
+}
+
+void Viewport::keyReleaseEvent(QKeyEvent *event)
+{
+    if (m_flying && isFlyKey(event->key())) {
+        if (!event->isAutoRepeat())
+            m_flyKeys.remove(event->key());
+        event->accept();
+        return;
+    }
+    QRhiWidget::keyReleaseEvent(event);
+}
+
+void Viewport::focusOutEvent(QFocusEvent *event)
+{
+    stopFlying(); // e.g. Alt+Tab while holding the button
+    QRhiWidget::focusOutEvent(event);
+}
+
+void Viewport::stopFlying()
+{
+    if (!m_flying)
+        return;
+    m_flying = false;
+    m_flyKeys.clear();
+    m_flyTimer.stop();
+    unsetCursor();
+}
+
+void Viewport::flyStep()
+{
+    const float dt = qMin(0.1f, float(m_flyClock.restart()) / 1000.0f); // no jump after a stall
+    QVector3D dir;
+    if (m_flyKeys.contains(Qt::Key_W)) dir.setZ(dir.z() + 1);
+    if (m_flyKeys.contains(Qt::Key_S)) dir.setZ(dir.z() - 1);
+    if (m_flyKeys.contains(Qt::Key_D)) dir.setX(dir.x() + 1);
+    if (m_flyKeys.contains(Qt::Key_A)) dir.setX(dir.x() - 1);
+    if (m_flyKeys.contains(Qt::Key_E)) dir.setY(dir.y() + 1);
+    if (m_flyKeys.contains(Qt::Key_Q)) dir.setY(dir.y() - 1);
+    if (dir.isNull())
+        return;
+    const float boost = m_flyKeys.contains(Qt::Key_Shift) ? 3.0f : 1.0f;
+    m_camera.fly(dir.normalized() * (m_flySpeed * boost * dt));
+    redraw();
 }
 
 void Viewport::leaveEvent(QEvent *event)

@@ -93,6 +93,9 @@ Third-party libraries are downloaded on the first configure into `build/_deps`
 | Orbit | Right drag |
 | Pan | Middle drag |
 | Zoom | Wheel |
+| Orbit / free camera | Bar at the top of the viewport, or View > Free Camera |
+| Free camera: look / fly | Hold right button + move the mouse; W A S D, Q / E down / up, Shift faster |
+| Free camera: speed / move | Wheel while holding the right button / wheel alone moves forward and back |
 | Scrub a value | Drag a property's label (Shift = fine, Ctrl = coarse) |
 | Move a panel | Drag its title; it snaps to the nearest edge |
 | Resize a panel | Drag its inner edge (the one facing the viewport) |
