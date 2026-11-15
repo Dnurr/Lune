@@ -303,9 +303,10 @@ void main()
 
     if (dot(N, V) < 0.0) N = -N;
 
-    vec3 albedo = color.rgb;
-    float roughness = max(material.x, 0.045);
-    float metallic = material.y;
+    Surface surf = materialSurface();
+    vec3 albedo = surf.baseColor;
+    float roughness = max(surf.roughness, 0.045);
+    float metallic = surf.metallic;
 
     vec3 F0 = vec3(0.04);
     F0 = mix(F0, albedo, metallic);
