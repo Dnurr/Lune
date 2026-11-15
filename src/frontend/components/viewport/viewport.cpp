@@ -75,8 +75,10 @@ void Viewport::setEditorContext(Scene *scene, Selection *selection, QUndoStack *
 
 void Viewport::setCamera(const OrbitCamera &camera)
 {
+    const float shift = m_goal.shiftX; // the lens shift follows the panels, not the scene
     m_camera = camera;
     m_goal = camera;
+    m_camera.shiftX = m_goal.shiftX = shift;
     redraw();
 }
 
@@ -165,6 +167,8 @@ void Viewport::render(QRhiCommandBuffer *cb)
 
     const EntityId selected = m_selection ? m_selection->current() : InvalidEntity;
     m_renderer.render(cb, renderTarget(), m_camera, m_scene, selected);
+    if (m_renderer.takeMaterialErrorsChanged())
+        emit materialErrorsChanged();
 
     if (m_stats->isVisible()) {
         // CPU time to prepare and record this frame (the GPU work happens later).
@@ -233,8 +237,10 @@ bool Viewport::eventFilter(QObject *watched, QEvent *event)
     case QEvent::Show:
     case QEvent::Hide:
     case QEvent::DynamicPropertyChange:
-        if (watched->parent() == this)
+        if (watched->parent() == this) {
             redraw(); // glass rectangles changed
+            updateLensShift();
+        }
         break;
     default:
         break;
@@ -384,6 +390,37 @@ void Viewport::wheelEvent(QWheelEvent *event)
         m_goal.zoom(steps);
     redraw();
     event->accept();
+}
+
+void Viewport::setCenterInFreeArea(bool on)
+{
+    m_centerInFreeArea = on;
+    updateLensShift();
+}
+
+void Viewport::updateLensShift()
+{
+    float shift = 0.0f;
+    if (m_centerInFreeArea && width() > 0) {
+        // Free area: between the panels docked on the left and on the right.
+        int left = 0, right = width();
+        for (QObject *o : children()) {
+            auto *w = qobject_cast<QWidget *>(o);
+            if (!w || !w->isVisible() || !w->property("glass").toBool() || w->property("dockSide").isNull())
+                continue;
+            const QString side = w->property("dockSide").toString();
+            if (side == QLatin1String("left"))
+                left = qMax(left, w->geometry().right() + 1);
+            else if (side == QLatin1String("right"))
+                right = qMin(right, w->geometry().left());
+        }
+        if (right > left)
+            shift = float((left + right) * 0.5 - width() * 0.5) / float(width()) * 2.0f;
+    }
+    if (qAbs(shift - m_goal.shiftX) > 1e-4f) {
+        m_goal.shiftX = shift;
+        redraw();
+    }
 }
 
 // ---------------------------------------------------------------------------

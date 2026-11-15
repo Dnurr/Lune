@@ -10,6 +10,8 @@
 #include <QBoxLayout>
 #include <QCloseEvent>
 #include <QAbstractSpinBox>
+#include <QButtonGroup>
+#include <QToolButton>
 #include <QApplication>
 #include <QIcon>
 #include <QJsonArray>
@@ -26,6 +28,7 @@
 
 #include "components/palette/commandpalette.h"
 #include "components/panel/assets/assets.h"
+#include "components/panel/nodes/nodespanel.h"
 #include "components/panel/inspector/inspector.h"
 #include "components/panel/outliner/outliner.h"
 #include "components/viewport/cameramenu.h"
@@ -62,6 +65,7 @@ Editor::Editor(QWidget *parent)
 
     createMenus();
     createPanels();
+    createWorkspaceTabs();
     restoreLayout();
     qApp->installEventFilter(this); // Tab over the viewport, wherever the focus is
 
@@ -237,6 +241,12 @@ void Editor::createPanels()
     m_assets->setMargin(12);
     m_assets->setPanelHeight(220);
     connect(m_assets, &AssetsPanel::fileActivated, this, &Editor::openAsset);
+
+    // Nodes (right, Shading workspace): materials as node graphs.
+    m_nodes = new NodesPanel(m_scene, m_selection, m_undo, m_viewport, Panel::Side::Right);
+    m_nodes->setMargin(12);
+    m_nodes->setPanelWidth(620);
+    m_nodes->setPanelEnabled(false); // turned on by the Shading workspace
 
     // Drag and drop onto the viewport (from the Assets panel or the file manager).
     m_viewport->setDropSuffixes({ "obj", "gltf", "glb", "hdr", "lune" });
@@ -480,18 +490,106 @@ void Editor::closeEvent(QCloseEvent *event)
 
 namespace
 {
-constexpr int kLayoutVersion = 1;
+constexpr int kLayoutVersion = 2; // 2: workspaces
+const QStringList kWorkspaces = { QStringLiteral("layout"), QStringLiteral("shading") };
+} // namespace
+
+QHash<QString, Panel *> Editor::workspacePanels() const
+{
+    return { { QStringLiteral("scene"), m_outliner },
+             { QStringLiteral("inspector"), m_inspector },
+             { QStringLiteral("assets"), m_assets },
+             { QStringLiteral("nodes"), m_nodes } };
+}
+
+QJsonObject Editor::captureWorkspace() const
+{
+    QJsonObject panels;
+    const auto all = workspacePanels();
+    for (auto it = all.cbegin(); it != all.cend(); ++it)
+        panels[it.key()] = it.value()->layoutState();
+    return panels;
+}
+
+void Editor::applyWorkspace(const QJsonObject &state)
+{
+    const auto all = workspacePanels();
+    for (auto it = all.cbegin(); it != all.cend(); ++it)
+        if (state.contains(it.key()))
+            it.value()->restoreLayoutState(state[it.key()].toObject());
+}
+
+QJsonObject Editor::defaultWorkspace(const QString &name)
+{
+    auto panel = [](const char *side, int width, int height, bool enabled) {
+        QJsonObject p;
+        p["side"] = QString::fromLatin1(side);
+        p["width"] = width;
+        p["height"] = height;
+        p["enabled"] = enabled;
+        return p;
+    };
+    const bool shading = name == QLatin1String("shading");
+    QJsonObject panels;
+    panels["scene"] = panel("left", 220, 220, !shading);
+    panels["inspector"] = panel("right", 280, 220, !shading);
+    panels["assets"] = panel("bottom", 220, 220, true);
+    panels["nodes"] = panel("right", 620, 220, shading);
+    return panels;
+}
+
+void Editor::createWorkspaceTabs()
+{
+    // Tabs on the right end of the menu bar.
+    auto *bar = new QWidget(menuBar());
+    auto *row = new QHBoxLayout(bar);
+    row->setContentsMargins(0, 2, 8, 2);
+    row->setSpacing(2);
+    auto *group = new QButtonGroup(bar);
+    group->setExclusive(true);
+    const QStringList titles = { QStringLiteral("Layout"), QStringLiteral("Shading") };
+    for (int i = 0; i < kWorkspaces.size(); ++i) {
+        auto *tab = new QToolButton(bar);
+        tab->setObjectName("WorkspaceTab");
+        tab->setText(titles[i]);
+        tab->setCheckable(true);
+        tab->setFocusPolicy(Qt::NoFocus);
+        tab->setCursor(Qt::PointingHandCursor);
+        tab->setChecked(kWorkspaces[i] == m_workspace);
+        group->addButton(tab);
+        row->addWidget(tab);
+        const QString name = kWorkspaces[i];
+        connect(tab, &QToolButton::clicked, this, [this, name] { switchWorkspace(name); });
+        m_workspaceTabs.insert(name, tab);
+    }
+    menuBar()->setCornerWidget(bar, Qt::TopRightCorner);
+    for (const QString &name : kWorkspaces)
+        m_workspaces.insert(name, defaultWorkspace(name));
+}
+
+void Editor::switchWorkspace(const QString &name)
+{
+    if (!kWorkspaces.contains(name))
+        return;
+    if (name != m_workspace) {
+        m_workspaces[m_workspace] = captureWorkspace();
+        m_workspace = name;
+        applyWorkspace(m_workspaces.value(name, defaultWorkspace(name)));
+    }
+    if (QToolButton *tab = m_workspaceTabs.value(name))
+        tab->setChecked(true);
+    m_viewport->setCenterInFreeArea(name == QLatin1String("shading"));
 }
 
 void Editor::saveLayout() const
 {
-    QJsonObject panels;
-    panels["scene"] = m_outliner->layoutState();
-    panels["inspector"] = m_inspector->layoutState();
-    panels["assets"] = m_assets->layoutState();
+    QJsonObject workspaces;
+    for (const QString &name : kWorkspaces)
+        workspaces[name] = name == m_workspace ? captureWorkspace() : m_workspaces.value(name, defaultWorkspace(name));
     QJsonObject layout;
     layout["version"] = kLayoutVersion;
-    layout["panels"] = panels;
+    layout["workspace"] = m_workspace;
+    layout["workspaces"] = workspaces;
     layout["collapsed"] = Panel::isCollapsed(m_viewport);
     layout["assets"] = m_assets->viewState();
 
@@ -511,12 +609,18 @@ void Editor::restoreLayout()
         m_assets->setRootPath(root);
 
     const QJsonObject layout = QJsonDocument::fromJson(settings.value("editor/layout").toByteArray()).object();
-    if (layout["version"].toInt() != kLayoutVersion)
-        return; // nothing saved yet, or an older layout: defaults
-    const QJsonObject panels = layout["panels"].toObject();
-    m_outliner->restoreLayoutState(panels["scene"].toObject());
-    m_inspector->restoreLayoutState(panels["inspector"].toObject());
-    m_assets->restoreLayoutState(panels["assets"].toObject());
+    if (layout["version"].toInt() != kLayoutVersion) {
+        switchWorkspace(m_workspace); // nothing saved yet, or an older layout: defaults
+        return;
+    }
+    const QJsonObject workspaces = layout["workspaces"].toObject();
+    for (const QString &name : kWorkspaces)
+        if (workspaces.contains(name))
+            m_workspaces.insert(name, workspaces[name].toObject());
+    const QString current = layout["workspace"].toString();
+    m_workspace = kWorkspaces.contains(current) ? current : kWorkspaces.first();
+    applyWorkspace(m_workspaces.value(m_workspace));
+    switchWorkspace(m_workspace);
     m_assets->restoreViewState(layout["assets"].toObject());
     m_collapsePanels->setChecked(layout["collapsed"].toBool());
 }

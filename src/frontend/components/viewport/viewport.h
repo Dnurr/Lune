@@ -90,7 +90,16 @@ public:
     // under it. `onGround` tells which.
     QVector3D dropPoint(const QPointF &pos, bool *onGround = nullptr) const;
 
+    // Node materials: why one can't be drawn (empty = fine). materialErrorsChanged() after a
+    // frame that changed any.
+    QString materialError(MaterialId id) const { return m_renderer.materialError(id); }
+
+    // Centers the scene in the part of the viewport not covered by the panels on the left
+    // and right (a lens shift, smoothed like the camera). Off: centered in the whole widget.
+    void setCenterInFreeArea(bool on);
+
 signals:
+    void materialErrorsChanged();
     void filesDropped(const QStringList &paths, const QPointF &pos);
     void cameraModeChanged(CameraMode mode);
     void flySpeedChanged(float speed);
@@ -122,6 +131,7 @@ private:
     bool layoutGizmo();
     void redraw();
     void stopFlying();
+    void updateLensShift();
     QStringList droppableFiles(const QMimeData *mime) const;
     // Once per frame, before drawing: flies the goal by the held keys, then moves the
     // drawn camera towards the goal. Returns true while it's still moving.
@@ -142,6 +152,7 @@ private:
     QPoint m_lastMouse;
 
     QStringList m_dropSuffixes;
+    bool m_centerInFreeArea = false;
     CameraMode m_cameraMode = CameraMode::Orbit;
     float m_flySpeed = 4.0f;
     bool m_flying = false;   // free camera, right button held

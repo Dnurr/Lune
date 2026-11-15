@@ -76,6 +76,7 @@ public:
         float aspect = 1.0f;
         float nearPlane = 0.1f;
         float farPlane = 1000.0f;
+        float shiftX = 0.0f; // OrbitCamera::shiftX
     };
 
     // A mesh drawn into the shadow maps: its buffers and its binding set (casterBindings()).

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QHash>
+#include <QJsonObject>
 #include <QMainWindow>
 
 #include "engine/scene/entity.h"
@@ -8,6 +10,9 @@ class AssetsPanel;
 class CommandPalette;
 class DisplaySettings;
 class InspectorPanel;
+class NodesPanel;
+class Panel;
+class QToolButton;
 class OutlinerPanel;
 class QAction;
 class QCloseEvent;
@@ -53,6 +58,17 @@ private:
     void saveLayout() const;
     void restoreLayout();
     void setPanelsCollapsed(bool collapsed);
+
+    // Workspaces: named panel arrangements, switched with the tabs in the menu bar.
+    //   layout   scene outliner, inspector, assets
+    //   shading  node editor on the right, assets; the scene centered in the free area
+    // Each one remembers its own panels (sides, sizes); see saveLayout().
+    void createWorkspaceTabs();
+    void switchWorkspace(const QString &name);
+    QJsonObject captureWorkspace() const;          // the panels as they are now
+    void applyWorkspace(const QJsonObject &state); // turn panels on/off, sides, sizes
+    static QJsonObject defaultWorkspace(const QString &name);
+    QHash<QString, Panel *> workspacePanels() const;
     void openAsset(const QString &path); // double-click in the assets browser
     // Files dropped on the viewport: meshes land where they're dropped, an .hdr becomes
     // the environment, a scene opens.
@@ -93,5 +109,9 @@ private:
     OutlinerPanel *m_outliner = nullptr;
     InspectorPanel *m_inspector = nullptr;
     AssetsPanel *m_assets = nullptr;
+    NodesPanel *m_nodes = nullptr;
+    QString m_workspace = QStringLiteral("layout");
+    QHash<QString, QJsonObject> m_workspaces; // saved state of the workspaces not shown
+    QHash<QString, QToolButton *> m_workspaceTabs;
     QString m_scenePath; // empty = never saved
 };

@@ -32,6 +32,11 @@ QMatrix4x4 OrbitCamera::projection(float aspect) const
 {
     QMatrix4x4 m;
     m.perspective(fieldOfView, aspect, nearPlane, farPlane);
+    if (shiftX != 0.0f) {
+        QMatrix4x4 shift; // clip x += shiftX * w
+        shift(0, 3) = shiftX;
+        m = shift * m;
+    }
     return m;
 }
 
@@ -99,6 +104,7 @@ void OrbitCamera::moveTowards(const OrbitCamera &goal, float amount)
     pitch += (goal.pitch - pitch) * t;
     // Distance: in log space, so zooming feels the same near and far.
     distance *= qPow(goal.distance / distance, t);
+    shiftX += (goal.shiftX - shiftX) * t;
     fieldOfView = goal.fieldOfView;
     nearPlane = goal.nearPlane;
     farPlane = goal.farPlane;
@@ -108,7 +114,8 @@ bool OrbitCamera::isCloseTo(const OrbitCamera &other) const
 {
     const float eps = 1e-4f * qMax(1.0f, distance);
     return (target - other.target).length() < eps && qAbs(yaw - other.yaw) < 0.01f
-        && qAbs(pitch - other.pitch) < 0.01f && qAbs(distance - other.distance) < eps;
+        && qAbs(pitch - other.pitch) < 0.01f && qAbs(distance - other.distance) < eps
+        && qAbs(shiftX - other.shiftX) < 1e-4f;
 }
 
 void OrbitCamera::fly(const QVector3D &move)

@@ -741,6 +741,7 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         shadowCamera.aspect = aspect;
         shadowCamera.nearPlane = camera.nearPlane;
         shadowCamera.farPlane = camera.farPlane;
+        shadowCamera.shiftX = camera.shiftX;
         m_shadows.prepare(rub, shadowLights, shadowCamera, boundsMin, boundsMax, !draws.empty());
     }
 

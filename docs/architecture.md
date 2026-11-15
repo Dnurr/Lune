@@ -129,13 +129,37 @@ never on top of it.
   filter so text fields keep Tab); panels that hide themselves (the Inspector with no
   selection) use `setPanelVisible`, which waits for the panels to be expanded again.
 
+### Workspaces
+
+Tabs at the right end of the menu bar switch between named panel arrangements:
+**Layout** (outliner, inspector, assets) and **Shading** (the Nodes panel on the right,
+assets). Each panel has its own content-driven visibility (`setPanelVisible`, e.g. the
+Inspector only with a selection) and a per-workspace switch (`setPanelEnabled`); it shows
+when both are on and the panels aren't collapsed. Switching stores the current panels'
+sides and sizes for that workspace and applies the other's. In Shading the viewport
+centers the scene in the area the panels leave free (`Viewport::setCenterInFreeArea`, a
+horizontal lens shift in the projection, smoothed with the camera; shadow cascades fit the
+shifted frustum), so the camera never moves.
+
 ### Layout
 
-The editor layout is per user, not per scene: window geometry, each panel's side and
-size, whether the panels are collapsed, the assets splitter and folder. `Editor` saves it
+The editor layout is per user, not per scene: window geometry, the current workspace and
+each workspace's panels (side, size, on/off), whether the panels are collapsed, the assets
+splitter and folder. `Editor` saves it
 with `QSettings` (on Windows under `HKEY_CURRENT_USER\Software\Lune\Lune`) when the
 window closes and restores it at startup; the JSON blob carries a version, and a missing
 or older one means the defaults.
+
+### Nodes
+
+`NodesPanel` (`frontend/components/panel/nodes/`) edits the material of the selected
+entity: a combo box over the scene's material library (choosing one assigns it), the
+canvas (`NodeEditorView`, a `QGraphicsView`) and the selected node's values. The canvas
+never changes the graph itself: it emits the whole graph after each edit, the panel
+pushes a `SetMaterialGraphCommand`, and the change comes back through the scene's
+`materialChanged`. Graphs are small, so whole-graph snapshots keep undo simple; drags of a
+node or a value merge into one step. The graph model is engine-side and UI-free
+(`engine/material/`), ready for other graph kinds. See [Node materials](materials.md).
 
 ### Assets
 

@@ -64,6 +64,10 @@ public:
     // Applied right away, or when the panels are expanded again if they're collapsed.
     void setPanelVisible(bool visible);
     bool wantsVisible() const { return m_wantsVisible; }
+    // Part of the current workspace (the editor turns panels on and off per workspace).
+    // Shown only when enabled, wanting to be visible, and not collapsed.
+    void setPanelEnabled(bool enabled);
+    bool isPanelEnabled() const { return m_enabled; }
 
     // Collapses / expands every top-level panel of `host` (animated).
     static void setCollapsed(QWidget *host, bool collapsed);
@@ -125,4 +129,7 @@ private:
     int m_resizeStartSize = 0;
     bool m_fills = false;
     bool m_wantsVisible = true;
+    bool m_enabled = true;
+    void applyVisibility();
+    void updateDockSideProperty(); // "dockSide" = left/right/bottom, read by the viewport
 };

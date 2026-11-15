@@ -278,7 +278,7 @@ void ShadowMaps::prepare(QRhiResourceUpdateBatch *rub, const std::vector<Light> 
         QVector3D sum;
         for (int k = 0; k < 8; ++k) {
             const float d = splits[i + (k & 1)];
-            pts[k] = camera.eye + camera.forward * d + camera.right * (d * tanX * (k & 2 ? 1.0f : -1.0f))
+            pts[k] = camera.eye + camera.forward * d + camera.right * (d * tanX * ((k & 2 ? 1.0f : -1.0f) - camera.shiftX))
                 + camera.up * (d * tanY * (k & 4 ? 1.0f : -1.0f));
             sum += pts[k];
         }

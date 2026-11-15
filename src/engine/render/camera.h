@@ -29,6 +29,10 @@ public:
     float fieldOfView = 50.0f; // vertical, degrees
     float nearPlane = 0.1f;
     float farPlane = 1000.0f;
+    // Horizontal lens shift in clip space (2 = the whole width): the image slides sideways
+    // without turning the camera, e.g. to center the scene in the part of the viewport
+    // that panels don't cover. Not saved with the scene.
+    float shiftX = 0.0f;
 
     QVector3D eye() const;
     QVector3D forward() const; // unit, from the eye towards the target

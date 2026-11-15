@@ -217,6 +217,12 @@ QFrame#CameraMenu {
 QToolButton#CameraMenuButton { color: @onSurfaceVariant; padding: 3px 10px; border-radius: 7px; font-weight: 600; }
 QToolButton#CameraMenuButton:checked { background-color: @secondaryContainer; color: @onSecondaryContainer; }
 QLabel#CameraMenuSpeed { color: @onSurfaceVariant; padding: 0 8px 0 6px; background: transparent; }
+/* Workspace tabs, right end of the menu bar */
+QToolButton#WorkspaceTab { color: @onSurfaceVariant; padding: 3px 12px; border-radius: 7px; font-weight: 600; }
+QToolButton#WorkspaceTab:checked { background-color: @secondaryContainer; color: @onSecondaryContainer; }
+/* Node editor: the canvas sits on the panel's glass */
+QGraphicsView#NodeEditor { background: transparent; border: 1px solid @glassBorder; border-radius: 10px; }
+QLabel#NodesStatus { color: @error; background: transparent; }
 
 /* Lists inside a panel sit directly on the glass */
 Panel QAbstractItemView { background: transparent; border: none; padding: 0; }

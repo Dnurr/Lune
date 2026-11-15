@@ -59,6 +59,7 @@ Panel::Panel(const QString &title, QWidget *parent, Side side)
         setProperty("glass", true);
         setProperty("glassRadius", 12); // same as border-radius in the theme
         setMouseTracking(true);         // resize cursor on the inner edge
+        updateDockSideProperty();
         if (isCollapsed(parent))
             QFrame::setVisible(false);
         relayoutAll(false); // existing panels make room for this one
@@ -76,6 +77,7 @@ void Panel::setSide(Side side)
     if (m_side == side)
         return;
     m_side = side;
+    updateDockSideProperty();
     applyOrientation();
     relayoutAll(false);
     emit sideChanged(m_side);
@@ -152,6 +154,14 @@ bool Panel::isOnResizeEdge(const QPoint &pos) const
     return false;
 }
 
+void Panel::updateDockSideProperty()
+{
+    if (isNested())
+        return;
+    static const char *const sides[] = { "left", "right", "bottom" };
+    setProperty("dockSide", QString::fromLatin1(sides[int(m_side)]));
+}
+
 void Panel::setContentFills(bool fills)
 {
     m_fills = fills;
@@ -165,8 +175,19 @@ void Panel::setContentFills(bool fills)
 void Panel::setPanelVisible(bool visible)
 {
     m_wantsVisible = visible;
+    applyVisibility();
+}
+
+void Panel::setPanelEnabled(bool enabled)
+{
+    m_enabled = enabled;
+    applyVisibility();
+}
+
+void Panel::applyVisibility()
+{
     const bool collapsed = !isNested() && isCollapsed(parentWidget());
-    setVisible(visible && !collapsed);
+    setVisible(m_wantsVisible && m_enabled && !collapsed);
 }
 
 bool Panel::isCollapsed(const QWidget *host)
@@ -192,7 +213,7 @@ void Panel::setCollapsed(QWidget *host, bool collapsed)
     // Show them all first, so each one gets its final place, then slide them in.
     QList<Panel *> shown;
     for (Panel *p : panels) {
-        if (p->m_wantsVisible && p->isHidden()) {
+        if (p->m_wantsVisible && p->m_enabled && p->isHidden()) {
             p->QFrame::setVisible(true);
             shown.append(p);
         }
@@ -244,6 +265,7 @@ QJsonObject Panel::layoutState() const
     state["side"] = QString::fromLatin1(sides[int(m_side)]);
     state["width"] = m_width;
     state["height"] = m_height;
+    state["enabled"] = m_enabled;
     return state;
 }
 
@@ -258,6 +280,8 @@ void Panel::restoreLayoutState(const QJsonObject &state)
         setSide(Side::Bottom);
     m_width = qMax(kMinPanelSize, state["width"].toInt(m_width));
     m_height = qMax(kMinPanelSize, state["height"].toInt(m_height));
+    if (state.contains("enabled"))
+        setPanelEnabled(state["enabled"].toBool());
     relayoutAll(false);
 }
 
@@ -390,6 +414,7 @@ void Panel::mouseReleaseEvent(QMouseEvent *event)
 
     const bool changed = newSide != m_side;
     m_side = newSide;
+    updateDockSideProperty();
     if (changed)
         applyOrientation();
     relayoutAll(true);

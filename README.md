@@ -19,6 +19,10 @@ Most actions are one keystroke or one search in the command palette away.
 - **Glass panels**: floating, draggable panels that snap to the left, right or bottom
   edge and resize from their inner edge; the viewport renders a blurred copy of the scene
   behind them. Tab over the viewport hides them all; the layout is restored at startup.
+- **Workspaces**: Layout (outliner, inspector, assets) and Shading (node editor, with the
+  scene centered beside it), tabs in the menu bar; each remembers its panels.
+- **Node materials**: materials as node graphs, compiled to shaders at runtime; node types
+  are plain GLSL functions with a few annotations.
 - **Assets browser**: folder tree and folder contents side by side, on the open scene's
   folder (or any folder); double-click a mesh to add it, a scene to open it, or drag
   files onto the viewport: meshes land where they're dropped, an `.hdr` becomes the
@@ -143,6 +147,7 @@ docs/                  documentation
 
 - [Architecture](docs/architecture.md): layers, how an edit flows through the editor, design decisions.
 - [Rendering](docs/rendering.md): the frame, the glass blur, coordinate conventions, shaders.
+- [Node materials](docs/materials.md): the Shading workspace, how graphs become shaders, writing nodes.
 - [Scene file format](docs/scene-format.md): the `.lune` specification.
 - [Extending Lune](docs/extending.md): adding components, actions, file formats, shaders, dependencies, tests.
 - [Troubleshooting](docs/troubleshooting.md): common build problems.

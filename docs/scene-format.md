@@ -145,3 +145,26 @@ the mesh is shared.
 Files are written with `QSaveFile`: the content goes to a temporary file that replaces
 the old one only when it's complete, so a crash or a full disk never leaves a
 half-written scene.
+
+### Materials
+
+Optional root array `materials`, the scene's node materials:
+
+```json
+"materials": [
+    { "id": 1, "name": "Rust",
+      "graph": {
+          "nodes": [ { "id": 1, "type": "output", "position": [220, 0], "values": { "roughness": 0.8 } },
+                     { "id": 2, "type": "color", "position": [-200, 0], "values": { "value": [0.6, 0.25, 0.1] } } ],
+          "links": [ { "from": [2, "result"], "to": [1, "baseColor"] } ] } }
+]
+```
+
+| Field | Meaning |
+|---|---|
+| `id` | Unique among materials, referenced by entities as `"material": <id>`. |
+| `graph.nodes[].type` | A node type of `material_nodes.glsl` (`node_<type>`), or `"output"`. |
+| `graph.nodes[].values` | Unlinked input values by port name: a number, or `[r, g, b]` (colors sRGB 0..1). Missing = the type's default. |
+| `graph.links[]` | `from` an output `[node, port]` to an input `[node, port]`; links that would form a loop are dropped. |
+
+An entity referencing a missing material loads without it (with a warning).

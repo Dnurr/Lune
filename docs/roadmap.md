@@ -62,6 +62,9 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 
 ### Materials
 
+- [x] Node materials: graph model, node editor (Shading workspace), GLSL codegen and runtime compilation, scene library, undo (Claude)
+- [ ] `main()` in `mesh.frag` takes the surface from `materialSurface()` (Author)
+- [ ] Shading nodes in `material_nodes.glsl`: texture, noise, fresnel, layering... (Author)
 - [ ] Texture loading and caching, sampler bindings per material (Claude)
 - [ ] glTF material import: base color, metallic-roughness, normal, emissive (Claude)
 - [ ] Texture slots in the Material Inspector (Claude)
@@ -115,7 +118,7 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 - Area lights with LTC (Author)
 - Screen-space reflections and ambient occlusion (Author)
 - Mesh sequences or Alembic import for animated geometry (Claude)
-- Node-based material or particle graphs (both)
+- Node-based particle graphs (both), on the node editor and graph model of the materials
 - USD import / export: scenes, meshes, cameras, lights, UsdPreviewSurface materials (Claude)
 - Hydra render delegate, so Lune can render inside Houdini Solaris and other Hydra hosts;
   needs the renderer fed by an adapter instead of reading the editor's `Scene` directly
