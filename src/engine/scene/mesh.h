@@ -5,10 +5,9 @@
 #include <QVector3D>
 #include <QVector4D>
 #include <QtGlobal>
+#include <algorithm>
 #include <cmath>
-#include <map>
 #include <memory>
-#include <tuple>
 #include <unordered_map>
 #include <vector>
 
@@ -120,35 +119,40 @@ struct Mesh
     // Sets `closed`. Call after building the mesh (positions and indices final).
     void computeClosed()
     {
-        // Weld positions closer than ~1e-5 of the mesh size.
-        const float extent = qMax(1e-6f, (boundsMax - boundsMin).length());
-        const float scale = 1e5f / extent;
-        std::map<std::tuple<long long, long long, long long>, quint32> ids;
+        // Weld positions closer than ~1e-5 of the mesh size: grid cells of 21 bits per axis.
+        const QVector3D size = boundsMax - boundsMin;
+        const float extent = qMax(1e-6f, qMax(size.x(), qMax(size.y(), size.z())));
+        const float scale = 1e5f / extent; // cell coordinates 0..1e5 (< 2^21)
+        auto cell = [&](float v, float min) { return quint64(std::llround((v - min) * scale)) & 0x1fffffu; };
+        std::unordered_map<quint64, quint32> ids;
+        ids.reserve(vertices.size());
         std::vector<quint32> weld(vertices.size());
         for (size_t i = 0; i < vertices.size(); ++i) {
             const QVector3D &p = vertices[i].position;
-            const auto key = std::make_tuple(std::llround(p.x() * scale), std::llround(p.y() * scale),
-                                             std::llround(p.z() * scale));
+            const quint64 key = cell(p.x(), boundsMin.x()) | cell(p.y(), boundsMin.y()) << 21
+                              | cell(p.z(), boundsMin.z()) << 42;
             weld[i] = ids.emplace(key, quint32(ids.size())).first->second;
         }
         // Directed edges: in a closed, consistently wound mesh each one appears once, and so
-        // does its reverse.
-        std::unordered_map<quint64, int> edges;
+        // does its reverse. Sorted, so both are cheap to check (millions of triangles).
         auto edgeKey = [](quint32 a, quint32 b) { return (quint64(a) << 32) | b; };
+        std::vector<quint64> edges;
+        edges.reserve(indices.size());
         for (size_t t = 0; t + 2 < indices.size(); t += 3) {
             const quint32 v[3] = { weld[indices[t]], weld[indices[t + 1]], weld[indices[t + 2]] };
             if (v[0] == v[1] || v[1] == v[2] || v[2] == v[0])
                 continue; // degenerate (e.g. at a sphere's poles)
             for (int k = 0; k < 3; ++k)
-                ++edges[edgeKey(v[k], v[(k + 1) % 3])];
+                edges.push_back(edgeKey(v[k], v[(k + 1) % 3]));
         }
+        std::sort(edges.begin(), edges.end());
         closed = !edges.empty();
-        for (const auto &[key, count] : edges) {
-            const auto reverse = edges.find(edgeKey(quint32(key & 0xffffffffu), quint32(key >> 32)));
-            if (count != 1 || reverse == edges.end() || reverse->second != 1) {
-                closed = false;
-                break;
-            }
+        for (size_t i = 0; closed && i < edges.size(); ++i) {
+            const quint64 e = edges[i];
+            if (i + 1 < edges.size() && edges[i + 1] == e)
+                closed = false; // the same edge twice
+            else
+                closed = std::binary_search(edges.begin(), edges.end(), edgeKey(quint32(e & 0xffffffffu), quint32(e >> 32)));
         }
     }
 };
