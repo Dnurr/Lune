@@ -86,3 +86,20 @@ void node_mix(vec3 a, vec3 b, float factor, out vec3 result) { result = mix(a, b
 //   color: the texel of a tangent-space normal map (0..1, linear); strength: glTF's scale;
 //   normal: world space, normalized, for Material Output's normal.
 // ---------------------------------------------------------------------------
+
+// @node Normal Map (Vector)
+// @param color 0.5 0.5 1
+// @param strength 1 range(0, 2)
+void node_normal_map(vec3 color, float strength, out vec3 normal)
+{
+    vec3 n = color * 2.0 - 1.0;
+    n = vec3(n.xy * strength, n.z);
+
+    vec3 N = normalize(v_normal);
+    vec3 T = normalize(v_tangent.xyz);
+    T = normalize(T - dot(T, N) * N) * v_tangent.w;
+    
+    vec3 B = cross(N, T);
+
+    normal = normalize(T * n.x + B * n.y + N * n.z);
+}

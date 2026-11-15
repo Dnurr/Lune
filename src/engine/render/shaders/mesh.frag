@@ -318,12 +318,15 @@ float Shadow(int i, int type, vec3 N)
 // Cook-Torrance PBR Model
 void main()
 {
-    vec3 N = normalize(v_normal);
-    vec3 V = normalize(cameraPos.xyz - v_world);
-
-    if (dot(N, V) < 0.0) N = -N;
-
     Surface surf = materialSurface();
+    
+    vec3 Ng = normalize(v_normal);
+    vec3 N = surf.normal;
+
+    vec3 V = normalize(cameraPos.xyz - v_world);
+    
+    if (dot(Ng, V) < 0.0) { Ng = -Ng; N = -N; }
+
     vec3 albedo = surf.baseColor;
     float roughness = max(surf.roughness, 0.045);
     float metallic = surf.metallic;
@@ -338,7 +341,7 @@ void main()
     vec3 R = reflect(-V, N);
     vec3 prefiltered = textureLod(prefilteredMap, toEnvironment(R), roughness * envParams.y).rgb;
     vec3 lut = texture(brdfLut, vec2(NdotV, roughness)).rgb;
-    vec3 ambientSpec = prefiltered * (kS * lut.r + lut.g) * envParams.x;
+    vec3 ambientSpec = prefiltered * (kS * lut.r + lut.g) * envParams.x * surf.occlusion;
 
     vec3 final = vec3(0.0);
 
@@ -371,14 +374,14 @@ void main()
         float shadow = 1.0;
         int slot = int(lightShadow[i].x);
         if (slot >= 0)
-            shadow = Shadow(i, int(lights[i].position.w), N);
+            shadow = Shadow(i, int(lights[i].position.w), Ng);
 
         final += (kD * albedo / PI + spec) * radiance * NdotL * shadow;
     }
 
     vec3 kD = (1.0 - kS) * (1.0 - metallic);
     vec3 irradiance = texture(irradianceMap, toEnvironment(N)).rgb;
-    vec3 ambient = kD * albedo * irradiance * envParams.x;
+    vec3 ambient = kD * albedo * irradiance * envParams.x * surf.occlusion;
 
-    fragColor = vec4(final + ambient + ambientSpec, 1.0);
+    fragColor = vec4(final + ambient + ambientSpec + surf.emission, 1.0);
 }
