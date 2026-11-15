@@ -77,6 +77,10 @@ private:
     void followScene(const QString &path); // assets root: the scene's folder, unless already inside the root
 
     void addEntity(const QString &name, const MeshPtr &mesh, const QVector3D &position = QVector3D());
+    // Imports a mesh file as a new entity, with its materials (glTF) added to the scene and
+    // put in its slots: one undo step. `restOnGround`: its lowest point at `position`.
+    // False and `error` set if the file can't be loaded.
+    bool addModel(const QString &path, QString *error, const QVector3D &position = QVector3D(), bool restOnGround = false);
     void addLight(Light::Type type);
     static Entity lightPrototype(Light::Type type); // name, transform and light of a new light
     void importMeshFile();

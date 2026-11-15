@@ -58,6 +58,8 @@ under version control. Reading and writing are in `engine/io/sceneio.cpp`.
 | `name` | string | Display name. Default `"Entity"`. |
 | `mesh` | string or null | `null`: empty entity. `"primitive:cube"`, `"primitive:sphere"`, `"primitive:plane"`: built-in meshes. Anything else: path of a mesh file (`.obj`, `.gltf`, `.glb`), relative to the scene file. |
 | `components` | object | One object per component, keyed by component name, holding its properties. |
+| `material` | integer | Optional: the node material of its (only) material slot, by id. |
+| `materials` | array of integers | Optional, instead of `material` when the mesh has several submeshes: one id per slot, `0` = none. |
 
 ### Components
 
@@ -164,7 +166,8 @@ Optional root array `materials`, the scene's node materials:
 |---|---|
 | `id` | Unique among materials, referenced by entities as `"material": <id>`. |
 | `graph.nodes[].type` | A node type of `material_nodes.glsl` (`node_<type>`), or `"output"`. |
-| `graph.nodes[].values` | Unlinked input values by port name: a number, or `[r, g, b]` (colors sRGB 0..1). Missing = the type's default. |
+| `graph.nodes[].values` | Unlinked input values by port name: a number, `[x, y]`, `[r, g, b]` (colors sRGB 0..1), or for images `{ "image": path, "linear": bool }` (path relative to the scene file like meshes; `file.glb#image2` for an image inside a glTF; `linear`: Data instead of Color). Missing = the type's default. |
 | `graph.links[]` | `from` an output `[node, port]` to an input `[node, port]`; links that would form a loop are dropped. |
 
-An entity referencing a missing material loads without it (with a warning).
+An entity referencing a missing material loads without it (with a warning). Material
+slots follow the submeshes of the mesh file, in its order (for glTF: by material index).

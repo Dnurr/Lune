@@ -22,7 +22,9 @@ Most actions are one keystroke or one search in the command palette away.
 - **Workspaces**: Layout (outliner, inspector, assets) and Shading (node editor, with the
   scene centered beside it), tabs in the menu bar; each remembers its panels.
 - **Node materials**: materials as node graphs, compiled to shaders at runtime; node types
-  are plain GLSL functions with a few annotations.
+  are plain GLSL functions with a few annotations. Image textures (loaded in the
+  background, mipmapped, sRGB or data), one material slot per submesh, and glTF materials
+  imported as graphs.
 - **Assets browser**: folder tree and folder contents side by side, on the open scene's
   folder (or any folder); double-click a mesh to add it, a scene to open it, or drag
   files onto the viewport: meshes land where they're dropped, an `.hdr` becomes the

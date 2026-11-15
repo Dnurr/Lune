@@ -63,13 +63,15 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 ### Materials
 
 - [x] Node materials: graph model, node editor (Shading workspace), GLSL codegen and runtime compilation, scene library, undo (Claude)
-- [ ] `main()` in `mesh.frag` takes the surface from `materialSurface()` (Author)
-- [ ] Shading nodes in `material_nodes.glsl`: texture, noise, fresnel, layering... (Author)
-- [ ] Texture loading and caching, sampler bindings per material (Claude)
-- [ ] glTF material import: base color, metallic-roughness, normal, emissive (Claude)
-- [ ] Texture slots in the Material Inspector (Claude)
-- [ ] Texture sampling, normal mapping with tangents (Author; Claude computes the tangents)
-- [ ] Emissive color and strength (Claude: property, Author: shader)
+- [x] `main()` in `mesh.frag` takes the surface from `materialSurface()` (Author)
+- [x] UVs and tangents in meshes (primitives, OBJ, glTF), submeshes and material slots (Claude)
+- [x] Texture loading and caching, sampler slots per material, Image Texture and Texture Coordinate nodes, image drops on the canvas (Claude)
+- [x] glTF material import: base color, metallic-roughness, occlusion, normal, emissive as node graphs (Claude)
+- [ ] `main()` uses `surf.normal`, `surf.occlusion`, `surf.emission` (Author)
+- [ ] Normal Map node (`node_normal_map`, see docs/materials.md) (Author)
+- [ ] Shading nodes in `material_nodes.glsl`: noise, fresnel, triplanar, layering... (Author)
+- [ ] Alpha: masks and blending (both)
+- [ ] OBJ materials (.mtl) to node graphs (Claude)
 
 ### Color management
 

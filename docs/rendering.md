@@ -45,7 +45,7 @@ flowchart LR
 | Shadow atlases | two depth atlases | `shadow.vert` + `shadow.frag` | Every visible mesh's depth from each shadowed light, one tile (viewport) per view; see [Shadows](#shadows). Always cleared. |
 | Background | scene (RGBA16F) | `background.vert` + `background.frag` | Only when the Environment's `background` is on: the environment in each view ray's direction. |
 | Grid | scene | `fullscreen.vert` + `grid.frag` | Fullscreen triangle; each pixel intersects its view ray with y = 0. No depth write: it's the background. Premultiplied alpha: opaque with its own sky, or only the lines over an environment background. Colors converted to linear on the CPU. |
-| Meshes | scene | `mesh.vert` + `mesh.frag` | Depth tested, two-sided, Cook-Torrance (GGX) shading with the scene lights and the environment maps. Writes linear values (can exceed 1). |
+| Meshes | scene | `mesh.vert` + `mesh.frag` | Depth tested, two-sided, Cook-Torrance (GGX) shading with the scene lights and the environment maps. One draw per submesh, each with its material slot's pipeline (node material or default) and binding set. Writes linear values (can exceed 1). |
 | Outline | scene | `outline.vert` + `outline.frag` | Selected entity only. "Inverted hull": back faces pushed outwards in screen space, front faces culled. Its own binding set per entity (entity uniforms only): on Direct3D 11 a binding set's registers follow the first pipeline that used it, and `mesh.frag` puts the entity block in another register. |
 | Display | display (RGBA8) | `fullscreen.vert` + `display.frag` | Converts the linear HDR scene to sRGB for the screen. Exposure and tonemapping go here: `params.x` = exposure (EV), `params.y` = operator index (0 none, 1 Reinhard, 2 ACES, 3 AgX), set with `Renderer::setDisplayParams()` from the editor's `DisplaySettings`. |
 | Overlay | display | `overlay.vert` + `overlay.frag` | Triangles in widget pixels with premultiplied alpha (the gizmo), in display colors: interface, so exposure/tonemapping never touch it; still blurred behind panels. |
@@ -62,8 +62,17 @@ Resources:
 
 - Uniform buffers are `Dynamic` and rewritten every frame; each pass in a frame uses its
   own buffer (a dynamic buffer must not be updated twice in one frame).
-- Each entity with a mesh has its own uniform buffer and binding set; meshes are cached
-  by `Mesh*` and released when no entity uses them any more.
+- Each entity with a mesh has a uniform buffer and binding set per material slot
+  (submesh): the same matrices, its material's values and textures. Slot 0's buffer also
+  serves the shadow and outline passes, which draw the whole mesh. Meshes are cached by
+  `Mesh*` and released when no entity uses them any more.
+- Vertices (`MeshVertex`, 48 bytes): position, normal, uv, tangent (xyz + handedness).
+  UV (0, 0) is the top-left of an image (glTF convention; OBJ's v is flipped on import).
+- Material textures: bindings 11–18 (`materialTexture0..7`), from `TextureCache`
+  (`engine/render/texturecache.h`): images decoded on a worker thread, uploaded as RGBA8
+  with mipmaps generated on the GPU, an sRGB format for Color images; until ready, a 1x1
+  fallback. Unused slots bind white. A slot's binding set is rebuilt only when its
+  textures change.
 - The scene lights go in one buffer per frame (binding 1 of every mesh binding set):
   up to `Renderer::MaxLights` (8) enabled lights, each as position + type, direction and
   linear color + intensity (see the `Light` block in `mesh.frag`). A scene with no enabled
@@ -199,7 +208,7 @@ the root `CMakeLists.txt`.
 
 Uniform blocks use `std140`, binding 0; textures start at binding 1. Meshes use binding 1
 for the lights block, 2 for the environment block, 3–5 for the environment maps, 6 for
-the shadow block and 7–10 for the shadow atlases. A
+the shadow block, 7–10 for the shadow atlases and 11–18 for the material textures. A
 block shared by several shaders must be declared identically in each (see `mesh.vert`,
 `mesh.frag`, `outline.vert`, `outline.frag`, `shadow.vert`; `mesh.frag` and `background.frag` for
 the environment block).

@@ -49,7 +49,7 @@ public:
     const Material *material(MaterialId id) const;
     void setMaterialGraph(MaterialId id, const NodeGraph &graph);
     void setMaterialName(MaterialId id, const QString &name);
-    void setEntityMaterial(EntityId id, MaterialId material);
+    void setEntityMaterial(EntityId id, int slot, MaterialId material);
     QString uniqueMaterialName(const QString &base) const;
 
 signals:

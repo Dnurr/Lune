@@ -116,12 +116,12 @@ void Scene::setMaterialName(MaterialId id, const QString &name)
     }
 }
 
-void Scene::setEntityMaterial(EntityId id, MaterialId material)
+void Scene::setEntityMaterial(EntityId id, int slot, MaterialId material)
 {
     Entity *e = find(id);
-    if (!e || e->material == material)
+    if (!e || e->material(slot) == material)
         return;
-    e->material = material;
+    e->setMaterial(slot, material);
     emit entityChanged(id);
 }
 

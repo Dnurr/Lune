@@ -64,6 +64,9 @@ void Viewport::setEditorContext(Scene *scene, Selection *selection, QUndoStack *
     connect(m_scene, &Scene::entityAdded, this, &Viewport::redraw);
     connect(m_scene, &Scene::entityRemoved, this, &Viewport::redraw);
     connect(m_scene, &Scene::entityChanged, this, &Viewport::redraw);
+    connect(m_scene, &Scene::materialAdded, this, &Viewport::redraw);
+    connect(m_scene, &Scene::materialRemoved, this, &Viewport::redraw);
+    connect(m_scene, &Scene::materialChanged, this, &Viewport::redraw); // graph edits, values
     connect(m_selection, &Selection::changed, this, [this] {
         if (m_gizmo.isDragging()) {
             m_gizmo.endDrag(); // the dragged entity went away (e.g. undo during the drag)
@@ -178,8 +181,8 @@ void Viewport::render(QRhiCommandBuffer *cb)
                                renderTarget()->pixelSize(), entities);
         QRhiWidget::update(); // keep rendering: FPS only means something with continuous frames
     }
-    if (moving)
-        QRhiWidget::update(); // next frame continues the camera's motion
+    if (moving || m_renderer.needsAnotherFrame())
+        QRhiWidget::update(); // next frame continues the camera's motion, or shows loaded textures
 }
 
 void Viewport::releaseResources()

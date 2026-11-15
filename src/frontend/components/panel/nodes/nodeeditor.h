@@ -23,6 +23,8 @@ class QGraphicsPathItem;
 //   right click, Shift+A    add a node (at the cursor)
 //   Delete, X               delete the selected nodes (not the Material Output)
 //   F                       frame all the nodes
+//   drop image files        filesDropped(): the panel adds Image Texture nodes, or sets the
+//                           image of the node under the cursor
 class NodeEditorView : public QGraphicsView
 {
     Q_OBJECT
@@ -44,6 +46,11 @@ public:
 signals:
     void edited(const NodeGraph &after, const QString &text, const QString &mergeKey);
     void nodeSelected(int id); // 0 = none or several
+    // Image files dropped at `scenePos` (canvas coordinates), on node `nodeId` (0 = none).
+    void filesDropped(const QStringList &paths, const QPointF &scenePos, int nodeId);
+
+public:
+    static bool isImageFile(const QString &path); // what filesDropped() accepts
 
 protected:
     bool event(QEvent *event) override;
@@ -56,6 +63,9 @@ protected:
     void drawBackground(QPainter *painter, const QRectF &rect) override;
     void resizeEvent(QResizeEvent *event) override;
     void showEvent(QShowEvent *event) override;
+    void dragEnterEvent(QDragEnterEvent *event) override;
+    void dragMoveEvent(QDragMoveEvent *event) override;
+    void dropEvent(QDropEvent *event) override;
 
 private:
     friend class NodeItem;

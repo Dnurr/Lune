@@ -120,7 +120,8 @@ private:
 class AddMaterialCommand : public QUndoCommand
 {
 public:
-    AddMaterialCommand(Scene *scene, const Material &prototype, EntityId assignTo = InvalidEntity);
+    // Adds the material and, if `assignTo` is an entity, puts it in that entity's `slot`.
+    AddMaterialCommand(Scene *scene, const Material &prototype, EntityId assignTo = InvalidEntity, int slot = 0);
 
     void redo() override;
     void undo() override;
@@ -131,14 +132,15 @@ private:
     Scene *m_scene;
     Material m_material; // id assigned on the first redo, then reused
     EntityId m_entity;
+    int m_slot = 0;
     MaterialId m_previous = NoMaterial; // the entity's material before
 };
 
-// Gives an entity a material (or none).
+// Puts a material (or none) in one of an entity's material slots.
 class AssignMaterialCommand : public QUndoCommand
 {
 public:
-    AssignMaterialCommand(Scene *scene, EntityId entity, MaterialId material);
+    AssignMaterialCommand(Scene *scene, EntityId entity, int slot, MaterialId material);
 
     void redo() override;
     void undo() override;
@@ -146,6 +148,7 @@ public:
 private:
     Scene *m_scene;
     EntityId m_entity;
+    int m_slot;
     MaterialId m_before, m_after;
 };
 

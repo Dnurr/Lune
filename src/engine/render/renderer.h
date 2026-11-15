@@ -10,9 +10,11 @@
 #include <unordered_map>
 #include <vector>
 
+#include "engine/material/materialcompiler.h"
 #include "engine/scene/entity.h"
 #include "iblmaps.h"
 #include "shadowmaps.h"
+#include "texturecache.h"
 
 class OrbitCamera;
 class Scene;
@@ -44,6 +46,7 @@ struct FrameStats
     int drawCalls = 0;      // every draw, fullscreen passes included
     quint64 triangles = 0;  // mesh triangles (selection outline included)
     int meshes = 0;         // visible entities with a mesh
+    int textures = 0;       // material textures bound (with repeats), fallbacks excluded
     int renderPasses = 0;
 };
 
@@ -97,8 +100,14 @@ public:
     // Node materials: why a material can't be drawn (graph or shader compile error, empty
     // if it's fine or wasn't drawn yet). Entities using it fall back to their own values.
     QString materialError(MaterialId id) const { return m_materialErrors.value(id); }
-    // True once after a frame that changed some material's error (e.g. to refresh the UI).
+    // True once after a frame that changed some material's error, or in which an image
+    // failed to load (e.g. to refresh the UI).
     bool takeMaterialErrorsChanged();
+
+    // Why a material image couldn't be loaded (empty if fine, loading, or never used).
+    QString textureError(const QString &image) const { return m_textures.error(image); }
+    // Something the last frame drew is still loading (textures): render again soon.
+    bool needsAnotherFrame() const { return m_textures.loading(); }
 
 private:
     struct GpuMesh
@@ -107,10 +116,19 @@ private:
         std::unique_ptr<QRhiBuffer> vertices, indices;
         quint32 indexCount = 0;
     };
-    struct GpuEntity
+    using TextureSet = std::array<QRhiTexture *, MaterialCompiler::MaxTextures>; // materialTexture0..7
+
+    // One material slot of an entity (a submesh): the entity uniforms with that slot's
+    // material values, and the scene binding set with its textures.
+    struct GpuSlot
     {
         std::unique_ptr<QRhiBuffer> uniforms;
-        std::unique_ptr<QRhiShaderResourceBindings> srb;       // scene pass (meshBindings)
+        std::unique_ptr<QRhiShaderResourceBindings> srb; // scene pass (meshBindings)
+        TextureSet textures {};                          // what srb binds at 11..18
+    };
+    struct GpuEntity
+    {
+        std::vector<GpuSlot> materialSlots; // one per submesh; materialSlots[0]'s uniforms also serve the passes below
         std::unique_ptr<QRhiShaderResourceBindings> shadowSrb; // shadow passes (ShadowMaps::casterBindings)
         // Selection outline: entity uniforms only. Not the scene SRB: on Direct3D 11 the
         // registers of a binding set are resolved for the first pipeline that uses it, and
@@ -121,9 +139,14 @@ private:
     void createSizeDependentResources();
     void createPipelines(QRhiRenderTarget *target);
     GpuMesh &gpuMesh(const MeshPtr &mesh, QRhiResourceUpdateBatch *rub);
-    GpuEntity &gpuEntity(EntityId id);
-    // Bindings of every mesh SRB: entity uniforms, then what the whole scene shares.
-    QList<QRhiShaderResourceBinding> meshBindings(QRhiBuffer *entityUniforms) const;
+    GpuEntity &gpuEntity(EntityId id, int slotCount);
+    GpuSlot newSlot();
+    // Points the slot's binding set at these textures (rebuilt only if they changed).
+    void bindTextures(GpuSlot &slot, const TextureSet &textures);
+    TextureSet fallbackTextures() const; // white everywhere
+    // Bindings of every mesh SRB: entity uniforms, what the whole scene shares, then the
+    // material's textures.
+    QList<QRhiShaderResourceBinding> meshBindings(QRhiBuffer *entityUniforms, const TextureSet &textures) const;
     // Mesh pipeline with another fragment shader (node materials); same state as m_meshPipe.
     std::unique_ptr<QRhiGraphicsPipeline> createMeshPipeline(const QShader &fragment);
     // The pipeline for a material's generated code: compiled on first use, then cached.
@@ -169,6 +192,7 @@ private:
     std::unique_ptr<QRhiBuffer> m_backgroundUbuf;
 
     ShadowMaps m_shadows; // shadow atlases, bindings 6..10 of every mesh SRB
+    TextureCache m_textures; // material images, bindings 11..18 of the mesh SRBs
 
     IblMaps m_ibl; // environment cubemaps and BRDF LUT, bindings 3..5 of every mesh SRB
 

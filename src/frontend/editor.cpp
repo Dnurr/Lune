@@ -270,6 +270,37 @@ void Editor::addEntity(const QString &name, const MeshPtr &mesh, const QVector3D
     m_undo->push(new AddEntityCommand(m_scene, m_selection, e));
 }
 
+bool Editor::addModel(const QString &path, QString *error, const QVector3D &position, bool restOnGround)
+{
+    const ImportedModel model = importModel(path, error);
+    if (!model.mesh)
+        return false;
+    Entity e;
+    e.name = m_scene->uniqueName(model.mesh->name.isEmpty() ? QFileInfo(path).completeBaseName() : model.mesh->name);
+    e.mesh = model.mesh;
+    e.transform.position = position;
+    if (restOnGround)
+        e.transform.position.setY(position.y() - model.mesh->boundsMin.y());
+
+    const bool withMaterials = std::any_of(model.materials.begin(), model.materials.end(),
+                                           [](const Material &m) { return !m.name.isEmpty(); });
+    if (withMaterials)
+        m_undo->beginMacro(QStringLiteral("Import %1").arg(QFileInfo(path).fileName()));
+    for (size_t slot = 0; slot < model.materials.size(); ++slot) {
+        if (model.materials[slot].name.isEmpty())
+            continue; // a submesh without material
+        Material m = model.materials[slot];
+        m.name = m_scene->uniqueMaterialName(m.name);
+        auto *command = new AddMaterialCommand(m_scene, m);
+        m_undo->push(command); // redo() runs now: the id is known
+        e.setMaterial(int(slot), command->materialId());
+    }
+    m_undo->push(new AddEntityCommand(m_scene, m_selection, e));
+    if (withMaterials)
+        m_undo->endMacro();
+    return true;
+}
+
 Entity Editor::lightPrototype(Light::Type type)
 {
     Entity e;
@@ -301,12 +332,8 @@ void Editor::importMeshFile()
     if (path.isEmpty())
         return;
     QString error;
-    const MeshPtr mesh = importMesh(path, &error);
-    if (!mesh) {
+    if (!addModel(path, &error))
         QMessageBox::warning(this, "Import Mesh", error);
-        return;
-    }
-    addEntity(mesh->name.isEmpty() ? QFileInfo(path).completeBaseName() : mesh->name, mesh);
 }
 
 // ---------------------------------------------------------------------------
@@ -673,16 +700,12 @@ void Editor::openAsset(const QString &path)
     }
     if (meshFileFilter().contains(QStringLiteral("*.") + suffix)) {
         QString error;
-        const MeshPtr mesh = importMesh(path, &error);
-        if (!mesh) {
+        if (!addModel(path, &error))
             QMessageBox::warning(this, "Import Mesh", error);
-            return;
-        }
-        addEntity(mesh->name.isEmpty() ? QFileInfo(path).completeBaseName() : mesh->name, mesh);
     }
     if (suffix == QLatin1String("hdr"))
         useEnvironmentImage(path);
-    // Other images: used by materials (from the Inspector) for now.
+    // Other images: dragged onto the node editor (Image Texture nodes).
 }
 
 void Editor::dropFiles(const QStringList &paths, const QPointF &pos)
@@ -705,17 +728,10 @@ void Editor::dropFiles(const QStringList &paths, const QPointF &pos)
         }
         if (suffix == QLatin1String("lune"))
             continue;
-        QString error;
-        const MeshPtr mesh = importMesh(path, &error);
-        if (!mesh) {
-            errors.append(error);
-            continue;
-        }
         // On the ground: resting on it (its lowest point at the drop point).
-        QVector3D position = point;
-        if (onGround)
-            position.setY(point.y() - mesh->boundsMin.y());
-        addEntity(mesh->name.isEmpty() ? QFileInfo(path).completeBaseName() : mesh->name, mesh, position);
+        QString error;
+        if (!addModel(path, &error, point, onGround))
+            errors.append(error);
     }
     m_undo->endMacro();
     if (!errors.isEmpty())

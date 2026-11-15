@@ -81,8 +81,25 @@ struct Entity
     // The base color is displayColor.
     float roughness = 0.5f; // 0 = mirror-like, 1 = fully diffuse highlight
     float metallic = 0.0f;  // 0 = dielectric (plastic, stone...), 1 = metal
-    // Node material from the scene's library; when set, it replaces the three values above.
-    MaterialId material = NoMaterial;
+    // Node materials from the scene's library, one slot per submesh of the mesh (slot i
+    // draws mesh->submeshes[i]); missing slots = NoMaterial. A slot with a material
+    // replaces the three values above for its triangles.
+    std::vector<MaterialId> materials;
+
+    MaterialId material(int slot = 0) const
+    {
+        return slot >= 0 && slot < int(materials.size()) ? materials[size_t(slot)] : NoMaterial;
+    }
+    void setMaterial(int slot, MaterialId id)
+    {
+        if (slot < 0)
+            return;
+        if (slot >= int(materials.size()))
+            materials.resize(size_t(slot) + 1, NoMaterial);
+        materials[size_t(slot)] = id;
+        while (!materials.empty() && materials.back() == NoMaterial)
+            materials.pop_back(); // trailing empty slots: the same as missing
+    }
 
     std::optional<Light> light;             // set = this entity is a light
     std::optional<Environment> environment; // set = this entity is the scene's environment

@@ -2,6 +2,8 @@
 
 layout(location = 0) in vec3 v_normal;
 layout(location = 1) in vec3 v_world;
+layout(location = 2) in vec2 v_uv;      // texture coordinates, (0, 0) = top-left of the image
+layout(location = 3) in vec4 v_tangent; // world space, along +u; w: bitangent = cross(v_normal, v_tangent.xyz) * v_tangent.w
 layout(location = 0) out vec4 fragColor;
 
 #define MAX_MATERIAL_PARAMS 32 // MaterialCompiler::MaxParams
@@ -113,12 +115,27 @@ const float PI = 3.14159265359;
 // materialParams[]. Don't remove the markers.
 //
 // main() takes the surface from here:  Surface surf = materialSurface();
+//
+// Textures of the material: its image texture inputs, in order (sRGB images are already
+// linear when sampled; data images as they are). Unused slots hold a 1x1 texture.
 // ---------------------------------------------------------------------------
+layout(binding = 11) uniform sampler2D materialTexture0; // MaterialCompiler::FirstTextureBinding
+layout(binding = 12) uniform sampler2D materialTexture1;
+layout(binding = 13) uniform sampler2D materialTexture2;
+layout(binding = 14) uniform sampler2D materialTexture3;
+layout(binding = 15) uniform sampler2D materialTexture4;
+layout(binding = 16) uniform sampler2D materialTexture5;
+layout(binding = 17) uniform sampler2D materialTexture6;
+layout(binding = 18) uniform sampler2D materialTexture7; // MaterialCompiler::MaxTextures = 8
+
 struct Surface
 {
     vec3 baseColor;  // linear
     float roughness; // 0..1
     float metallic;  // 0..1
+    vec3 normal;     // world space, normalized (normal maps bend it); default: normalize(v_normal)
+    float occlusion; // ambient occlusion, 0..1 (1 = none): meant for the ambient (environment) light
+    vec3 emission;   // linear, added to the outgoing light
 };
 //@material-begin
 Surface materialSurface()
@@ -127,6 +144,9 @@ Surface materialSurface()
     s.baseColor = color.rgb;
     s.roughness = material.x;
     s.metallic = material.y;
+    s.normal = normalize(v_normal);
+    s.occlusion = 1.0;
+    s.emission = vec3(0.0);
     return s;
 }
 //@material-end

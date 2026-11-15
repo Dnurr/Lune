@@ -5,14 +5,15 @@
 namespace
 {
 // Adds a quad with corners c +/- u +/- v; u x v must point along the normal n
-// so that the two triangles are counter-clockwise seen from outside.
+// so that the two triangles are counter-clockwise seen from outside. Seen from outside, u
+// points right and v up: the whole texture, upright.
 void addQuad(Mesh &m, const QVector3D &c, const QVector3D &u, const QVector3D &v, const QVector3D &n)
 {
     const quint32 base = quint32(m.vertices.size());
-    m.vertices.push_back({ c - u - v, n });
-    m.vertices.push_back({ c + u - v, n });
-    m.vertices.push_back({ c + u + v, n });
-    m.vertices.push_back({ c - u + v, n });
+    m.vertices.push_back({ c - u - v, n, QVector2D(0, 1) });
+    m.vertices.push_back({ c + u - v, n, QVector2D(1, 1) });
+    m.vertices.push_back({ c + u + v, n, QVector2D(1, 0) });
+    m.vertices.push_back({ c - u + v, n, QVector2D(0, 0) });
     m.indices.insert(m.indices.end(), { base, base + 1, base + 2, base, base + 2, base + 3 });
 }
 
@@ -22,14 +23,14 @@ MeshPtr makeCube()
     m->name = QStringLiteral("Cube");
     m->source = QStringLiteral("primitive:cube");
     const QVector3D X(0.5f, 0, 0), Y(0, 0.5f, 0), Z(0, 0, 0.5f);
-    addQuad(*m, X, Y, Z, X.normalized());
+    // Sides upright (v = +Y); top and bottom with v toward -Z and +Z.
+    addQuad(*m, X, -Z, Y, X.normalized());
     addQuad(*m, -X, Z, Y, -X.normalized());
-    addQuad(*m, Y, Z, X, Y.normalized());
+    addQuad(*m, Y, X, -Z, Y.normalized());
     addQuad(*m, -Y, X, Z, -Y.normalized());
     addQuad(*m, Z, X, Y, Z.normalized());
-    addQuad(*m, -Z, Y, X, -Z.normalized());
-    m->computeBounds();
-    m->computeClosed();
+    addQuad(*m, -Z, -X, Y, -Z.normalized());
+    m->finish();
     return m;
 }
 
@@ -45,7 +46,8 @@ MeshPtr makeSphere()
         for (int j = 0; j <= segments; ++j) {
             const float theta = 2.0f * float(M_PI) * j / segments;
             const QVector3D n(qSin(phi) * qCos(theta), qCos(phi), qSin(phi) * qSin(theta));
-            m->vertices.push_back({ n * 0.5f, n });
+            // Equirectangular: u around (increasing to the right seen from outside), v = 0 at the top.
+            m->vertices.push_back({ n * 0.5f, n, QVector2D(1.0f - float(j) / segments, float(i) / rings) });
         }
     }
     const quint32 row = segments + 1;
@@ -56,8 +58,7 @@ MeshPtr makeSphere()
             m->indices.insert(m->indices.end(), { a, a + 1, b, a + 1, b + 1, b });
         }
     }
-    m->computeBounds();
-    m->computeClosed();
+    m->finish();
     return m;
 }
 
@@ -66,9 +67,8 @@ MeshPtr makePlane()
     auto m = std::make_shared<Mesh>();
     m->name = QStringLiteral("Plane");
     m->source = QStringLiteral("primitive:plane");
-    addQuad(*m, QVector3D(), QVector3D(0, 0, 0.5f), QVector3D(0.5f, 0, 0), QVector3D(0, 1, 0));
-    m->computeBounds();
-    m->computeClosed();
+    addQuad(*m, QVector3D(), QVector3D(0.5f, 0, 0), QVector3D(0, 0, -0.5f), QVector3D(0, 1, 0));
+    m->finish();
     return m;
 }
 } // namespace

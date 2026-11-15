@@ -9,7 +9,13 @@ namespace
 {
 QString glslType(PortType t)
 {
-    return t == PortType::Vec3 ? QStringLiteral("vec3") : QStringLiteral("float");
+    switch (t) {
+    case PortType::Float: return QStringLiteral("float");
+    case PortType::Vec2: return QStringLiteral("vec2");
+    case PortType::Vec3: return QStringLiteral("vec3");
+    case PortType::Texture: return QStringLiteral("sampler2D");
+    }
+    return QString();
 }
 
 QString convert(const QString &expr, PortType from, PortType to)
@@ -17,8 +23,25 @@ QString convert(const QString &expr, PortType from, PortType to)
     if (from == to)
         return expr;
     if (from == PortType::Float)
-        return QStringLiteral("vec3(%1)").arg(expr);
-    return QStringLiteral("dot(%1, vec3(0.2126, 0.7152, 0.0722))").arg(expr);
+        return QStringLiteral("%1(%2)").arg(glslType(to), expr);
+    if (from == PortType::Vec3 && to == PortType::Float)
+        return QStringLiteral("dot(%1, vec3(0.2126, 0.7152, 0.0722))").arg(expr);
+    if (from == PortType::Vec3 && to == PortType::Vec2)
+        return QStringLiteral("(%1).xy").arg(expr);
+    if (from == PortType::Vec2 && to == PortType::Float)
+        return QStringLiteral("(%1).x").arg(expr);
+    if (from == PortType::Vec2 && to == PortType::Vec3)
+        return QStringLiteral("vec3(%1, 0.0)").arg(expr);
+    return expr; // textures are never linked
+}
+
+QString swizzle(PortType t)
+{
+    switch (t) {
+    case PortType::Vec2: return QStringLiteral("xy");
+    case PortType::Vec3: return QStringLiteral("xyz");
+    default: return QStringLiteral("x");
+    }
 }
 
 QString variable(int node, const QString &port)
@@ -92,9 +115,16 @@ CompiledMaterial compile(const NodeGraph &graph, const NodeLibrary &library)
                 // A link to an output that no longer exists: use the value instead.
             }
         }
+        if (in.type == PortType::Texture) {
+            const int slot = int(result.textures.size());
+            result.textures.push_back({ n.id, in.name });
+            return QStringLiteral("materialTexture%1").arg(slot);
+        }
+        if (!in.expression.isEmpty())
+            return QStringLiteral("(%1)").arg(in.expression);
         const int slot = int(result.params.size());
         result.params.push_back({ n.id, in.name, in.type, in.color });
-        return QStringLiteral("materialParams[%1].%2").arg(slot).arg(in.type == PortType::Vec3 ? "xyz" : "x");
+        return QStringLiteral("materialParams[%1].%2").arg(slot).arg(swizzle(in.type));
     };
 
     QString body;
@@ -121,6 +151,13 @@ CompiledMaterial compile(const NodeGraph &graph, const NodeLibrary &library)
     if (int(result.params.size()) > MaxParams) {
         result.error = QStringLiteral("Too many unlinked inputs (%1, at most %2).").arg(result.params.size()).arg(MaxParams);
         result.params.clear();
+        result.textures.clear();
+        return result;
+    }
+    if (int(result.textures.size()) > MaxTextures) {
+        result.error = QStringLiteral("Too many textures (%1, at most %2).").arg(result.textures.size()).arg(MaxTextures);
+        result.params.clear();
+        result.textures.clear();
         return result;
     }
 

@@ -1,6 +1,8 @@
 #include "nodeeditor.h"
 
 #include <QContextMenuEvent>
+#include <QFileInfo>
+#include <QMimeData>
 #include <QGraphicsItem>
 #include <QGraphicsPathItem>
 #include <QGraphicsScene>
@@ -11,6 +13,7 @@
 #include <QScrollBar>
 #include <QStyleOptionGraphicsItem>
 #include <QTimer>
+#include <QVector2D>
 #include <QVector3D>
 #include <QtMath>
 #include <map>
@@ -30,6 +33,8 @@ QColor portColor(const PortDesc &p)
 {
     if (p.color)
         return QColor("#E6C35C"); // colors: yellow
+    if (p.type == PortType::Vec2)
+        return QColor("#5CA8E6"); // coordinates: blue
     return p.type == PortType::Vec3 ? QColor("#9B8CF2") : QColor("#A8A8B0"); // vectors: violet, numbers: gray
 }
 
@@ -43,13 +48,30 @@ QColor headerColor(const NodeType &t)
         return QColor("#6A5A2E");
     if (t.category == QLatin1String("Math"))
         return QColor("#3E5E4C");
+    if (t.category == QLatin1String("Texture"))
+        return QColor("#5A3E6A");
     return QColor("#4A4A58");
 }
 
 QString valueText(const QVariant &v, const PortDesc &p)
 {
+    if (!p.expression.isEmpty())
+        return QStringLiteral("auto"); // computed by the shader (e.g. the mesh's UVs)
+    if (p.type == PortType::Texture) {
+        const TextureValue t = TextureValue::fromVariant(v, p.linear);
+        if (t.image.isEmpty())
+            return QStringLiteral("none");
+        const int hash = t.image.lastIndexOf(QLatin1String("#image"));
+        if (hash > 0) // inside a glTF: "model.glb #2"
+            return QStringLiteral("%1 #%2").arg(QFileInfo(t.image.left(hash)).fileName(), t.image.mid(hash + 6));
+        return QFileInfo(t.image).fileName();
+    }
     if (p.type == PortType::Float)
         return QString::number(v.toDouble(), 'f', 2);
+    if (p.type == PortType::Vec2) {
+        const QVector2D c = v.value<QVector2D>();
+        return QStringLiteral("%1 %2").arg(c.x(), 0, 'f', 2).arg(c.y(), 0, 'f', 2);
+    }
     if (p.color)
         return QString();
     const QVector3D c = v.value<QVector3D>();
@@ -148,7 +170,7 @@ public:
             painter->drawText(r, Qt::AlignVCenter | Qt::AlignLeft, p.name);
             if (!linked) {
                 const QVariant v = MaterialCompiler::inputValue(m_node, p);
-                if (p.color) {
+                if (p.color && p.expression.isEmpty()) {
                     const QRectF swatch(r.right() - 34, r.top() + 5, 34, r.height() - 10);
                     painter->setPen(QColor(255, 255, 255, 50));
                     painter->setBrush(toColor(v));
@@ -530,6 +552,64 @@ void NodeEditorView::keyPressEvent(QKeyEvent *event)
         break;
     }
     QGraphicsView::keyPressEvent(event);
+}
+
+bool NodeEditorView::isImageFile(const QString &path)
+{
+    static const QStringList suffixes { QStringLiteral("png"), QStringLiteral("jpg"), QStringLiteral("jpeg"),
+                                        QStringLiteral("bmp"), QStringLiteral("tga"), QStringLiteral("webp") };
+    return suffixes.contains(QFileInfo(path).suffix().toLower());
+}
+
+namespace
+{
+QStringList droppedImages(const QMimeData *mime)
+{
+    QStringList paths;
+    if (!mime || !mime->hasUrls())
+        return paths;
+    for (const QUrl &url : mime->urls()) {
+        const QString path = url.toLocalFile();
+        if (!path.isEmpty() && NodeEditorView::isImageFile(path))
+            paths.append(path);
+    }
+    return paths;
+}
+} // namespace
+
+void NodeEditorView::dragEnterEvent(QDragEnterEvent *event)
+{
+    if (m_hasGraph && !droppedImages(event->mimeData()).isEmpty())
+        event->acceptProposedAction();
+    else
+        event->ignore();
+}
+
+void NodeEditorView::dragMoveEvent(QDragMoveEvent *event)
+{
+    if (m_hasGraph && !droppedImages(event->mimeData()).isEmpty())
+        event->acceptProposedAction();
+    else
+        event->ignore();
+}
+
+void NodeEditorView::dropEvent(QDropEvent *event)
+{
+    const QStringList paths = droppedImages(event->mimeData());
+    if (!m_hasGraph || paths.isEmpty()) {
+        event->ignore();
+        return;
+    }
+    const QPointF scenePos = mapToScene(event->position().toPoint());
+    int nodeId = 0;
+    for (QGraphicsItem *item : m_scene->items(scenePos)) {
+        if (auto *node = dynamic_cast<NodeItem *>(item)) {
+            nodeId = node->id();
+            break;
+        }
+    }
+    event->acceptProposedAction();
+    emit filesDropped(paths, scenePos, nodeId);
 }
 
 void NodeEditorView::contextMenuEvent(QContextMenuEvent *event)

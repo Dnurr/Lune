@@ -10,6 +10,7 @@
 #include <rhi/qshaderbaker.h>
 
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 
 namespace
@@ -19,7 +20,8 @@ constexpr float kBlurRadius = 2;
 constexpr int kGridUbufSize = 64 + 8 * 16;
 constexpr int kCompositeUbufSize = 2 * 16 + Renderer::MaxGlassRects * 16;
 // See mesh.vert; mesh.frag adds the node material values at the end.
-constexpr int kEntityUbufSize = 3 * 64 + 5 * 16 + MaterialCompiler::MaxParams * 16;
+constexpr int kEntityParamsOffset = 3 * 64 + 5 * 16; // materialParams[0]
+constexpr int kEntityUbufSize = kEntityParamsOffset + MaterialCompiler::MaxParams * 16;
 constexpr int kOverlayVertexSize = int(sizeof(OverlayVertex));
 // Lights uniform block (mesh.frag, binding 1): ivec4 header + MaxLights * 3 vec4.
 constexpr int kLightSize = 3 * 16;
@@ -76,8 +78,10 @@ QRhiVertexInputLayout meshInputLayout()
 {
     QRhiVertexInputLayout layout;
     layout.setBindings({ { quint32(sizeof(MeshVertex)) } });
-    layout.setAttributes({ { 0, 0, QRhiVertexInputAttribute::Float3, 0 },
-                           { 0, 1, QRhiVertexInputAttribute::Float3, quint32(sizeof(QVector3D)) } });
+    layout.setAttributes({ { 0, 0, QRhiVertexInputAttribute::Float3, quint32(offsetof(MeshVertex, position)) },
+                           { 0, 1, QRhiVertexInputAttribute::Float3, quint32(offsetof(MeshVertex, normal)) },
+                           { 0, 2, QRhiVertexInputAttribute::Float2, quint32(offsetof(MeshVertex, uv)) },
+                           { 0, 3, QRhiVertexInputAttribute::Float4, quint32(offsetof(MeshVertex, tangent)) } });
     return layout;
 }
 } // namespace
@@ -142,12 +146,13 @@ void Renderer::initialize(QRhi *rhi, QRhiRenderTarget *target)
 
         m_ibl.initialize(m_rhi);
         m_shadows.initialize(m_rhi);
+        m_textures.initialize(m_rhi);
 
         using B = QRhiShaderResourceBinding;
         const auto stages = B::VertexStage | B::FragmentStage;
         m_meshLayoutSrb.reset(m_rhi->newShaderResourceBindings());
         {
-            const auto b = meshBindings(m_layoutUbuf.get());
+            const auto b = meshBindings(m_layoutUbuf.get(), fallbackTextures());
             m_meshLayoutSrb->setBindings(b.cbegin(), b.cend());
         }
         m_meshLayoutSrb->create();
@@ -365,6 +370,7 @@ void Renderer::release()
     m_backgroundUbuf.reset();
     m_shadows.release();
     m_ibl.release();
+    m_textures.release();
     m_sampler.reset();
     m_rhi = nullptr;
     m_pixelSize = {};
@@ -390,28 +396,60 @@ Renderer::GpuMesh &Renderer::gpuMesh(const MeshPtr &mesh, QRhiResourceUpdateBatc
     return m_meshes.emplace(mesh.get(), std::move(g)).first->second;
 }
 
-Renderer::GpuEntity &Renderer::gpuEntity(EntityId id)
+Renderer::GpuSlot Renderer::newSlot()
 {
-    auto it = m_entities.find(id);
-    if (it != m_entities.end())
-        return it->second;
+    GpuSlot s;
+    s.uniforms.reset(m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, kEntityUbufSize));
+    s.uniforms->create();
+    s.textures = fallbackTextures();
+    s.srb.reset(m_rhi->newShaderResourceBindings());
+    const auto bindings = meshBindings(s.uniforms.get(), s.textures);
+    s.srb->setBindings(bindings.cbegin(), bindings.cend());
+    s.srb->create();
+    return s;
+}
 
-    using B = QRhiShaderResourceBinding;
-    GpuEntity g;
-    g.uniforms.reset(m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, kEntityUbufSize));
-    g.uniforms->create();
-    g.srb.reset(m_rhi->newShaderResourceBindings());
-    const auto bindings = meshBindings(g.uniforms.get());
-    g.srb->setBindings(bindings.cbegin(), bindings.cend());
-    g.srb->create();
-    g.outlineSrb.reset(m_rhi->newShaderResourceBindings());
-    g.outlineSrb->setBindings({ B::uniformBuffer(0, B::VertexStage | B::FragmentStage, g.uniforms.get()) });
-    g.outlineSrb->create();
-    g.shadowSrb.reset(m_rhi->newShaderResourceBindings());
-    const auto shadow = m_shadows.casterBindings(g.uniforms.get());
-    g.shadowSrb->setBindings(shadow.cbegin(), shadow.cend());
-    g.shadowSrb->create();
-    return m_entities.emplace(id, std::move(g)).first->second;
+void Renderer::bindTextures(GpuSlot &slot, const TextureSet &textures)
+{
+    if (slot.textures == textures)
+        return;
+    slot.textures = textures;
+    const auto bindings = meshBindings(slot.uniforms.get(), textures);
+    slot.srb->setBindings(bindings.cbegin(), bindings.cend());
+    slot.srb->create();
+}
+
+Renderer::TextureSet Renderer::fallbackTextures() const
+{
+    TextureSet set;
+    set.fill(m_textures.fallback(TextureFallback::White));
+    return set;
+}
+
+Renderer::GpuEntity &Renderer::gpuEntity(EntityId id, int slotCount)
+{
+    slotCount = qMax(1, slotCount);
+    auto it = m_entities.find(id);
+    if (it == m_entities.end()) {
+        using B = QRhiShaderResourceBinding;
+        GpuEntity g;
+        g.materialSlots.push_back(newSlot());
+        QRhiBuffer *uniforms = g.materialSlots[0].uniforms.get();
+        g.outlineSrb.reset(m_rhi->newShaderResourceBindings());
+        g.outlineSrb->setBindings({ B::uniformBuffer(0, B::VertexStage | B::FragmentStage, uniforms) });
+        g.outlineSrb->create();
+        g.shadowSrb.reset(m_rhi->newShaderResourceBindings());
+        const auto shadow = m_shadows.casterBindings(uniforms);
+        g.shadowSrb->setBindings(shadow.cbegin(), shadow.cend());
+        g.shadowSrb->create();
+        it = m_entities.emplace(id, std::move(g)).first;
+    }
+    GpuEntity &g = it->second;
+    while (int(g.materialSlots.size()) < slotCount)
+        g.materialSlots.push_back(newSlot());
+    if (int(g.materialSlots.size()) > slotCount)
+        g.materialSlots.resize(size_t(slotCount)); // slot 0 (outline, shadows) stays
+    return g;
 }
 
 std::unique_ptr<QRhiGraphicsPipeline> Renderer::createMeshPipeline(const QShader &fragment)
@@ -491,7 +529,7 @@ bool Renderer::takeMaterialErrorsChanged()
     return changed;
 }
 
-QList<QRhiShaderResourceBinding> Renderer::meshBindings(QRhiBuffer *entityUniforms) const
+QList<QRhiShaderResourceBinding> Renderer::meshBindings(QRhiBuffer *entityUniforms, const TextureSet &textures) const
 {
     using B = QRhiShaderResourceBinding;
     const auto fs = B::FragmentStage;
@@ -502,6 +540,8 @@ QList<QRhiShaderResourceBinding> Renderer::meshBindings(QRhiBuffer *entityUnifor
                                            B::sampledTexture(4, fs, m_ibl.prefiltered(), m_ibl.cubeSampler()),
                                            B::sampledTexture(5, fs, m_ibl.brdfLut(), m_ibl.lutSampler()) };
     b.append(m_shadows.meshBindings()); // 6..10
+    for (int i = 0; i < MaterialCompiler::MaxTextures; ++i) // 11..18
+        b.append(B::sampledTexture(MaterialCompiler::FirstTextureBinding + i, fs, textures[size_t(i)], m_textures.sampler()));
     return b;
 }
 
@@ -533,6 +573,9 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
     const int iblPasses = m_ibl.update(cb, { environment.image, environment.skyColor, environment.groundColor });
 
     QRhiResourceUpdateBatch *rub = m_rhi->nextResourceUpdateBatch();
+    m_textures.beginFrame(rub); // images decoded since the last frame
+    if (m_textures.takeErrorsChanged())
+        m_materialErrorsChanged = true; // the UI shows image errors with the material's
     const QSize blurSize = m_blurA->pixelSize();
     const QVector3D eye = camera.eye();
     const float aspect = float(m_pixelSize.width()) / qMax(1, m_pixelSize.height());
@@ -615,17 +658,25 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
     }
 
     // --- Meshes: upload new ones, per-entity uniforms ---
+    // Whole meshes (shadow maps, outline), and their submeshes (scene pass, one material each).
     struct Draw
     {
         GpuMesh *mesh;
-        QRhiShaderResourceBindings *srb;
         QRhiShaderResourceBindings *shadowSrb;
         QRhiShaderResourceBindings *outlineSrb;
-        QRhiGraphicsPipeline *pipe; // m_meshPipe, or a node material's
         bool selected;
         bool mirrored; // negative scale: the model matrix flips the triangles' winding
     };
+    struct SurfaceDraw
+    {
+        GpuMesh *mesh;
+        quint32 firstIndex, indexCount;
+        QRhiShaderResourceBindings *srb;
+        QRhiGraphicsPipeline *pipe; // m_meshPipe, or a node material's
+    };
     std::vector<Draw> draws;
+    std::vector<SurfaceDraw> surfaces;
+    int boundTextures = 0;
     QVector3D boundsMin(1e30f, 1e30f, 1e30f), boundsMax(-1e30f, -1e30f, -1e30f); // of every drawn mesh, world space
 
     // Node materials used this frame: generated code, pipeline and parameter layout.
@@ -663,12 +714,14 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
                 if (!e.mesh || e.mesh->indices.empty() || !e.visible)
                     continue;
                 GpuMesh &gm = gpuMesh(e.mesh, rub);
-                GpuEntity &ge = gpuEntity(e.id);
+                const int slotCount = int(e.mesh->submeshes.size());
+                GpuEntity &ge = gpuEntity(e.id, slotCount);
                 seen[e.id] = true;
 
+                // The uniforms every slot shares; each adds its material's values.
                 const QMatrix4x4 model = e.transform.matrix();
-                float data[kEntityUbufSize / 4] = {};
-                float *v = putMat4(data, clipViewProj * model);
+                float common[kEntityUbufSize / 4] = {};
+                float *v = putMat4(common, clipViewProj * model);
                 v = putMat4(v, model);
                 v = putMat4(v, QMatrix4x4(model.normalMatrix()));
                 v = putLinearColor(v, e.displayColor, 1.0f);
@@ -679,33 +732,61 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
                 v[0] = eye.x(); v[1] = eye.y(); v[2] = eye.z();
                 v += 4;
                 v[0] = e.roughness; v[1] = e.metallic;
-                v += 4;
-                // Node material: the values of its unlinked inputs, one vec4 each.
-                const FrameMaterial *fm = e.material != NoMaterial ? frameMaterial(e.material) : nullptr;
-                if (fm) {
-                    const NodeLibrary &library = NodeLibrary::instance();
-                    for (const MaterialParam &p : fm->compiled.params) {
-                        const GraphNode *node = fm->graph->node(p.node);
-                        const NodeType *type = node ? library.type(node->type) : nullptr;
-                        const PortDesc *port = type ? type->input(p.port) : nullptr;
-                        if (port) {
-                            const QVariant value = MaterialCompiler::inputValue(*node, *port);
-                            if (p.type == PortType::Vec3) {
-                                const QVector3D c = value.value<QVector3D>();
-                                v[0] = p.color ? sRGBToLinear(c.x()) : c.x();
-                                v[1] = p.color ? sRGBToLinear(c.y()) : c.y();
-                                v[2] = p.color ? sRGBToLinear(c.z()) : c.z();
-                            } else {
-                                v[0] = value.toFloat();
-                            }
-                        }
-                        v += 4;
-                    }
-                }
-                rub->updateDynamicBuffer(ge.uniforms.get(), 0, kEntityUbufSize, data);
 
-                draws.push_back({ &gm, ge.srb.get(), ge.shadowSrb.get(), ge.outlineSrb.get(),
-                                  fm ? fm->pipe : m_meshPipe.get(), e.id == selected, model.determinant() < 0.0 });
+                const NodeLibrary &library = NodeLibrary::instance();
+                for (int slot = 0; slot < slotCount; ++slot) {
+                    GpuSlot &gs = ge.materialSlots[size_t(slot)];
+                    float data[kEntityUbufSize / 4];
+                    std::memcpy(data, common, sizeof(data));
+                    TextureSet textures = fallbackTextures();
+                    // Node material: the values of its unlinked inputs (one vec4 each), its textures.
+                    const MaterialId materialId = e.material(slot);
+                    const FrameMaterial *fm = materialId != NoMaterial ? frameMaterial(materialId) : nullptr;
+                    if (fm) {
+                        v = data + kEntityParamsOffset / 4;
+                        for (const MaterialParam &p : fm->compiled.params) {
+                            const GraphNode *node = fm->graph->node(p.node);
+                            const NodeType *type = node ? library.type(node->type) : nullptr;
+                            const PortDesc *port = type ? type->input(p.port) : nullptr;
+                            if (port) {
+                                const QVariant value = MaterialCompiler::inputValue(*node, *port);
+                                if (p.type == PortType::Vec3) {
+                                    const QVector3D c = value.value<QVector3D>();
+                                    v[0] = p.color ? sRGBToLinear(c.x()) : c.x();
+                                    v[1] = p.color ? sRGBToLinear(c.y()) : c.y();
+                                    v[2] = p.color ? sRGBToLinear(c.z()) : c.z();
+                                } else if (p.type == PortType::Vec2) {
+                                    const QVector2D c = value.value<QVector2D>();
+                                    v[0] = c.x();
+                                    v[1] = c.y();
+                                } else {
+                                    v[0] = value.toFloat();
+                                }
+                            }
+                            v += 4;
+                        }
+                        for (size_t i = 0; i < fm->compiled.textures.size(); ++i) {
+                            const MaterialTexture &t = fm->compiled.textures[i];
+                            const GraphNode *node = fm->graph->node(t.node);
+                            const NodeType *type = node ? library.type(node->type) : nullptr;
+                            const PortDesc *port = type ? type->input(t.port) : nullptr;
+                            if (!port)
+                                continue;
+                            const TextureValue value = TextureValue::fromVariant(node->values.value(port->name), port->linear);
+                            textures[i] = m_textures.texture(value, port->fallback);
+                            if (!value.image.isEmpty())
+                                ++boundTextures;
+                        }
+                    }
+                    rub->updateDynamicBuffer(gs.uniforms.get(), 0, kEntityUbufSize, data);
+                    bindTextures(gs, textures);
+
+                    const Submesh &sm = e.mesh->submeshes[size_t(slot)];
+                    if (sm.indexCount > 0)
+                        surfaces.push_back({ &gm, sm.firstIndex, sm.indexCount, gs.srb.get(), fm ? fm->pipe : m_meshPipe.get() });
+                }
+
+                draws.push_back({ &gm, ge.shadowSrb.get(), ge.outlineSrb.get(), e.id == selected, model.determinant() < 0.0 });
 
                 const QVector3D &lo = e.mesh->boundsMin, &hi = e.mesh->boundsMax;
                 for (int c = 0; c < 8; ++c) {
@@ -803,13 +884,14 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         cb->setShaderResources(srb);
         cb->draw(3);
     };
-    auto drawMesh = [&](QRhiGraphicsPipeline *pipe, QRhiShaderResourceBindings *srb, const Draw &d) {
+    auto drawMesh = [&](QRhiGraphicsPipeline *pipe, QRhiShaderResourceBindings *srb, GpuMesh *mesh,
+                        quint32 firstIndex, quint32 indexCount) {
         cb->setGraphicsPipeline(pipe);
         cb->setViewport(fullViewport);
         cb->setShaderResources(srb);
-        const QRhiCommandBuffer::VertexInput vin(d.mesh->vertices.get(), 0);
-        cb->setVertexInput(0, 1, &vin, d.mesh->indices.get(), 0, QRhiCommandBuffer::IndexUInt32);
-        cb->drawIndexed(d.mesh->indexCount);
+        const QRhiCommandBuffer::VertexInput vin(mesh->vertices.get(), 0);
+        cb->setVertexInput(0, 1, &vin, mesh->indices.get(), 0, QRhiCommandBuffer::IndexUInt32);
+        cb->drawIndexed(indexCount, 1, firstIndex);
     };
     const QColor black(Qt::black);
 
@@ -817,12 +899,18 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
     // plus the shadow atlases.
     m_stats = {};
     m_stats.meshes = int(draws.size());
+    m_stats.textures = boundTextures;
     m_stats.renderPasses = 8 + m_shadows.passCount() + iblPasses;
     m_stats.drawCalls = 8 + iblPasses + (overlayCount > 0 ? 1 : 0) + (showBackground ? 1 : 0);
+    for (const SurfaceDraw &s : surfaces) {
+        m_stats.drawCalls += 1;
+        m_stats.triangles += s.indexCount / 3;
+    }
     for (const Draw &d : draws) {
-        const int times = d.selected ? 2 : 1; // the outline draws the mesh again
-        m_stats.drawCalls += times;
-        m_stats.triangles += quint64(d.mesh->indexCount / 3) * quint64(times);
+        if (d.selected) { // the outline draws the mesh again
+            m_stats.drawCalls += 1;
+            m_stats.triangles += d.mesh->indexCount / 3;
+        }
     }
     for (const Draw &d : draws) { // once per shadow map tile
         m_stats.drawCalls += m_shadows.viewCount();
@@ -844,11 +932,11 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
     if (showBackground)
         fullscreen(m_backgroundPipe.get(), m_backgroundSrb.get(), m_pixelSize);
     fullscreen(m_gridPipe.get(), m_gridSrb.get(), m_pixelSize);
-    for (const Draw &d : draws)
-        drawMesh(d.pipe, d.srb, d);
+    for (const SurfaceDraw &s : surfaces)
+        drawMesh(s.pipe, s.srb, s.mesh, s.firstIndex, s.indexCount);
     for (const Draw &d : draws) {
         if (d.selected)
-            drawMesh(m_outlinePipe.get(), d.outlineSrb, d);
+            drawMesh(m_outlinePipe.get(), d.outlineSrb, d.mesh, 0, d.mesh->indexCount);
     }
     cb->endPass();
 

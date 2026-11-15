@@ -44,7 +44,7 @@ void StatsOverlay::frameRendered(double cpuMs, const FrameStats &stats, const ch
                            "%4 fps   %5 ms/frame\n"
                            "CPU %6 ms  (max %7)\n"
                            "%8 draws  %9 passes  %10 tris\n"
-                           "%11 meshes  %12 entities")
+                           "%11 meshes  %12 entities  %13 textures")
                 .arg(QString::fromLatin1(backend))
                 .arg(pixelSize.width())
                 .arg(pixelSize.height())
@@ -56,7 +56,8 @@ void StatsOverlay::frameRendered(double cpuMs, const FrameStats &stats, const ch
                 .arg(stats.renderPasses)
                 .arg(c.toString(qulonglong(stats.triangles)))
                 .arg(stats.meshes)
-                .arg(entities));
+                .arg(entities)
+                .arg(stats.textures));
     reposition();
 
     m_window.restart();

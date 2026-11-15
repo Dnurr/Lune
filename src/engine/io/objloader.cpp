@@ -6,12 +6,15 @@
 #include <QTextStream>
 
 #include <algorithm>
+#include <map>
+#include <tuple>
 
 namespace
 {
 struct Corner
 {
     int position = -1; // 0-based
+    int uv = -1;       // 0-based, -1 = none
     int normal = -1;   // 0-based, -1 = none
 };
 
@@ -41,12 +44,16 @@ MeshPtr loadObj(const QString &path, QString *error)
 
     std::vector<QVector3D> positions;
     std::vector<QVector3D> normals;
+    std::vector<QVector2D> uvs;
     auto mesh = std::make_shared<Mesh>();
     mesh->name = QFileInfo(path).completeBaseName();
     mesh->source = QFileInfo(path).absoluteFilePath();
 
-    // Corners with a normal are shared between faces; key = (position, normal).
-    QHash<quint64, quint32> shared;
+    // Corners with a normal are shared between faces; key = (position, uv, normal).
+    std::map<std::tuple<int, int, int>, quint32> shared;
+    // Triangles per material (usemtl), in order of first use: one submesh each.
+    std::vector<std::pair<QString, std::vector<quint32>>> groups(1);
+    size_t group = 0;
 
     QTextStream in(&file);
     QString line;
@@ -65,6 +72,22 @@ MeshPtr loadObj(const QString &path, QString *error)
                 return fail(QStringLiteral("Line %1: expected 3 numbers").arg(lineNo));
             const QVector3D p(parts[1].toFloat(), parts[2].toFloat(), parts[3].toFloat());
             (kind == u"v" ? positions : normals).push_back(p);
+        } else if (kind == u"vt") {
+            if (parts.size() < 2)
+                return fail(QStringLiteral("Line %1: expected texture coordinates").arg(lineNo));
+            // OBJ has v = 0 at the bottom of the image; Lune (like glTF) at the top.
+            uvs.push_back(QVector2D(parts[1].toFloat(), 1.0f - (parts.size() > 2 ? parts[2].toFloat() : 0.0f)));
+        } else if (kind == u"usemtl") {
+            const QString name = parts.size() > 1 ? l.mid(6).trimmed().toString() : QString();
+            auto it = std::find_if(groups.begin(), groups.end(), [&](const auto &g) { return g.first == name; });
+            if (it == groups.end()) {
+                if (groups.size() == 1 && groups[0].second.empty())
+                    groups[0].first = name; // nothing before the first usemtl
+                else
+                    groups.push_back({ name, {} });
+                it = std::find_if(groups.begin(), groups.end(), [&](const auto &g) { return g.first == name; });
+            }
+            group = size_t(it - groups.begin());
         } else if (kind == u"f") {
             face.clear();
             for (qsizetype i = 1; i < parts.size(); ++i) {
@@ -74,6 +97,11 @@ MeshPtr loadObj(const QString &path, QString *error)
                 c.position = resolveIndex(fields[0], int(positions.size()), &ok);
                 if (!ok)
                     return fail(QStringLiteral("Line %1: bad vertex index").arg(lineNo));
+                if (fields.size() >= 2 && !fields[1].isEmpty()) {
+                    c.uv = resolveIndex(fields[1], int(uvs.size()), &ok);
+                    if (!ok)
+                        return fail(QStringLiteral("Line %1: bad texture coordinate index").arg(lineNo));
+                }
                 if (fields.size() >= 3 && !fields[2].isEmpty()) {
                     c.normal = resolveIndex(fields[2], int(normals.size()), &ok);
                     if (!ok)
@@ -100,28 +128,36 @@ MeshPtr loadObj(const QString &path, QString *error)
             std::vector<quint32> ids;
             ids.reserve(face.size());
             for (const Corner &c : face) {
+                const QVector2D uv = c.uv >= 0 ? uvs[c.uv] : QVector2D();
                 if (hasNormals) {
-                    const quint64 key = (quint64(c.position) << 32) | quint32(c.normal);
-                    auto it = shared.constFind(key);
-                    if (it == shared.constEnd()) {
-                        it = shared.insert(key, quint32(mesh->vertices.size()));
-                        mesh->vertices.push_back({ positions[c.position], normals[c.normal].normalized() });
+                    const auto key = std::make_tuple(c.position, c.uv, c.normal);
+                    auto it = shared.find(key);
+                    if (it == shared.end()) {
+                        it = shared.emplace(key, quint32(mesh->vertices.size())).first;
+                        mesh->vertices.push_back({ positions[c.position], normals[c.normal].normalized(), uv });
                     }
-                    ids.push_back(*it);
+                    ids.push_back(it->second);
                 } else {
                     ids.push_back(quint32(mesh->vertices.size()));
-                    mesh->vertices.push_back({ positions[c.position], flat });
+                    mesh->vertices.push_back({ positions[c.position], flat, uv });
                 }
             }
+            std::vector<quint32> &tris = groups[group].second;
             for (size_t i = 1; i + 1 < ids.size(); ++i)
-                mesh->indices.insert(mesh->indices.end(), { ids[0], ids[i], ids[i + 1] });
+                tris.insert(tris.end(), { ids[0], ids[i], ids[i + 1] });
         }
-        // o, g, s, usemtl, mtllib, vt: ignored
+        // o, g, s, mtllib: ignored
+    }
+
+    for (auto &[name, tris] : groups) {
+        if (tris.empty())
+            continue;
+        mesh->submeshes.push_back({ quint32(mesh->indices.size()), quint32(tris.size()), name, -1 });
+        mesh->indices.insert(mesh->indices.end(), tris.begin(), tris.end());
     }
 
     if (mesh->indices.empty())
         return fail(QStringLiteral("%1 contains no faces").arg(QFileInfo(path).fileName()));
-    mesh->computeBounds();
-    mesh->computeClosed();
+    mesh->finish();
     return mesh;
 }

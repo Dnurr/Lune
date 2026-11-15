@@ -22,11 +22,14 @@
 //
 // Values typed into unlinked inputs aren't written into the code: each one gets a slot
 // of materialParams[] (a vec4 per input, in the entity's uniforms), so editing a value
-// only updates a buffer. The code changes, and the shader is compiled again, only when
-// nodes or links change.
+// only updates a buffer. Likewise each texture input gets a sampler slot,
+// materialTexture0..7, so picking another image binds another texture. The code changes,
+// and the shader is compiled again, only when nodes or links change. Unlinked inputs with
+// an expression (`expr(v_uv)`) get that expression.
 //
-// Linked ports of different types are converted: float -> vec3 repeats the value,
-// vec3 -> float takes the luminance (Rec. 709 weights).
+// Linked ports of different types are converted: a float fills a vec2/vec3; a vec3 gives
+// a float as its luminance (Rec. 709 weights) and a vec2 as its .xy; a vec2 gives a float
+// as its .x and a vec3 as (x, y, 0).
 struct MaterialParam
 {
     int node = 0;
@@ -35,18 +38,28 @@ struct MaterialParam
     bool color = false; // sRGB in the graph: converted to linear when uploaded
 };
 
+// A texture input: materialTexture<i> samples it.
+struct MaterialTexture
+{
+    int node = 0;
+    QString port;
+};
+
 struct CompiledMaterial
 {
-    QString code;                       // GLSL replacing the default materialSurface(); empty on error
-    std::vector<MaterialParam> params;  // materialParams[i] <- params[i]
-    QString error;                      // why there's no code (e.g. no Material Output)
+    QString code;                          // GLSL replacing the default materialSurface(); empty on error
+    std::vector<MaterialParam> params;     // materialParams[i] <- params[i]
+    std::vector<MaterialTexture> textures; // materialTexture<i> <- textures[i]
+    QString error;                         // why there's no code (e.g. no Material Output)
 
     bool ok() const { return error.isEmpty(); }
 };
 
 namespace MaterialCompiler
 {
-constexpr int MaxParams = 32; // must match MAX_MATERIAL_PARAMS in mesh.frag
+constexpr int MaxParams = 32;  // must match MAX_MATERIAL_PARAMS in mesh.frag
+constexpr int MaxTextures = 8; // materialTexture0..7 in mesh.frag
+constexpr int FirstTextureBinding = 11; // binding of materialTexture0 in mesh.frag
 inline const QString BeginMarker = QStringLiteral("//@material-begin");
 inline const QString EndMarker = QStringLiteral("//@material-end");
 

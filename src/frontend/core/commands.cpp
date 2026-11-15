@@ -213,14 +213,15 @@ bool SetTransformCommand::mergeWith(const QUndoCommand *other)
 // Materials
 // ---------------------------------------------------------------------------
 
-AddMaterialCommand::AddMaterialCommand(Scene *scene, const Material &prototype, EntityId assignTo)
+AddMaterialCommand::AddMaterialCommand(Scene *scene, const Material &prototype, EntityId assignTo, int slot)
     : m_scene(scene)
     , m_material(prototype)
     , m_entity(assignTo)
+    , m_slot(slot)
 {
     setText(QStringLiteral("New material"));
     if (const Entity *e = scene->entity(assignTo))
-        m_previous = e->material;
+        m_previous = e->material(slot);
 }
 
 void AddMaterialCommand::redo()
@@ -230,37 +231,38 @@ void AddMaterialCommand::redo()
     else
         m_scene->insertMaterial(m_material);
     if (m_entity != InvalidEntity)
-        m_scene->setEntityMaterial(m_entity, m_material.id);
+        m_scene->setEntityMaterial(m_entity, m_slot, m_material.id);
 }
 
 void AddMaterialCommand::undo()
 {
     if (m_entity != InvalidEntity)
-        m_scene->setEntityMaterial(m_entity, m_previous);
+        m_scene->setEntityMaterial(m_entity, m_slot, m_previous);
     if (const Material *m = m_scene->material(m_material.id))
         m_material = *m; // keep edits made since, for redo
     m_scene->removeMaterial(m_material.id);
 }
 
-AssignMaterialCommand::AssignMaterialCommand(Scene *scene, EntityId entity, MaterialId material)
+AssignMaterialCommand::AssignMaterialCommand(Scene *scene, EntityId entity, int slot, MaterialId material)
     : m_scene(scene)
     , m_entity(entity)
+    , m_slot(slot)
     , m_before(NoMaterial)
     , m_after(material)
 {
     setText(QStringLiteral("Assign material"));
     if (const Entity *e = scene->entity(entity))
-        m_before = e->material;
+        m_before = e->material(slot);
 }
 
 void AssignMaterialCommand::redo()
 {
-    m_scene->setEntityMaterial(m_entity, m_after);
+    m_scene->setEntityMaterial(m_entity, m_slot, m_after);
 }
 
 void AssignMaterialCommand::undo()
 {
-    m_scene->setEntityMaterial(m_entity, m_before);
+    m_scene->setEntityMaterial(m_entity, m_slot, m_before);
 }
 
 SetMaterialGraphCommand::SetMaterialGraphCommand(Scene *scene, MaterialId material, const NodeGraph &after,

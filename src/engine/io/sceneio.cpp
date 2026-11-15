@@ -10,6 +10,7 @@
 #include <QVector3D>
 
 #include <algorithm>
+#include <functional>
 #include <vector>
 
 #include "engine/scene/components.h"
@@ -55,6 +56,26 @@ QJsonValue toJson(PropertyType type, const QVariant &v)
 QString relativePath(const QString &path, const QDir &sceneDir)
 {
     return QDir::fromNativeSeparators(sceneDir.relativeFilePath(path));
+}
+
+// The image references in a material graph's texture values ({ "image": ..., ... }),
+// passed through `map`. A reference into a glTF ("<file>#image<N>") maps its file part.
+NodeGraph mapImages(NodeGraph graph, const std::function<QString(const QString &)> &map)
+{
+    for (GraphNode &n : graph.nodes) {
+        for (auto it = n.values.begin(); it != n.values.end(); ++it) {
+            if (it.value().metaType().id() != QMetaType::QVariantMap)
+                continue;
+            QVariantMap texture = it.value().toMap();
+            const QString image = texture.value(QStringLiteral("image")).toString();
+            if (image.isEmpty())
+                continue;
+            const int hash = image.lastIndexOf(QLatin1String("#image"));
+            texture[QStringLiteral("image")] = hash > 0 ? map(image.left(hash)) + image.mid(hash) : map(image);
+            it.value() = texture;
+        }
+    }
+    return graph;
 }
 
 QJsonValue propertyToJson(const PropertyDesc &p, const QVariant &v, const QDir &sceneDir)
@@ -128,8 +149,14 @@ bool save(const Scene &scene, const QString &path, const QJsonObject &editorStat
         je["id"] = double(e.id);
         je["name"] = e.name;
         je["mesh"] = e.mesh && !e.mesh->source.isEmpty() ? QJsonValue(meshReference(e.mesh, sceneDir)) : QJsonValue();
-        if (e.material != NoMaterial)
-            je["material"] = double(e.material);
+        if (e.materials.size() == 1) {
+            je["material"] = double(e.materials[0]);
+        } else if (!e.materials.empty()) {
+            QJsonArray slotIds; // one per submesh, 0 = none
+            for (MaterialId m : e.materials)
+                slotIds.append(double(m));
+            je["materials"] = slotIds;
+        }
 
         QJsonObject jc;
         for (const ComponentDesc &c : comps) {
@@ -152,7 +179,7 @@ bool save(const Scene &scene, const QString &path, const QJsonObject &editorStat
         QJsonObject jm;
         jm["id"] = double(m.id);
         jm["name"] = m.name;
-        jm["graph"] = m.graph.toJson();
+        jm["graph"] = mapImages(m.graph, [&](const QString &path) { return relativePath(path, sceneDir); }).toJson();
         materials.append(jm);
     }
 
@@ -227,7 +254,12 @@ bool load(Scene &scene, const QString &path, QJsonObject *editorState, QStringLi
         else
             usedIds.insert(e.id, true);
         e.name = je["name"].toString(QStringLiteral("Entity"));
-        e.material = MaterialId(je["material"].toDouble());
+        if (je["materials"].isArray()) {
+            for (const QJsonValue &m : je["materials"].toArray())
+                e.materials.push_back(MaterialId(m.toDouble()));
+        } else if (je.contains("material")) {
+            e.materials.push_back(MaterialId(je["material"].toDouble()));
+        }
 
         const QString meshRef = je["mesh"].toString();
         if (meshRef.startsWith(QLatin1String("primitive:"))) {
@@ -292,7 +324,9 @@ bool load(Scene &scene, const QString &path, QJsonObject *editorState, QStringLi
         Material m;
         m.id = MaterialId(jm["id"].toDouble());
         m.name = jm["name"].toString(QStringLiteral("Material"));
-        m.graph = NodeGraph::fromJson(jm["graph"].toObject());
+        m.graph = mapImages(NodeGraph::fromJson(jm["graph"].toObject()), [&](const QString &path) {
+            return QDir::cleanPath(sceneDir.absoluteFilePath(path));
+        });
         if (m.id == NoMaterial || usedMaterials.contains(m.id)) {
             warn(QStringLiteral("Material %1: missing or duplicate id, skipped").arg(m.name));
             continue;
@@ -301,9 +335,12 @@ bool load(Scene &scene, const QString &path, QJsonObject *editorState, QStringLi
         materials.push_back(std::move(m));
     }
     for (Entity &e : entities) {
-        if (e.material != NoMaterial && !usedMaterials.contains(e.material)) {
-            warn(QStringLiteral("%1: unknown material %2").arg(e.name).arg(e.material));
-            e.material = NoMaterial;
+        for (int slot = 0; slot < int(e.materials.size()); ++slot) {
+            const MaterialId m = e.materials[size_t(slot)];
+            if (m != NoMaterial && !usedMaterials.contains(m)) {
+                warn(QStringLiteral("%1: unknown material %2").arg(e.name).arg(m));
+                e.setMaterial(slot, NoMaterial);
+            }
         }
     }
 

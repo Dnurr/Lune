@@ -93,6 +93,8 @@ public:
     // Node materials: why one can't be drawn (empty = fine). materialErrorsChanged() after a
     // frame that changed any.
     QString materialError(MaterialId id) const { return m_renderer.materialError(id); }
+    // Why a material image couldn't be loaded (empty = fine or still loading).
+    QString textureError(const QString &image) const { return m_renderer.textureError(image); }
 
     // Centers the scene in the part of the viewport not covered by the panels on the left
     // and right (a lens shift, smoothed like the camera). Off: centered in the whole widget.

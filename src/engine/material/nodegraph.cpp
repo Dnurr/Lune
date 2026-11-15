@@ -1,6 +1,7 @@
 #include "nodegraph.h"
 
 #include <QJsonArray>
+#include <QVector2D>
 #include <QVector3D>
 #include <algorithm>
 
@@ -86,7 +87,8 @@ const GraphLink *NodeGraph::linkTo(int toNode, const QString &toPort) const
 // ---------------------------------------------------------------------------
 // JSON
 //   { "nodes": [ { "id": 1, "type": "mix", "position": [x, y], "values": { "factor": 0.5,
-//                  "a": [0.8, 0.8, 0.8] } } ],
+//                  "a": [0.8, 0.8, 0.8], "offset": [0, 1],
+//                  "image": { "image": "C:/textures/wood.png", "linear": false } } } ],
 //     "links": [ { "from": [1, "result"], "to": [2, "baseColor"] } ] }
 // ---------------------------------------------------------------------------
 
@@ -98,6 +100,12 @@ QJsonValue valueToJson(const QVariant &v)
         const QVector3D c = v.value<QVector3D>();
         return QJsonArray { c.x(), c.y(), c.z() };
     }
+    if (v.metaType().id() == QMetaType::QVector2D) {
+        const QVector2D c = v.value<QVector2D>();
+        return QJsonArray { c.x(), c.y() };
+    }
+    if (v.metaType().id() == QMetaType::QVariantMap) // a texture: { image, linear }
+        return QJsonObject::fromVariantMap(v.toMap());
     return v.toDouble();
 }
 
@@ -107,8 +115,12 @@ QVariant valueFromJson(const QJsonValue &j)
         const QJsonArray a = j.toArray();
         if (a.size() == 3)
             return QVector3D(float(a[0].toDouble()), float(a[1].toDouble()), float(a[2].toDouble()));
+        if (a.size() == 2)
+            return QVector2D(float(a[0].toDouble()), float(a[1].toDouble()));
         return {};
     }
+    if (j.isObject())
+        return j.toObject().toVariantMap();
     if (j.isDouble())
         return float(j.toDouble());
     return {};

@@ -21,13 +21,16 @@ add_library(lune_engine STATIC
     src/engine/material/nodegraph.cpp
     src/engine/material/nodelibrary.cpp
     src/engine/material/materialcompiler.cpp
+    src/engine/material/gltfmaterialgraph.cpp
     src/engine/io/objloader.cpp
     src/engine/io/gltfloader.cpp
     src/engine/io/meshimport.cpp
     src/engine/io/hdrimage.cpp
     src/engine/io/sceneio.cpp
+    src/engine/io/imageloader.cpp
     src/engine/render/camera.cpp
     src/engine/render/renderer.cpp
+    src/engine/render/texturecache.cpp
     src/engine/render/iblmaps.cpp
     src/engine/render/shadowmaps.cpp
 )
