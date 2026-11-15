@@ -5,6 +5,9 @@
 
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
+    // Where QSettings keeps the editor layout (on Windows: HKEY_CURRENT_USER\Software\Lune\Lune).
+    QApplication::setOrganizationName(QStringLiteral("Lune"));
+    QApplication::setApplicationName(QStringLiteral("Lune"));
 
     // Dark gray palette with a navy accent.
     // Surfaces are neutral grays (no hue); only the accent roles are blue/navy.

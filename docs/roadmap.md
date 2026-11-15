@@ -21,6 +21,7 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 - [x] `.lune` scene files, OBJ and glTF import (Claude)
 - [x] Picking, move / rotate / scale gizmo (Claude)
 - [x] Stats overlay, automated tests, documentation (Claude)
+- [x] Assets browser (folder tree + contents), resizable panels, Tab to hide them, layout saved between sessions (Claude)
 
 ## 2. HDR and shading (current phase)
 

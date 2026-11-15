@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QFrame>
+#include <QJsonObject>
 #include <QPoint>
 
 class QBoxLayout;
@@ -22,6 +23,13 @@ class QPropertyAnimation;
 //     - parent on left/right: children stacked from the top, dragged vertically only
 //     - parent at the bottom: children packed from the left, dragged horizontally only
 //   On release the dragged child takes its new place in the order.
+//
+// Top-level panels can be resized from their inner edge (the one facing the viewport).
+// Mouse presses and wheel events on a panel stop there: they never reach the viewport
+// behind it, even outside any control.
+//
+// Collapsing (setCollapsed on the parent): every top-level panel slides out and hides;
+// expanding brings back the ones that want to be visible (setPanelVisible).
 class Panel : public QFrame
 {
     Q_OBJECT
@@ -48,10 +56,28 @@ public:
 
     bool isNested() const { return hostPanel() != nullptr; }
 
+    // The content fills the whole area below the title, instead of keeping its natural
+    // length along the panel's main axis (packed at the top / left).
+    void setContentFills(bool fills);
+
+    // Visibility the panel wants (e.g. the inspector only while something is selected).
+    // Applied right away, or when the panels are expanded again if they're collapsed.
+    void setPanelVisible(bool visible);
+    bool wantsVisible() const { return m_wantsVisible; }
+
+    // Collapses / expands every top-level panel of `host` (animated).
+    static void setCollapsed(QWidget *host, bool collapsed);
+    static bool isCollapsed(const QWidget *host);
+
+    // Side and size, to save and restore the editor layout.
+    QJsonObject layoutState() const;
+    void restoreLayoutState(const QJsonObject &state);
+
     QSize sizeHint() const override;
 
 signals:
     void sideChanged(Panel::Side side);
+    void resized(); // by the user, from the inner edge
 
 protected:
     bool event(QEvent *event) override;
@@ -59,6 +85,8 @@ protected:
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
+    void wheelEvent(QWheelEvent *event) override;
+    void leaveEvent(QEvent *event) override;
     void showEvent(QShowEvent *event) override;
     void hideEvent(QHideEvent *event) override;
 
@@ -66,6 +94,8 @@ private:
     Panel *hostPanel() const; // parent Panel when nested, otherwise nullptr
     bool isVertical() const { return m_side != Side::Bottom; }
     bool isOnTitle(const QPoint &pos) const;
+    bool isOnResizeEdge(const QPoint &pos) const; // inner edge of a top-level panel
+    void slide(bool in);                          // collapse animation
 
     // Top-level layout
     QList<Panel *> siblings(Side side) const; // visible panels on `side`, in creation order
@@ -90,4 +120,9 @@ private:
 
     bool m_dragging = false;
     QPoint m_dragOffset; // cursor position inside the panel when the drag started
+    bool m_resizing = false;
+    QPoint m_resizeStart; // cursor in parent coordinates when the resize started
+    int m_resizeStartSize = 0;
+    bool m_fills = false;
+    bool m_wantsVisible = true;
 };

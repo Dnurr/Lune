@@ -122,6 +122,28 @@ never on top of it.
   dragged only along that axis to reorder.
 - Panels set the dynamic property `glass = true`, which tells the viewport to blur the
   scene behind them (see [Rendering](rendering.md#glass-panels)).
+- Mouse presses and wheel events stop at the panel, even outside its controls: the
+  viewport behind it never sees them (no accidental selection or zoom).
+- Top-level panels resize from their inner edge. `Panel::setCollapsed(viewport, ...)`
+  slides them all out (Tab with the mouse over the viewport, handled by `Editor`'s event
+  filter so text fields keep Tab); panels that hide themselves (the Inspector with no
+  selection) use `setPanelVisible`, which waits for the panels to be expanded again.
+
+### Layout
+
+The editor layout is per user, not per scene: window geometry, each panel's side and
+size, whether the panels are collapsed, the assets splitter and folder. `Editor` saves it
+with `QSettings` (on Windows under `HKEY_CURRENT_USER\Software\Lune\Lune`) when the
+window closes and restores it at startup; the JSON blob carries a version, and a missing
+or older one means the defaults.
+
+### Assets
+
+`AssetsPanel` (`frontend/components/panel/assets/assets.h`) browses a root folder with two
+`QFileSystemModel`s: directories only for the tree (a proxy keeps the root as its single
+top-level item), and the files the editor can use (scenes, meshes, images) for the
+contents. The root follows the open scene's folder unless the scene is already inside it,
+or is picked with the Folder button. Double-clicking a file goes to `Editor::openAsset`.
 
 ### Viewport
 

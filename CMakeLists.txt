@@ -59,6 +59,7 @@ add_executable(Lune
     src/frontend/components/widgets/vector3.cpp
     src/frontend/components/panel/panel.cpp
     src/frontend/components/panel/inspector/inspector.cpp
+    src/frontend/components/panel/assets/assets.cpp
     src/frontend/components/panel/outliner/outliner.cpp
     src/frontend/components/palette/commandpalette.cpp
     src/frontend/editor.cpp

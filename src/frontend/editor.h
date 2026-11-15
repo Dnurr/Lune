@@ -4,8 +4,12 @@
 
 #include "engine/scene/entity.h"
 
+class AssetsPanel;
 class CommandPalette;
 class DisplaySettings;
+class InspectorPanel;
+class OutlinerPanel;
+class QAction;
 class QCloseEvent;
 class QJsonObject;
 class QMenu;
@@ -37,10 +41,20 @@ public:
 
 protected:
     void closeEvent(QCloseEvent *event) override;
+    // Tab with the mouse over the viewport (not over a panel) collapses / expands the panels.
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
     void createMenus();
     void createPanels();
+
+    // Editor layout (window geometry, panels, assets browser), saved in the user settings
+    // when the editor closes and restored when it starts. Not part of the scene.
+    void saveLayout() const;
+    void restoreLayout();
+    void setPanelsCollapsed(bool collapsed);
+    void openAsset(const QString &path); // double-click in the assets browser
+    void followScene(const QString &path); // assets root: the scene's folder, unless already inside the root
 
     void addEntity(const QString &name, const MeshPtr &mesh);
     void addLight(Light::Type type);
@@ -71,5 +85,9 @@ private:
     CommandPalette *m_palette = nullptr;
     DisplaySettings *m_display = nullptr; // exposure + tonemapping of the viewport
     QMenu *m_addMenu = nullptr;
+    QAction *m_collapsePanels = nullptr;
+    OutlinerPanel *m_outliner = nullptr;
+    InspectorPanel *m_inspector = nullptr;
+    AssetsPanel *m_assets = nullptr;
     QString m_scenePath; // empty = never saved
 };

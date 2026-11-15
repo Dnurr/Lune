@@ -76,7 +76,7 @@ void InspectorPanel::rebuild()
 
     const Entity *e = m_scene->entity(m_selection->current());
     m_shown = e ? e->id : InvalidEntity;
-    setVisible(e != nullptr);
+    setPanelVisible(e != nullptr);
     if (!e)
         return;
     m_shownComponents = presentComponents(*e);

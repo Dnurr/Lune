@@ -3,18 +3,29 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QCursor>
+#include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QMessageBox>
 #include <QBoxLayout>
 #include <QCloseEvent>
+#include <QAbstractSpinBox>
+#include <QApplication>
 #include <QIcon>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
+#include <QKeyEvent>
+#include <QLineEdit>
 #include <QMenuBar>
+#include <QPlainTextEdit>
+#include <QSettings>
+#include <QStandardPaths>
+#include <QTextEdit>
 #include <QUndoStack>
 
 #include "components/palette/commandpalette.h"
+#include "components/panel/assets/assets.h"
 #include "components/panel/inspector/inspector.h"
 #include "components/panel/outliner/outliner.h"
 #include "components/viewport/displaymenu.h"
@@ -49,6 +60,8 @@ Editor::Editor(QWidget *parent)
 
     createMenus();
     createPanels();
+    restoreLayout();
+    qApp->installEventFilter(this); // Tab over the viewport, wherever the focus is
 
     // A deleted entity can't stay selected (commands handle it; this covers any other removal).
     connect(m_scene, &Scene::entityRemoved, this, [this](EntityId id) {
@@ -141,7 +154,13 @@ void Editor::createMenus()
     stats->setShortcut(QKeySequence(Qt::Key_F12));
     stats->setCheckable(true);
     connect(stats, &QAction::toggled, m_viewport, &Viewport::setStatsVisible);
+    // Tab is handled in eventFilter (only with the mouse over the viewport), so it's
+    // shown in the menu but not set as the action's shortcut.
+    m_collapsePanels = new QAction("Hide Panels\tTab", this);
+    m_collapsePanels->setCheckable(true);
+    connect(m_collapsePanels, &QAction::toggled, this, &Editor::setPanelsCollapsed);
     QMenu *view = menuBar()->addMenu("View");
+    view->addAction(m_collapsePanels);
     view->addAction(stats);
     view->addSeparator();
 
@@ -189,22 +208,23 @@ void Editor::createMenus()
 void Editor::createPanels()
 {
     // Scene outliner (left)
-    auto *outliner = new OutlinerPanel(m_scene, m_selection, m_viewport);
-    outliner->setMargin(12);
-    outliner->setPanelWidth(220);
-    connect(outliner, &OutlinerPanel::renameRequested, this, [this](EntityId id, const QString &name) {
+    m_outliner = new OutlinerPanel(m_scene, m_selection, m_viewport);
+    m_outliner->setMargin(12);
+    m_outliner->setPanelWidth(220);
+    connect(m_outliner, &OutlinerPanel::renameRequested, this, [this](EntityId id, const QString &name) {
         m_undo->push(new RenameEntityCommand(m_scene, id, name));
     });
 
     // Inspector (right): built from the component descriptors, hidden while nothing is selected.
-    auto *inspector = new InspectorPanel(m_scene, m_selection, m_undo, m_viewport);
-    inspector->setMargin(12);
-    inspector->setPanelWidth(280);
+    m_inspector = new InspectorPanel(m_scene, m_selection, m_undo, m_viewport);
+    m_inspector->setMargin(12);
+    m_inspector->setPanelWidth(280);
 
-    // Assets (bottom)
-    auto *assets = new Panel("Assets", m_viewport, Panel::Side::Bottom);
-    assets->setMargin(12);
-    assets->setPanelHeight(200);
+    // Assets (bottom): folder tree + contents
+    m_assets = new AssetsPanel(m_viewport, Panel::Side::Bottom);
+    m_assets->setMargin(12);
+    m_assets->setPanelHeight(220);
+    connect(m_assets, &AssetsPanel::fileActivated, this, &Editor::openAsset);
 
     // Created last so it sits above the panels.
     // Display dropdown in the top-right corner of the free viewport area.
@@ -317,6 +337,7 @@ bool Editor::loadScene(const QString &path)
     }
     applyEditorState(editorState);
     resetDocument(path);
+    followScene(path);
     if (!warnings.isEmpty())
         QMessageBox::warning(this, "Open Scene", "The scene was opened with some problems:\n\n" + warnings.join('\n'));
     return true;
@@ -350,6 +371,7 @@ bool Editor::writeScene(const QString &path)
     m_scenePath = path;
     m_undo->setClean();
     updateTitle();
+    followScene(path);
     return true;
 }
 
@@ -420,10 +442,117 @@ void Editor::applyEditorState(const QJsonObject &state)
 
 void Editor::closeEvent(QCloseEvent *event)
 {
-    if (maybeSave())
+    if (maybeSave()) {
+        saveLayout();
         event->accept();
-    else
+    } else {
         event->ignore();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Layout
+// ---------------------------------------------------------------------------
+
+namespace
+{
+constexpr int kLayoutVersion = 1;
+}
+
+void Editor::saveLayout() const
+{
+    QJsonObject panels;
+    panels["scene"] = m_outliner->layoutState();
+    panels["inspector"] = m_inspector->layoutState();
+    panels["assets"] = m_assets->layoutState();
+    QJsonObject layout;
+    layout["version"] = kLayoutVersion;
+    layout["panels"] = panels;
+    layout["collapsed"] = Panel::isCollapsed(m_viewport);
+    layout["assets"] = m_assets->viewState();
+
+    QSettings settings;
+    settings.setValue("window/geometry", saveGeometry());
+    settings.setValue("editor/layout", QJsonDocument(layout).toJson(QJsonDocument::Compact));
+    settings.setValue("assets/root", m_assets->rootPath());
+}
+
+void Editor::restoreLayout()
+{
+    QSettings settings;
+    restoreGeometry(settings.value("window/geometry").toByteArray());
+
+    const QString root = settings.value("assets/root").toString();
+    if (!root.isEmpty())
+        m_assets->setRootPath(root);
+
+    const QJsonObject layout = QJsonDocument::fromJson(settings.value("editor/layout").toByteArray()).object();
+    if (layout["version"].toInt() != kLayoutVersion)
+        return; // nothing saved yet, or an older layout: defaults
+    const QJsonObject panels = layout["panels"].toObject();
+    m_outliner->restoreLayoutState(panels["scene"].toObject());
+    m_inspector->restoreLayoutState(panels["inspector"].toObject());
+    m_assets->restoreLayoutState(panels["assets"].toObject());
+    m_assets->restoreViewState(layout["assets"].toObject());
+    m_collapsePanels->setChecked(layout["collapsed"].toBool());
+}
+
+void Editor::setPanelsCollapsed(bool collapsed)
+{
+    Panel::setCollapsed(m_viewport, collapsed);
+    m_collapsePanels->setChecked(collapsed); // when called from Tab
+}
+
+bool Editor::eventFilter(QObject *watched, QEvent *event)
+{
+    if (event->type() == QEvent::KeyPress) {
+        const auto *key = static_cast<QKeyEvent *>(event);
+        if (key->key() == Qt::Key_Tab && key->modifiers() == Qt::NoModifier && isActiveWindow()) {
+            // Text fields keep Tab (moving to the next field); otherwise it belongs to the
+            // viewport when the mouse is over it and not over a panel.
+            const QWidget *focus = QApplication::focusWidget();
+            const bool typing = qobject_cast<const QLineEdit *>(focus) || qobject_cast<const QAbstractSpinBox *>(focus)
+                || qobject_cast<const QTextEdit *>(focus) || qobject_cast<const QPlainTextEdit *>(focus);
+            if (!typing && QApplication::widgetAt(QCursor::pos()) == m_viewport) {
+                if (!key->isAutoRepeat())
+                    setPanelsCollapsed(!Panel::isCollapsed(m_viewport));
+                return true;
+            }
+        }
+    }
+    return QMainWindow::eventFilter(watched, event);
+}
+
+// ---------------------------------------------------------------------------
+// Assets
+// ---------------------------------------------------------------------------
+
+void Editor::followScene(const QString &path)
+{
+    const QString folder = QDir::cleanPath(QFileInfo(path).absolutePath());
+    const QString root = m_assets->rootPath();
+    if (folder != root && !folder.startsWith(root + '/'))
+        m_assets->setRootPath(folder);
+}
+
+void Editor::openAsset(const QString &path)
+{
+    const QString suffix = QFileInfo(path).suffix().toLower();
+    if (suffix == QLatin1String("lune")) {
+        if (maybeSave())
+            loadScene(path);
+        return;
+    }
+    if (meshFileFilter().contains(QStringLiteral("*.") + suffix)) {
+        QString error;
+        const MeshPtr mesh = importMesh(path, &error);
+        if (!mesh) {
+            QMessageBox::warning(this, "Import Mesh", error);
+            return;
+        }
+        addEntity(mesh->name.isEmpty() ? QFileInfo(path).completeBaseName() : mesh->name, mesh);
+    }
+    // Images: used by materials and environments (from the Inspector) for now.
 }
 
 void Editor::deleteSelected()

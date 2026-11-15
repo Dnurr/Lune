@@ -17,7 +17,10 @@ Most actions are one keystroke or one search in the command palette away.
   Shaders are written once in GLSL and compiled for every backend at build time.
 - **Infinite world grid**, shaded meshes with depth, selection outline.
 - **Glass panels**: floating, draggable panels that snap to the left, right or bottom
-  edge; the viewport renders a blurred copy of the scene behind them.
+  edge and resize from their inner edge; the viewport renders a blurred copy of the scene
+  behind them. Tab over the viewport hides them all; the layout is restored at startup.
+- **Assets browser**: folder tree and folder contents side by side, on the open scene's
+  folder (or any folder); double-click a mesh to add it, a scene to open it.
 - **Scene editing**: click to select, move / rotate / scale gizmo, outliner, rename.
 - **Automatic Inspector**: built from component descriptors, one editor per property
   type; drag a property's label to scrub its value.
@@ -92,6 +95,8 @@ Third-party libraries are downloaded on the first configure into `build/_deps`
 | Zoom | Wheel |
 | Scrub a value | Drag a property's label (Shift = fine, Ctrl = coarse) |
 | Move a panel | Drag its title; it snaps to the nearest edge |
+| Resize a panel | Drag its inner edge (the one facing the viewport) |
+| Add a mesh / open a scene | Double-click it in the Assets panel |
 | Exposure / tonemapping | Display menu, top-right corner of the viewport (drag "exposure" to scrub) |
 
 ### Keyboard
@@ -99,6 +104,7 @@ Third-party libraries are downloaded on the first configure into `build/_deps`
 | Shortcut | Action |
 |---|---|
 | Ctrl+K | Command palette |
+| Tab | Hide / show the panels (mouse over the viewport) |
 | Shift+A | Add menu at the cursor (empty, cube, sphere, plane, lights, environment, import) |
 | W / E / R | Move / rotate / scale gizmo |
 | T | Gizmo axes: global / local (scale always uses the entity's axes) |
@@ -119,7 +125,7 @@ src/
     render/            Renderer, camera, shaders/
   frontend/            the editor (Qt Widgets)
     core/              selection and undo commands
-    components/        viewport + gizmo, panels (inspector, outliner), palette, widgets
+    components/        viewport + gizmo, panels (inspector, outliner, assets), palette, widgets
     theme/             palette and stylesheet
 tests/                 Qt Test suites, one executable per tst_*.cpp
 cmake/                 third-party dependencies

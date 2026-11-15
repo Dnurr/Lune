@@ -7,13 +7,17 @@
 #include <QLabel>
 #include <QMouseEvent>
 #include <QPropertyAnimation>
+#include <QWheelEvent>
 
 #include <algorithm>
 
 namespace
 {
 int g_nextOrder = 0;
-}
+constexpr int kResizeGrip = 6;     // px from the inner edge that start a resize
+constexpr int kMinPanelSize = 140; // smallest width / height when resizing
+const char *const kCollapsedProperty = "panelsCollapsed";
+} // namespace
 
 Panel::Panel(const QString &title, QWidget *parent, Side side)
     : QFrame(parent)
@@ -54,6 +58,9 @@ Panel::Panel(const QString &title, QWidget *parent, Side side)
         // Ask the Viewport (if that's the parent) to draw the blurred scene behind us.
         setProperty("glass", true);
         setProperty("glassRadius", 12); // same as border-radius in the theme
+        setMouseTracking(true);         // resize cursor on the inner edge
+        if (isCollapsed(parent))
+            QFrame::setVisible(false);
         relayoutAll(false); // existing panels make room for this one
         raise();
     }
@@ -105,7 +112,7 @@ bool Panel::event(QEvent *event)
 bool Panel::eventFilter(QObject *watched, QEvent *event)
 {
     // Every top-level panel listens to the parent, so each one only updates itself here.
-    if (watched == parentWidget() && event->type() == QEvent::Resize && !m_dragging)
+    if (watched == parentWidget() && event->type() == QEvent::Resize && !m_dragging && !m_resizing)
         applyGeometry(false);
     return QFrame::eventFilter(watched, event);
 }
@@ -130,13 +137,146 @@ bool Panel::isOnTitle(const QPoint &pos) const
     return pos.y() <= m_title->geometry().bottom() + 4;
 }
 
+bool Panel::isOnResizeEdge(const QPoint &pos) const
+{
+    if (isNested() || !parentWidget())
+        return false;
+    switch (m_side) {
+    case Side::Left:
+        return pos.x() >= width() - kResizeGrip;
+    case Side::Right:
+        return pos.x() < kResizeGrip;
+    case Side::Bottom:
+        return pos.y() < kResizeGrip;
+    }
+    return false;
+}
+
+void Panel::setContentFills(bool fills)
+{
+    m_fills = fills;
+    applyOrientation();
+}
+
+// ---------------------------------------------------------------------------
+// Visibility, collapsing
+// ---------------------------------------------------------------------------
+
+void Panel::setPanelVisible(bool visible)
+{
+    m_wantsVisible = visible;
+    const bool collapsed = !isNested() && isCollapsed(parentWidget());
+    setVisible(visible && !collapsed);
+}
+
+bool Panel::isCollapsed(const QWidget *host)
+{
+    return host && host->property(kCollapsedProperty).toBool();
+}
+
+void Panel::setCollapsed(QWidget *host, bool collapsed)
+{
+    if (!host || isCollapsed(host) == collapsed)
+        return;
+    host->setProperty(kCollapsedProperty, collapsed);
+    const QList<Panel *> panels = host->findChildren<Panel *>(Qt::FindDirectChildrenOnly);
+    if (collapsed) {
+        for (Panel *p : panels) {
+            if (p->isVisible())
+                p->slide(false);
+            else
+                p->QFrame::setVisible(false); // window not shown yet: no animation
+        }
+        return;
+    }
+    // Show them all first, so each one gets its final place, then slide them in.
+    QList<Panel *> shown;
+    for (Panel *p : panels) {
+        if (p->m_wantsVisible && p->isHidden()) {
+            p->QFrame::setVisible(true);
+            shown.append(p);
+        }
+    }
+    for (Panel *p : shown)
+        p->slide(true);
+}
+
+// Slides the panel past its side of the parent (out), or from there to its place (in).
+// Hides it at the end of a slide out.
+void Panel::slide(bool in)
+{
+    const QRect target = in ? targetGeometry() : geometry();
+    QRect away = target;
+    switch (m_side) {
+    case Side::Left:
+        away.moveRight(-1);
+        break;
+    case Side::Right:
+        away.moveLeft(parentWidget()->width());
+        break;
+    case Side::Bottom:
+        away.moveTop(parentWidget()->height());
+        break;
+    }
+    m_snap->stop();
+    auto *anim = new QPropertyAnimation(this, "geometry", this);
+    anim->setDuration(160);
+    anim->setEasingCurve(in ? QEasingCurve::OutCubic : QEasingCurve::InCubic);
+    anim->setStartValue(in ? away : target);
+    anim->setEndValue(in ? target : away);
+    connect(anim, &QPropertyAnimation::finished, this, [this] {
+        if (isCollapsed(parentWidget()))
+            QFrame::setVisible(false);
+        else
+            applyGeometry(false); // expanded again meanwhile: back to its place
+    });
+    anim->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+// ---------------------------------------------------------------------------
+// Layout state
+// ---------------------------------------------------------------------------
+
+QJsonObject Panel::layoutState() const
+{
+    static const char *const sides[] = { "left", "right", "bottom" };
+    QJsonObject state;
+    state["side"] = QString::fromLatin1(sides[int(m_side)]);
+    state["width"] = m_width;
+    state["height"] = m_height;
+    return state;
+}
+
+void Panel::restoreLayoutState(const QJsonObject &state)
+{
+    const QString side = state["side"].toString();
+    if (side == QLatin1String("left"))
+        setSide(Side::Left);
+    else if (side == QLatin1String("right"))
+        setSide(Side::Right);
+    else if (side == QLatin1String("bottom"))
+        setSide(Side::Bottom);
+    m_width = qMax(kMinPanelSize, state["width"].toInt(m_width));
+    m_height = qMax(kMinPanelSize, state["height"].toInt(m_height));
+    relayoutAll(false);
+}
+
 // ---------------------------------------------------------------------------
 // Dragging
 // ---------------------------------------------------------------------------
 
 void Panel::mousePressEvent(QMouseEvent *event)
 {
-    if (event->button() == Qt::LeftButton && isOnTitle(event->position().toPoint())) {
+    const QPoint pos = event->position().toPoint();
+    if (event->button() == Qt::LeftButton && isOnResizeEdge(pos)) {
+        m_snap->stop();
+        m_resizing = true;
+        m_resizeStart = mapToParent(pos);
+        m_resizeStartSize = m_side == Side::Bottom ? m_height : m_width;
+        event->accept();
+        return;
+    }
+    if (event->button() == Qt::LeftButton && isOnTitle(pos)) {
         m_snap->stop();
         m_dragging = true;
         m_dragOffset = event->position().toPoint();
@@ -145,13 +285,47 @@ void Panel::mousePressEvent(QMouseEvent *event)
         event->accept();
         return;
     }
-    QFrame::mousePressEvent(event);
+    // Not on a control: the press stops here instead of reaching the viewport behind.
+    event->accept();
+}
+
+void Panel::wheelEvent(QWheelEvent *event)
+{
+    event->accept(); // scrolling over a panel never zooms the viewport
+}
+
+void Panel::leaveEvent(QEvent *event)
+{
+    if (!m_resizing)
+        unsetCursor();
+    QFrame::leaveEvent(event);
 }
 
 void Panel::mouseMoveEvent(QMouseEvent *event)
 {
+    const QPoint pos = event->position().toPoint();
+    if (m_resizing) {
+        const QPoint d = mapToParent(pos) - m_resizeStart;
+        const QWidget *p = parentWidget();
+        if (m_side == Side::Bottom) {
+            const int maxHeight = qMax(kMinPanelSize, p->height() * 3 / 4);
+            m_height = qBound(kMinPanelSize, m_resizeStartSize - d.y(), maxHeight);
+        } else {
+            const int maxWidth = qMax(kMinPanelSize, p->width() / 2);
+            const int grow = m_side == Side::Left ? d.x() : -d.x();
+            m_width = qBound(kMinPanelSize, m_resizeStartSize + grow, maxWidth);
+        }
+        relayoutAll(false);
+        event->accept();
+        return;
+    }
     if (!m_dragging) {
-        QFrame::mouseMoveEvent(event);
+        // Hover: resize cursor on the inner edge.
+        if (isOnResizeEdge(pos))
+            setCursor(m_side == Side::Bottom ? Qt::SizeVerCursor : Qt::SizeHorCursor);
+        else
+            unsetCursor();
+        event->accept();
         return;
     }
 
@@ -179,8 +353,16 @@ void Panel::mouseMoveEvent(QMouseEvent *event)
 
 void Panel::mouseReleaseEvent(QMouseEvent *event)
 {
+    if (m_resizing && event->button() == Qt::LeftButton) {
+        m_resizing = false;
+        if (!isOnResizeEdge(event->position().toPoint()))
+            unsetCursor();
+        emit resized();
+        event->accept();
+        return;
+    }
     if (!m_dragging || event->button() != Qt::LeftButton) {
-        QFrame::mouseReleaseEvent(event);
+        event->accept();
         return;
     }
 
@@ -271,7 +453,7 @@ void Panel::applyOrientation()
     m_content->setDirection(dir);
     // Only the main axis is aligned: the content keeps its natural length along it
     // (packed at the top/left) and fills the whole cross axis.
-    m_body->setAlignment(m_content, isVertical() ? Qt::AlignTop : Qt::AlignLeft);
+    m_body->setAlignment(m_content, m_fills ? Qt::Alignment() : isVertical() ? Qt::AlignTop : Qt::AlignLeft);
 
     for (Panel *child : findChildren<Panel *>(Qt::FindDirectChildrenOnly))
         child->updateNestedSizing();

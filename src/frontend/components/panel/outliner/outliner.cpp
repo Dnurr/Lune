@@ -2,6 +2,7 @@
 
 #include <QBoxLayout>
 #include <QEvent>
+#include <QFocusEvent>
 #include <QListWidget>
 #include <QTimer>
 
@@ -108,7 +109,11 @@ QListWidgetItem *OutlinerPanel::itemFor(EntityId id) const
 
 bool OutlinerPanel::eventFilter(QObject *watched, QEvent *event)
 {
-    if (watched == m_list && event->type() == QEvent::FocusIn) {
+    // Focus from a click is followed by the click itself, which picks the item under the
+    // cursor: that's the user selecting, keep it. Other focus reasons (Tab, back from a
+    // dialog) make Qt pick the first item on its own.
+    if (watched == m_list && event->type() == QEvent::FocusIn
+        && static_cast<QFocusEvent *>(event)->reason() != Qt::MouseFocusReason) {
         // The list's focusInEvent runs right after this filter: flag it until it's done.
         m_focusing = true;
         QTimer::singleShot(0, this, [this] { m_focusing = false; });
