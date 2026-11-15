@@ -70,6 +70,7 @@ add_executable(Lune
     src/frontend/components/panel/outliner/outliner.cpp
     src/frontend/components/palette/commandpalette.cpp
     src/frontend/editor.cpp
+    src/frontend/frameanimationdriver.cpp
     src/frontend/theme/theme.cpp
     src/main.cpp
 )

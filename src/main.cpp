@@ -1,6 +1,7 @@
 #include <QApplication>
 
 #include "frontend/editor.h"
+#include "frontend/frameanimationdriver.h"
 #include "frontend/theme/theme.h"
 
 int main(int argc, char *argv[]) {
@@ -53,6 +54,10 @@ int main(int argc, char *argv[]) {
 
     Editor editor;
     editor.show();
+
+    // UI animations advance with the window's frames, not on a timer of their own.
+    FrameAnimationDriver animationDriver(editor.windowHandle());
+    animationDriver.install();
 
     // "Lune.exe scene.lune" (or double-clicking an associated .lune file) opens it.
     const QStringList args = QApplication::arguments();

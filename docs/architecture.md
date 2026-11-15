@@ -128,6 +128,12 @@ never on top of it.
   slides them all out (Tab with the mouse over the viewport, handled by `Editor`'s event
   filter so text fields keep Tab); panels that hide themselves (the Inspector with no
   selection) use `setPanelVisible`, which waits for the panels to be expanded again.
+- Slides and snaps are `QPropertyAnimation`s advanced by `FrameAnimationDriver`
+  (`frontend/frameanimationdriver.h`, installed in `main.cpp`): one step per frame of the
+  window, right before it paints, for the time of that frame. With Qt's default driver
+  the animations tick on a ~16 ms timer of their own while the window repaints on
+  another, so some frames got two steps and some none, and the slides stuttered however
+  fast the frames were (measured: the frame time and the blur were not the cause).
 
 ### Workspaces
 
