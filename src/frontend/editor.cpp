@@ -27,6 +27,10 @@
 #include <QUndoStack>
 
 #include "components/palette/commandpalette.h"
+#include "components/render/renderresultdialog.h"
+#include "components/render/rendersettingsdialog.h"
+#include "components/viewport/shadingmenu.h"
+#include "engine/render/imagerender.h"
 #include "components/panel/assets/assets.h"
 #include "components/panel/nodes/nodespanel.h"
 #include "components/panel/inspector/inspector.h"
@@ -187,6 +191,38 @@ void Editor::createMenus()
     view->addAction(freeCamera);
     view->addAction(overlays);
     view->addAction(stats);
+
+    // Shading (also in the bar at the top left of the viewport); both stay in sync.
+    QMenu *shading = view->addMenu("Shading");
+    auto *shadingGroup = new QActionGroup(this);
+    const std::pair<Shading, const char *> shadingModes[] = { { Shading::Wireframe, "Wireframe" }, { Shading::Clay, "Clay" },
+                                                             { Shading::Unlit, "Unlit" }, { Shading::Preview, "Preview" },
+                                                             { Shading::Rendered, "Rendered" } };
+    for (const auto &[mode, name] : shadingModes) {
+        auto *a = new QAction(name, shadingGroup);
+        a->setCheckable(true);
+        shading->addAction(a);
+        connect(a, &QAction::triggered, this, [this, mode] {
+            ViewSettings v = m_viewport->viewSettings();
+            v.shading = mode;
+            m_viewport->setViewSettings(v);
+        });
+        const Shading m = mode;
+        auto sync = [this, a, m] { a->setChecked(m_viewport->viewSettings().shading == m); };
+        connect(m_viewport, &Viewport::viewSettingsChanged, a, sync);
+        sync();
+    }
+    shading->addSeparator();
+    auto *sky = shading->addAction("Environment Background");
+    sky->setCheckable(true);
+    connect(sky, &QAction::triggered, this, [this](bool on) {
+        ViewSettings v = m_viewport->viewSettings();
+        v.skybox = on;
+        m_viewport->setViewSettings(v);
+    });
+    auto syncSky = [this, sky] { sky->setChecked(m_viewport->viewSettings().skybox); };
+    connect(m_viewport, &Viewport::viewSettingsChanged, sky, syncSky);
+    syncSky();
     view->addSeparator();
 
     // Display: tonemapping operator (one checked at a time) and exposure reset.
@@ -204,6 +240,18 @@ void Editor::createMenus()
     auto *resetExposure = new QAction("Reset Exposure", this);
     connect(resetExposure, &QAction::triggered, this, [this] { m_display->setExposure(0.0); });
     view->addAction(resetExposure);
+
+    // Render: images of the scene seen by the viewport's camera, without editor overlays
+    QMenu *render = menuBar()->addMenu("Render");
+    auto *renderImage = render->addAction("Render Image", this, [this] { renderImages(false); });
+    renderImage->setShortcut(QKeySequence(Qt::Key_F4));
+    auto *renderVideo = render->addAction("Render Video (not yet)");
+    renderVideo->setShortcut(QKeySequence(Qt::Key_F5));
+    renderVideo->setEnabled(false); // needs animation first
+    auto *renderPasses = render->addAction("Render Passes", this, [this] { renderImages(true); });
+    renderPasses->setShortcut(QKeySequence(Qt::Key_F6));
+    render->addSeparator();
+    render->addAction("Render Settings...", this, &Editor::editRenderSettings);
 
     // Add: also opens at the mouse cursor with Shift+A
     m_addMenu = menuBar()->addMenu("Add");
@@ -263,9 +311,11 @@ void Editor::createPanels()
 
     // Created last so it sits above the panels.
     // Display dropdown in the top-right corner of the free viewport area.
-    new DisplayMenu(m_display, m_viewport);
+    m_viewportMenus.append(new DisplayMenu(m_display, m_viewport));
     // Orbit / Free camera, top center.
-    new CameraMenu(m_viewport);
+    m_viewportMenus.append(new CameraMenu(m_viewport));
+    // Shading mode and background, top left.
+    m_viewportMenus.append(new ShadingMenu(m_viewport));
 
     m_palette = new CommandPalette(this, m_viewport);
 }
@@ -379,6 +429,8 @@ void Editor::newScene()
     m_viewport->setCamera(OrbitCamera {});
     m_viewport->setCameraMode(CameraMode::Orbit);
     m_display->reset();
+    m_viewport->setViewSettings(ViewSettings {});
+    m_renderSettings = RenderSettings();
     resetDocument(QString());
 }
 
@@ -483,9 +535,16 @@ QJsonObject Editor::editorState() const
     QJsonObject display;
     display["exposure"] = m_display->exposure();
     display["tonemapper"] = DisplaySettings::tonemapperIds().value(m_display->tonemapper());
+    const ViewSettings &v = m_viewport->viewSettings();
+    QJsonObject shading;
+    static const char *shadingIds[] = { "wireframe", "clay", "unlit", "preview", "rendered" };
+    shading["mode"] = QString::fromLatin1(shadingIds[int(v.shading)]);
+    shading["skybox"] = v.skybox;
     QJsonObject state;
     state["camera"] = camera;
     state["display"] = display;
+    state["shading"] = shading;
+    state["render"] = m_renderSettings.toJson();
     return state;
 }
 
@@ -508,6 +567,77 @@ void Editor::applyEditorState(const QJsonObject &state)
     m_display->setExposure(display["exposure"].toDouble(0.0));
     const int tonemapper = DisplaySettings::tonemapperIds().indexOf(display["tonemapper"].toString());
     m_display->setTonemapper(tonemapper >= 0 ? tonemapper : DisplaySettings::None);
+
+    const QJsonObject shading = state["shading"].toObject();
+    static const QStringList shadingIds = { "wireframe", "clay", "unlit", "preview", "rendered" };
+    ViewSettings v;
+    const int mode = shadingIds.indexOf(shading["mode"].toString());
+    v.shading = mode >= 0 ? Shading(mode) : Shading::Rendered;
+    v.skybox = shading["skybox"].toBool(true);
+    m_viewport->setViewSettings(v);
+    m_renderSettings = RenderSettings::fromJson(state["render"].toObject());
+}
+
+void Editor::editRenderSettings()
+{
+    const QSize viewportPixels = m_viewport->size() * m_viewport->devicePixelRatio();
+    RenderSettingsDialog dialog(m_renderSettings, viewportPixels, m_scenePath, this);
+    if (dialog.exec() == QDialog::Accepted)
+        m_renderSettings = dialog.settings();
+}
+
+void Editor::renderImages(bool allPasses)
+{
+    std::vector<const ImagePass *> passes;
+    if (allPasses) {
+        for (const QString &id : m_renderSettings.passes)
+            if (const ImagePass *p = imagePass(id))
+                passes.push_back(p);
+        if (passes.empty()) {
+            QMessageBox::information(this, "Render Passes", "No passes are selected: choose them in Render > Render Settings.");
+            return;
+        }
+    } else {
+        passes.push_back(&imagePasses().front()); // the final image
+    }
+
+    ImageRenderRequest request;
+    request.size = m_renderSettings.imageSize(m_viewport->size() * m_viewport->devicePixelRatio());
+    request.exposure = float(m_display->exposure());
+    request.tonemapper = m_display->tonemapper();
+    request.skybox = m_renderSettings.skybox;
+    for (const ImagePass *p : passes)
+        request.views.push_back(p->view);
+
+    QString error;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    const std::vector<QImage> images = ::renderImages(m_viewport->rhiBackend(), window()->windowHandle(), *m_scene,
+                                                      m_viewport->camera(), request, &error);
+    QApplication::restoreOverrideCursor();
+    if (images.size() != passes.size()) {
+        QMessageBox::warning(this, "Render", error.isEmpty() ? QStringLiteral("Rendering failed.") : error);
+        return;
+    }
+
+    const QString folder = m_renderSettings.outputFolder(m_scenePath);
+    if (!QDir().mkpath(folder)) {
+        QMessageBox::warning(this, "Render", QStringLiteral("Can't create the folder %1.").arg(QDir::toNativeSeparators(folder)));
+        return;
+    }
+    const QString base = m_scenePath.isEmpty() ? QStringLiteral("untitled") : QFileInfo(m_scenePath).completeBaseName();
+    QStringList titles, paths;
+    for (size_t i = 0; i < passes.size(); ++i) {
+        const QString path = QDir(folder).filePath(
+            RenderSettings::fileName(base, m_renderSettings.frame, allPasses ? passes[i]->id : QString()));
+        if (!images[i].save(path)) {
+            QMessageBox::warning(this, "Render", QStringLiteral("Can't write %1.").arg(QDir::toNativeSeparators(path)));
+            return;
+        }
+        titles.append(passes[i]->title);
+        paths.append(path);
+    }
+    auto *result = new RenderResultDialog(images, titles, paths, this);
+    result->show();
 }
 
 void Editor::closeEvent(QCloseEvent *event)
@@ -664,6 +794,8 @@ void Editor::restoreLayout()
 void Editor::setPanelsCollapsed(bool collapsed)
 {
     Panel::setCollapsed(m_viewport, collapsed);
+    for (QWidget *menu : m_viewportMenus)
+        menu->setVisible(!collapsed);
     m_collapsePanels->setChecked(collapsed); // when called from Tab
 }
 

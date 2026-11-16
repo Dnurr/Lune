@@ -210,12 +210,13 @@ QFrame#DisplayMenu QComboBox { padding-right: 30px; }
 /* MSVC limits one string literal to ~16 KB: the style sheet is split in pieces. */
 )QSS" R"QSS(
 /* Camera mode bar, top center of the viewport */
-QFrame#CameraMenu {
+QFrame#CameraMenu, QFrame#ShadingMenu {
     background-color: @glassStrong; color: @onSurface;
     border: 1px solid @glassBorder; border-radius: 10px;
 }
 QToolButton#CameraMenuButton { color: @onSurfaceVariant; padding: 3px 10px; border-radius: 7px; font-weight: 600; }
 QToolButton#CameraMenuButton:checked { background-color: @secondaryContainer; color: @onSecondaryContainer; }
+QFrame#ShadingMenuSeparator { background: @glassBorder; }
 QLabel#CameraMenuSpeed { color: @onSurfaceVariant; padding: 0 8px 0 6px; background: transparent; }
 /* Workspace tabs, right end of the menu bar */
 QToolButton#WorkspaceTab { color: @onSurfaceVariant; padding: 3px 12px; border-radius: 7px; font-weight: 600; }

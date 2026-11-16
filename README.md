@@ -60,6 +60,9 @@ in [docs/rendering.md](docs/rendering.md).
 - **Undo / redo** for every edit, drags merged into one step; **command palette**
   (Ctrl+K) with fuzzy search.
 - **Assets browser**, drag and drop of meshes, images and HDR environments.
+- **Viewport shading** (Wireframe, Clay, Unlit, Preview, Rendered) and **image renders**:
+  the final image (F4) or a set of passes (F6) as PNG files, at any size, without the
+  editor's overlays.
 - **Scene files** (`.lune`, JSON, paths relative to the scene), a **stats overlay** (F12)
   and **automated tests** for the scene model, undo, file formats, importers, picking,
   gizmo and material compiler.
@@ -155,7 +158,7 @@ Third-party libraries are downloaded on the first configure into `build/_deps`
 | Shortcut | Action |
 |---|---|
 | Ctrl+K | Command palette |
-| Tab | Hide / show the panels (mouse over the viewport) |
+| Tab | Hide / show the panels and the viewport's bars (mouse over the viewport) |
 | Shift+A | Add menu at the cursor (empty, cube, sphere, plane, lights, environment, import) |
 | W / E / R | Move / rotate / scale gizmo |
 | T | Gizmo axes: global / local (scale always uses the entity's axes) |
@@ -165,6 +168,8 @@ Third-party libraries are downloaded on the first configure into `build/_deps`
 | Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S | New / open / save / save as |
 | Ctrl+I | Import mesh (OBJ, glTF, GLB) |
 | Shift+Alt+Z | Editor overlays on / off: grid lines, light icons, gizmo, selection outline (View > Overlays), for clean screenshots |
+| F4 | Render the image (PNG in `renders/` next to the scene) |
+| F6 | Render the passes chosen in Render > Render Settings, one PNG each |
 | F12 | Stats overlay |
 
 ## Project layout

@@ -21,7 +21,8 @@ layout(std140, binding = 0) uniform buf {
 };
 
 // Scene lights, filled by the Renderer once per frame (binding 1, shared by every mesh).
-// A scene without enabled lights gets one default sun, so lightCount.x is never 0.
+// A scene without enabled lights gets one default sun; lightCount.x is 0 only in the Preview
+// shading (the environment alone, see Renderer's Shading).
 #define MAX_LIGHTS 8 // Renderer::MaxLights
 struct Light
 {
@@ -31,6 +32,12 @@ struct Light
 };
 layout(std140, binding = 1) uniform lightsBuf {
     ivec4 lightCount; // x: number of lights in use
+                      // y: debug view (DebugView in renderer.h): what main() should write
+                      //    instead of the shaded color (the viewport's Unlit shading and the
+                      //    debug passes of Render Passes):
+                      //      0 the shaded color          3 linear distance from the camera
+                      //      1 base color, no lighting   4 the scene lights only (no ambient)
+                      //      2 normal, 0.5 + 0.5 * N     5 the shadow factors (white = lit)
     Light lights[MAX_LIGHTS];
 };
 

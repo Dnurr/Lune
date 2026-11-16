@@ -50,8 +50,40 @@ struct FrameStats
     int renderPasses = 0;
 };
 
+// How meshes are shaded (the viewport's shading menu, and each pass of an image render).
+enum class Shading
+{
+    Wireframe, // edges only (see-through), no surfaces
+    Clay,      // every mesh with one plain gray material, scene lights and environment
+    Unlit,     // materials' base color only (mesh.frag: DebugView::Unlit)
+    Preview,   // materials lit by the environment only (no scene lights, no shadows)
+    Rendered,  // everything
+};
+
+// What mesh.frag's main() writes instead of the shaded color: lightCount.y in the lights
+// block. Implemented there (until it is, every view looks like None).
+enum class DebugView
+{
+    None = 0,
+    Unlit = 1,       // the base color, no lighting
+    Normals = 2,     // the shading normal (world space), as 0.5 + 0.5 * N
+    Depth = 3,       // linear distance from the camera
+    DirectOnly = 4,  // the scene lights only (no environment)
+    ShadowsOnly = 5, // the lights' shadow factors (white = lit)
+};
+
+struct ViewSettings
+{
+    Shading shading = Shading::Rendered;
+    bool skybox = true;         // an environment with `background` on shows it; off: the plain sky
+    bool wireOverlay = false;   // edges drawn over the shaded meshes
+    DebugView debug = DebugView::None; // Shading::Unlit always uses DebugView::Unlit
+
+    bool operator==(const ViewSettings &) const = default;
+};
+
 // Scene renderer, independent from any widget: it only needs a QRhi and a render target
-// (an editor viewport today, an offline render target tomorrow).
+// (an editor viewport, or the offscreen target of an image render: imagerender.h).
 //
 // Frame:
 //   0. ibl     -> environment maps, only when the environment changed (IblMaps)
@@ -97,6 +129,13 @@ public:
     // The world grid's lines (on by default). Off: the grid pass still draws its sky (when
     // there's no environment background), without lines.
     void setGridLinesVisible(bool visible) { m_gridLines = visible; }
+
+    // Shading mode, background and debug outputs (default: everything, as rendered).
+    void setViewSettings(const ViewSettings &settings) { m_view = settings; }
+    const ViewSettings &viewSettings() const { return m_view; }
+    // False where the backend can't draw lines from triangles (OpenGL ES): Wireframe then
+    // draws like Clay and wireOverlay is ignored.
+    bool wireframeSupported() const;
 
     const FrameStats &lastFrameStats() const { return m_stats; }
     const char *backendName() const;
@@ -206,6 +245,7 @@ private:
     float m_exposure = 0.0f;
     int m_tonemapper = 0;
     bool m_gridLines = true;
+    ViewSettings m_view;
     std::vector<OverlayVertex> m_overlay;
     float m_overlayScale = 1.0f;
 
@@ -244,6 +284,9 @@ private:
     std::array<std::unique_ptr<QRhiShaderResourceBindings>, 4> m_blurSrbs;
 
     std::unique_ptr<QRhiGraphicsPipeline> m_gridPipe, m_meshPipe, m_outlinePipe, m_overlayPipe, m_backgroundPipe;
+    // Edges (polygon mode Line, wireframe.vert/.frag): Shading::Wireframe, and over the
+    // shaded meshes (depth tested, pulled toward the camera). Null where unsupported.
+    std::unique_ptr<QRhiGraphicsPipeline> m_wirePipe, m_wireOverPipe;
     std::unique_ptr<QRhiGraphicsPipeline> m_displayPipe, m_downPipe, m_blurPipe, m_compositePipe;
 
     std::unordered_map<const Mesh *, GpuMesh> m_meshes;

@@ -72,12 +72,19 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 - [ ] Shading nodes in `material_nodes.glsl`: noise, fresnel, triplanar, layering... (Author)
 - [x] Alpha modes (opaque, clip, blend) on materials, Material Output `alpha`, glTF alpha import, blended pipelines sorted far to near (Claude)
 - [x] Clip materials cut their shadows; translucency map with the light blend materials let through (Claude)
-- [ ] `main()`: discard below the cutoff, premultiplied output for blend (Author)
-- [ ] Translucent shadows in `Shadow()` from `shadowTranslucency` (Author)
+- [x] `main()`: discard below the cutoff, premultiplied output for blend (Author)
+- [x] Translucent shadows in `Shadow()` from `shadowTranslucency`, colored (Author)
 - [x] Material Output `subsurface`, `subsurfaceColor`, `subsurfaceRadius` (Claude)
 - [x] Front depth in the translucency map, for thickness (Claude)
 - [ ] Subsurface scattering in the light loop: wrap lighting, back light, thickness from the front depth (Author)
 - [ ] OBJ materials (.mtl) to node graphs (Claude)
+
+### Viewport shading and image renders
+
+- [x] Shading menu: Wireframe, Clay, Unlit, Preview (environment only), Rendered; environment background toggle (Claude)
+- [x] Render Image (F4) and Render Passes (F6) to PNG on their own QRhi, Render Settings, result window (Claude)
+- [ ] Debug views in `main()` from `lightCount.y`: unlit, normals, depth, direct light only, shadows only (Author)
+- [ ] Render Video (F5), once there's a timeline (Claude)
 
 ### Color management
 
@@ -114,10 +121,13 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 
 ## 6. Output
 
-- [ ] Render settings: resolution, frame range, samples (Claude)
-- [ ] Offline render loop off the viewport, with progress and cancel (Claude)
+- [x] Render settings: resolution, output folder, passes (Claude)
+- [ ] Render settings: frame range, samples (Claude)
+- [x] Offline render off the viewport (its own QRhi) (Claude)
+- [ ] Progress and cancel for long renders (Claude)
 - [ ] EXR writer for image sequences, 16 or 32-bit float, linear (Claude)
-- [ ] PNG / JPEG output with the display transform applied (Claude)
+- [x] PNG output with the display transform applied (Claude)
+- [ ] JPEG output (Claude)
 - [ ] Motion blur by sub-frame accumulation (Author)
 
 ## Ideas, not scheduled

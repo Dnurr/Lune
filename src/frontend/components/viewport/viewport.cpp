@@ -124,6 +124,31 @@ bool Viewport::isStatsVisible() const
     return m_stats->isVisible();
 }
 
+void Viewport::setViewSettings(const ViewSettings &settings)
+{
+    if (m_view == settings)
+        return;
+    m_view = settings;
+    emit viewSettingsChanged();
+    redraw();
+}
+
+QRhi::Implementation Viewport::rhiBackend() const
+{
+    // rhi() is null until the first frame: then the backend the widget will pick.
+    if (QRhi *r = const_cast<Viewport *>(this)->rhi())
+        return r->backend();
+    switch (api()) {
+    case Api::OpenGL: return QRhi::OpenGLES2;
+    case Api::Metal: return QRhi::Metal;
+    case Api::Vulkan: return QRhi::Vulkan;
+    case Api::Direct3D11: return QRhi::D3D11;
+    case Api::Direct3D12: return QRhi::D3D12;
+    case Api::Null: return QRhi::Null;
+    }
+    return QRhi::Null;
+}
+
 void Viewport::setOverlaysVisible(bool visible)
 {
     if (m_overlays == visible)
@@ -180,6 +205,7 @@ void Viewport::render(QRhiCommandBuffer *cb)
     if (layoutGizmo()) // after the icons: drawn on top of them
         m_gizmo.appendGeometry(overlay);
     m_renderer.setOverlay(std::move(overlay), float(devicePixelRatio()));
+    m_renderer.setViewSettings(m_view);
     if (m_display)
         m_renderer.setDisplayParams(float(m_display->exposure()), m_display->tonemapper());
 

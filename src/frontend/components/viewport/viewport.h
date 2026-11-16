@@ -4,6 +4,7 @@
 #include <QPoint>
 #include <QRhiWidget>
 #include <QSet>
+#include <rhi/qrhi.h>
 #include <functional>
 
 #include "engine/render/camera.h"
@@ -76,6 +77,13 @@ public:
     void setOverlaysVisible(bool visible);
     bool overlaysVisible() const { return m_overlays; }
 
+    // Shading mode and background (the shading menu). viewSettingsChanged() when they change.
+    void setViewSettings(const ViewSettings &settings);
+    const ViewSettings &viewSettings() const { return m_view; }
+
+    // For image renders: the backend and window the viewport draws with (valid once shown).
+    QRhi::Implementation rhiBackend() const;
+
     // Where the camera is going: input moves this one, and the camera drawn on screen
     // follows it smoothly (see advanceCamera()). Jumps there in setCamera().
     const OrbitCamera &camera() const { return m_goal; }
@@ -111,6 +119,7 @@ signals:
     void filesDropped(const QStringList &paths, const QPointF &pos);
     void cameraModeChanged(CameraMode mode);
     void flySpeedChanged(float speed);
+    void viewSettingsChanged();
 
 protected:
     bool event(QEvent *event) override;
@@ -162,6 +171,7 @@ private:
     QStringList m_dropSuffixes;
     bool m_centerInFreeArea = false;
     bool m_overlays = true;
+    ViewSettings m_view;
     CameraMode m_cameraMode = CameraMode::Orbit;
     float m_flySpeed = 4.0f;
     bool m_flying = false;   // free camera, right button held

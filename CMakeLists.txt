@@ -33,6 +33,7 @@ add_library(lune_engine STATIC
     src/engine/render/texturecache.cpp
     src/engine/render/iblmaps.cpp
     src/engine/render/shadowmaps.cpp
+    src/engine/render/imagerender.cpp
 )
 # Includes are relative to src/: "engine/scene/scene.h", "frontend/core/selection.h"
 target_include_directories(lune_engine PUBLIC src)
@@ -49,6 +50,7 @@ add_library(lune_editor_core STATIC
     src/frontend/core/commands.cpp
     src/frontend/core/displaysettings.cpp
     src/frontend/core/displayhistory.cpp
+    src/frontend/core/rendersettings.cpp
     src/frontend/components/viewport/gizmo.cpp
     src/frontend/components/viewport/overlaydraw.cpp
     src/frontend/components/viewport/lighticons.cpp
@@ -63,6 +65,9 @@ add_executable(Lune
     src/frontend/components/viewport/statsoverlay.cpp
     src/frontend/components/viewport/displaymenu.cpp
     src/frontend/components/viewport/cameramenu.cpp
+    src/frontend/components/viewport/shadingmenu.cpp
+    src/frontend/components/render/rendersettingsdialog.cpp
+    src/frontend/components/render/renderresultdialog.cpp
     src/frontend/components/widgets/draglabel.cpp
     src/frontend/components/widgets/vector3.cpp
     src/frontend/components/panel/panel.cpp
@@ -114,6 +119,8 @@ qt6_add_shaders(Lune "shaders"
         src/engine/render/shaders/shadow_material.vert
         src/engine/render/shaders/shadow_front.vert
         src/engine/render/shaders/shadow_front.frag
+        src/engine/render/shaders/wireframe.vert
+        src/engine/render/shaders/wireframe.frag
 )
 
 if(WIN32)

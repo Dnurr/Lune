@@ -35,6 +35,9 @@ constexpr int kBackgroundUbufSize = 64 + 2 * 16;
 // Editor look of meshes.
 const QColor kOutlineColor("#8FB0F2"); // palette primary (navy accent)
 constexpr float kOutlineWidth = 2.0f;  // logical pixels
+// Shading::Clay: one material for everything.
+const QColor kClayColor("#B4B4B8");
+constexpr float kClayRoughness = 0.6f;
 
 QShader loadShader(const QString &name)
 {
@@ -107,6 +110,11 @@ void Renderer::setDisplayParams(float exposureEv, int tonemapper)
 {
     m_exposure = exposureEv;
     m_tonemapper = tonemapper;
+}
+
+bool Renderer::wireframeSupported() const
+{
+    return m_rhi && m_rhi->isFeatureSupported(QRhi::NonFillPolygonMode);
 }
 
 void Renderer::setOverlay(std::vector<OverlayVertex> vertices, float pixelScale)
@@ -321,6 +329,40 @@ void Renderer::createPipelines(QRhiRenderTarget *target)
     }
     m_outlinePipe = pipeline(loadShader(QStringLiteral("outline.vert")), QStringLiteral("outline.frag"),
                              m_outlineLayoutSrb.get(), m_sceneRp.get(), 1, outline);
+    // Edges: the triangles as lines, with the entity uniforms only (like the outline).
+    m_wirePipe.reset();
+    m_wireOverPipe.reset();
+    if (wireframeSupported()) {
+        const QShader wireVs = loadShader(QStringLiteral("wireframe.vert"));
+        const QShader wireFs = loadShader(QStringLiteral("wireframe.frag"));
+        auto wire = [&](bool over) {
+            std::unique_ptr<QRhiGraphicsPipeline> p(m_rhi->newGraphicsPipeline());
+            p->setShaderStages({ { QRhiShaderStage::Vertex, wireVs }, { QRhiShaderStage::Fragment, wireFs } });
+            p->setVertexInputLayout(meshInputLayout());
+            p->setShaderResourceBindings(m_outlineLayoutSrb.get());
+            p->setRenderPassDescriptor(m_sceneRp.get());
+            p->setPolygonMode(QRhiGraphicsPipeline::Line);
+            QRhiGraphicsPipeline::TargetBlend b;
+            b.enable = true;
+            b.srcColor = QRhiGraphicsPipeline::One; // premultiplied alpha
+            b.dstColor = QRhiGraphicsPipeline::OneMinusSrcAlpha;
+            b.srcAlpha = QRhiGraphicsPipeline::One;
+            b.dstAlpha = QRhiGraphicsPipeline::OneMinusSrcAlpha;
+            p->setTargetBlends({ b });
+            if (over) {
+                // Over the surfaces they belong to: depth tested, pulled toward the camera so
+                // the lines don't fight with their own triangles. Alone: every edge (see-through).
+                p->setDepthTest(true);
+                p->setDepthOp(QRhiGraphicsPipeline::LessOrEqual);
+                p->setDepthBias(-50);
+                p->setSlopeScaledDepthBias(-1.0f);
+            }
+            p->create();
+            return p;
+        };
+        m_wirePipe = wire(false);
+        m_wireOverPipe = wire(true);
+    }
     m_displayPipe = pipeline(fullscreen, QStringLiteral("display.frag"), m_displaySrb.get(), m_ldrRp.get(), 1);
     // The overlay is interface, not scene: drawn after the display conversion, in display colors,
     // so exposure/tonemapping never touch it. It's still before the blur, so panels blur it too.
@@ -650,7 +692,12 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
             }
         }
     }
-    const bool showBackground = hasEnvironment && environment.background;
+    const bool showBackground = hasEnvironment && environment.background && m_view.skybox;
+    // Wireframe without line drawing (OpenGL ES): like Clay.
+    const bool wireOnly = m_view.shading == Shading::Wireframe && m_wirePipe;
+    const bool clay = m_view.shading == Shading::Clay || (m_view.shading == Shading::Wireframe && !m_wirePipe);
+    const bool sceneLights = m_view.shading != Shading::Preview; // Preview: the environment only
+    const DebugView debugView = m_view.shading == Shading::Unlit ? DebugView::Unlit : m_view.debug;
     // Recomputes the maps (before anything samples them) only when the source changed.
     const int iblPasses = m_ibl.update(cb, { environment.image, environment.skyColor, environment.groundColor });
 
@@ -700,7 +747,7 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
             putLinearColor(v + 8, color, intensity);
             ++count;
         };
-        if (scene) {
+        if (scene && sceneLights) {
             for (const Entity &e : scene->entities()) {
                 if (!e.light || !e.light->enabled || count == MaxLights)
                     continue;
@@ -713,13 +760,14 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         }
         // A scene without lights (older files, or all disabled) would be black:
         // light it with a default sun so it can still be edited.
-        if (count == 0) {
+        if (count == 0 && sceneLights) {
             const Light sun;
             const QVector3D direction = QVector3D(-0.45f, -0.8f, -0.35f).normalized();
             shadowLights.push_back({ 0, false, QVector3D(), direction, true, sun.size, sun.softness });
             put(Light::Directional, QVector3D(), direction, Qt::white, 3.0f);
         }
-        const qint32 header[4] = { count, 0, 0, 0 };
+        // y: what mesh.frag writes (DebugView), 0 = the shaded color.
+        const qint32 header[4] = { count, qint32(debugView), 0, 0 };
         std::memcpy(data, header, sizeof(header));
         rub->updateDynamicBuffer(m_lightsUbuf.get(), 0, kLightsUbufSize, data);
     }
@@ -829,14 +877,16 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
                 float *v = putMat4(common, clipViewProj * model);
                 v = putMat4(v, model);
                 v = putMat4(v, QMatrix4x4(model.normalMatrix()));
-                v = putLinearColor(v, e.displayColor, 1.0f);
+                v = putLinearColor(v, clay ? kClayColor : e.displayColor, 1.0f);
                 v = putLinearColor(v, kOutlineColor, kOutlineWidth * m_overlayScale);
                 v[0] = float(m_pixelSize.width());
                 v[1] = float(m_pixelSize.height());
+                v[2] = wireOnly ? 1.0f : 0.0f; // wireframe.frag: light lines alone, dark ones over surfaces
                 v += 4;
                 v[0] = eye.x(); v[1] = eye.y(); v[2] = eye.z();
                 v += 4;
-                v[0] = e.roughness; v[1] = e.metallic;
+                v[0] = clay ? kClayRoughness : e.roughness;
+                v[1] = clay ? 0.0f : e.metallic;
 
                 const QVector3D center = model.map((e.mesh->boundsMin + e.mesh->boundsMax) * 0.5f);
                 const float distance2 = (center - eye).lengthSquared();
@@ -862,6 +912,8 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
                     // Node material: the values of its unlinked inputs (one vec4 each), its textures.
                     const MaterialId materialId = e.material(slot);
                     const FrameMaterial *fm = materialId != NoMaterial ? frameMaterial(materialId) : nullptr;
+                    if (clay)
+                        fm = nullptr; // compiled anyway, so its errors still show
                     if (fm) {
                         v = data + kEntityParamsOffset / 4;
                         for (const MaterialParam &p : fm->compiled.params) {
@@ -1086,8 +1138,15 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
     if (showBackground)
         fullscreen(m_backgroundPipe.get(), m_backgroundSrb.get(), m_pixelSize);
     fullscreen(m_gridPipe.get(), m_gridSrb.get(), m_pixelSize);
-    for (const SurfaceDraw &s : surfaces)
-        drawMesh(s.pipe, s.srb, s.mesh, s.firstIndex, s.indexCount);
+    if (!wireOnly) {
+        for (const SurfaceDraw &s : surfaces)
+            drawMesh(s.pipe, s.srb, s.mesh, s.firstIndex, s.indexCount);
+    }
+    QRhiGraphicsPipeline *wirePipe = wireOnly ? m_wirePipe.get() : m_view.wireOverlay ? m_wireOverPipe.get() : nullptr;
+    if (wirePipe) {
+        for (const Draw &d : draws)
+            drawMesh(wirePipe, d.outlineSrb, d.mesh, 0, d.mesh->indexCount);
+    }
     for (const Draw &d : draws) {
         if (d.selected)
             drawMesh(m_outlinePipe.get(), d.outlineSrb, d.mesh, 0, d.mesh->indexCount);

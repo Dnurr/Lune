@@ -212,6 +212,48 @@ Bindings: the map is binding 19 of the mesh binding set. With the 15 samplers be
 `mesh.frag` uses 16, the most Direct3D 11 allows per shader stage: a new sampled texture in
 `mesh.frag` needs another one removed or merged first.
 
+## Viewport shading
+
+`Renderer::setViewSettings()` (the shading menu at the top left of the viewport, View >
+Shading, and every pass of an image render):
+
+| Shading | What the Renderer does |
+|---|---|
+| Wireframe | Meshes as lines (`wireframe.vert/.frag`, polygon mode Line), see-through, light gray. Where lines aren't supported (OpenGL ES): like Clay. |
+| Clay | Every slot with the default pipeline and one gray color (roughness 0.6, metallic 0): node materials are still compiled, so their errors show. |
+| Unlit | `lightCount.y = 1` for `mesh.frag` (below). |
+| Preview | No scene lights (`lightCount.x = 0`, not even the default sun) and no shadow views: the environment alone. |
+| Rendered | Everything. |
+
+`skybox` off hides the environment background (the grid's plain sky instead), and
+`wireOverlay` draws dark, half-transparent edges over the shaded meshes (depth tested,
+with a negative depth bias so they don't fight their own triangles).
+
+**Debug views**: `lightCount.y` in the lights block tells `mesh.frag`'s `main()` what to
+write instead of the shaded color (`DebugView` in `renderer.h`): 1 base color, 2 normal,
+3 linear depth, 4 direct light only, 5 shadow factors. Until `main()` handles them, those
+views look like Rendered.
+
+## Image renders
+
+Render > Render Image (F4) and Render Passes (F6) draw the scene with the viewport's
+camera (its lens shift dropped, so the image is centered) through `renderImages()`
+(`imagerender.h`):
+
+1. A new QRhi of the viewport's backend, its own `Renderer`, and an RGBA8 texture target
+   of the requested size. Nothing is shared with the viewport, so its size, overlays and
+   glass panels never reach the image, and its GPU state isn't touched.
+2. Per pass, offscreen frames (`beginOffscreenFrame`): each pass is its own frame, since
+   uniform buffers are rewritten every frame. Frames repeat while textures are still
+   loading (at most 30 s), then the last one is read back: 8-bit, after exposure and
+   tonemapping, without grid lines, overlay or outline.
+3. Everything is released; the editor writes the PNG files and opens the result window.
+
+Passes (`imagePasses()`): rendered, wireframe, clay, unlit, preview, rendered + wireframe,
+normals, depth, direct light only, shadows only. Files:
+`<folder>/<scene>_frame0001.png` (F4), `<scene>_frame0001_<pass>.png` (F6). The settings
+(size, folder, background, passes) are saved in the scene's editor state.
+
 ## Glass panels
 
 Every direct child widget of the viewport with the dynamic property `glass = true` (the

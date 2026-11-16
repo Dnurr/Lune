@@ -1,10 +1,12 @@
 #pragma once
 
 #include <QHash>
+#include <QList>
 #include <QJsonObject>
 #include <QMainWindow>
 
 #include "engine/scene/entity.h"
+#include "frontend/core/rendersettings.h"
 
 class AssetsPanel;
 class CommandPalette;
@@ -86,6 +88,11 @@ private:
     void importMeshFile();
     void deleteSelected();
 
+    // Render menu: the final image (F4), or every pass of the render settings (F6), saved
+    // as PNG files and shown in a result window.
+    void renderImages(bool allPasses);
+    void editRenderSettings();
+
     // Scene files
     void createDefaultScene();
     void resetDocument(const QString &path);
@@ -110,6 +117,7 @@ private:
     DisplaySettings *m_display = nullptr; // exposure + tonemapping of the viewport
     QMenu *m_addMenu = nullptr;
     QAction *m_collapsePanels = nullptr;
+    QList<QWidget *> m_viewportMenus; // Display and camera menus: hidden with the panels (Tab)
     OutlinerPanel *m_outliner = nullptr;
     InspectorPanel *m_inspector = nullptr;
     AssetsPanel *m_assets = nullptr;
@@ -118,4 +126,5 @@ private:
     QHash<QString, QJsonObject> m_workspaces; // saved state of the workspaces not shown
     QHash<QString, QToolButton *> m_workspaceTabs;
     QString m_scenePath; // empty = never saved
+    RenderSettings m_renderSettings; // saved in the scene's editor state
 };
