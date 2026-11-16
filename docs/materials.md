@@ -63,8 +63,11 @@ says, chosen in the row under the material combo box:
 Link an Image Texture's `alpha` output (the image's alpha channel) into it, or type a
 value. For blend materials, **absorption** (0..1, default 0) is the share of light a fully
 opaque surface absorbs instead of letting through: it shapes the translucent shadow
-(`shadow_material.glsl` decides how), so a clear white glass can still cast a faint one. Blend surfaces don't write depth, so they never hide each other; they are sorted
-per entity, not per triangle, so two crossing glass panes can show in the wrong order.
+(`shadow_material.glsl` decides how), so a clear white glass can still cast a faint one.
+
+Blend surfaces don't write depth, so they never hide each other; they are sorted per
+entity, not per triangle, so two crossing glass panes can show in the wrong order. Closed
+meshes (a glass cube or ball) draw their far side first, then their near side.
 
 ### Importing glTF materials
 
