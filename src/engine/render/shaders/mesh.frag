@@ -89,6 +89,8 @@ layout(std140, binding = 6) uniform shadowBuf {
     vec4 cameraForward;                               // xyz: the camera's view direction (unit)
     vec4 translucencyDir;                             // directional atlas uv -> shadowTranslucency uv: uv * xy + zw
     vec4 translucencyPoint;                           // point atlas uv -> shadowTranslucency uv: uv * xy + zw
+    vec4 frontDepthDir;                               // directional atlas uv -> its front depth in shadowTranslucency
+    vec4 frontDepthPoint;                             // point atlas uv -> its front depth (both: uv * xy + zw)
 };
 // Each atlas twice. The comparison sampler gives the filtered shadow test:
 //     texture(dirShadowMap, vec3(uv, depth))  ->  1 = lit (depth <= the stored one), 0 = in shadow,
@@ -114,6 +116,14 @@ layout(binding = 10) uniform sampler2D pointShadowDepth;
 // multiplied by rgb (the translucent surface itself, or a vase standing on a glass table,
 // must not be). Linear filtering, like the comparison samplers: average a few samples
 // for soft edges. Opaque shadows still come from the depth atlases.
+//
+// Front depth (for thickness, e.g. subsurface scattering): the same map has, at a quarter
+// of the atlases' resolution, the depth of the caster surface NEAREST to the light (map p.xy
+// with frontDepthDir / frontDepthPoint, read .a; same linear depth as above, 1 = nothing).
+// Closed meshes write only their far side into the depth atlases, so for a solid object
+// the atlas depth is where the light leaves it and the front depth where it enters:
+//   thickness at the receiver ~ dReceiver - frontDepth * scale   (scale: dirShadowRange.x
+//   or far), in world units. Only built-in casters (no clip or blend materials).
 layout(binding = 19) uniform sampler2D shadowTranslucency;
 
 // Direction in the world -> direction to sample the environment maps with.

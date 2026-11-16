@@ -46,6 +46,17 @@ class QRhiTextureRenderTarget;
 //          1 / TranslucencyScale of the atlases' resolution, a region for each atlas with the
 //          same tiles. Cleared to 1; every translucent caster multiplies rgb by the light it
 //          lets through and keeps in alpha the smallest (nearest) linear depth.
+//
+// The translucency map also holds the front depth, in two more regions at 1 / FrontDepthScale
+// (to the right of the translucency regions): the alpha of every texel is the linear depth
+// of the caster surface nearest to the light (closed meshes: their front faces, the side
+// the depth atlases leave out). The depth atlas minus it is how much of an object the
+// light crossed (thickness, for subsurface scattering). Drawn by the built-in casters only:
+// clip and blend materials are not in it.
+//
+//   translucency map (pixels):   x 0..2047             x 2048..3071
+//                                 y 2048..3071 point    y 1024..1535 point front depth
+//                                 y 0..2047 directional y 0..1023    directional front depth
 class ShadowMaps
 {
 public:
@@ -64,6 +75,7 @@ public:
     static constexpr int PointFaceBorder = 24;
     static constexpr int ViewCount = DirectionalViews + 6 * MaxPoint;
     static constexpr int TranslucencyScale = 2; // translucency map: half the atlases' resolution
+    static constexpr int FrontDepthScale = 4;   // front-depth regions: a quarter
     static constexpr int TranslucencyBinding = 19;  // shadowTranslucency in mesh.frag
     static constexpr int MaterialViewBinding = 20;  // shadowViewBuf in shadow_material.vert/.glsl
 
@@ -138,8 +150,8 @@ public:
     // `shadows` off, light without shadows.
     void prepare(QRhiResourceUpdateBatch *rub, const std::vector<Light> &lights, const Camera &camera,
                  const QVector3D &boundsMin, const QVector3D &boundsMax, bool hasMeshes);
-    // Records both atlas passes and the translucency pass (always cleared, so they're valid
-    // to sample). `rub` goes with the first pass.
+    // Records both atlas passes and the translucency pass, with the front depth (always
+    // cleared, so they're valid to sample). `rub` goes with the first pass.
     void render(QRhiCommandBuffer *cb, QRhiResourceUpdateBatch *rub, const std::vector<Caster> &casters);
 
     int passCount() const { return 3; }
@@ -153,6 +165,7 @@ private:
         QMatrix4x4 clip;        // world -> clip space, corrected for the backend
         QRectF viewport;        // in the atlas, QRhi convention (pixels, origin bottom-left)
         QRectF translucencyViewport; // the same tile in the translucency map
+        QRectF frontDepthViewport;   // and in its front-depth region
         float nearPlane = 0.0f, farPlane = 0.0f; // point lights
     };
 
@@ -161,10 +174,11 @@ private:
     void createPipelines();
     QRectF tileViewport(bool point, int tile, int directionalCount) const;
     QMatrix4x4 clipToTile(const QRectF &viewport, const QSize &atlas) const;
-    // Where an atlas's region starts in the translucency map (pixels, QRhi convention).
-    QPointF translucencyOrigin(bool point) const;
-    // Atlas uv -> translucency map uv: xy scale, zw offset.
-    void translucencyMapping(bool point, float *dst) const;
+    // Where an atlas's region starts in the translucency map (pixels, QRhi convention):
+    // its translucency, or its front depth.
+    QPointF regionOrigin(bool point, bool front) const;
+    // Atlas uv -> translucency map uv of that region: xy scale, zw offset.
+    void regionMapping(bool point, bool front, float *dst) const;
 
     QRhi *m_rhi = nullptr;
     std::unique_ptr<QRhiTexture> m_directional, m_point;
@@ -182,6 +196,7 @@ private:
     std::unique_ptr<QRhiBuffer> m_layoutUbuf;
     std::unique_ptr<QRhiShaderResourceBindings> m_layoutSrb;
     std::unique_ptr<QRhiGraphicsPipeline> m_pipelines[CullModes];
+    std::unique_ptr<QRhiGraphicsPipeline> m_frontPipelines[CullModes]; // indexed by cullFor()
     quint32 m_viewStride = 0;
     std::vector<View> m_views;
 };

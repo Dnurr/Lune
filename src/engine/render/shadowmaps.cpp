@@ -24,7 +24,9 @@ constexpr int kCascadeSplits = kAtlas + 4;                                      
 constexpr int kCameraForward = kCascadeSplits + 4;                                  // vec4
 constexpr int kTranslucencyDir = kCameraForward + 4;                                // vec4
 constexpr int kTranslucencyPoint = kTranslucencyDir + 4;                            // vec4
-constexpr int kUniformFloats = kTranslucencyPoint + 4;
+constexpr int kFrontDepthDir = kTranslucencyPoint + 4;                             // vec4
+constexpr int kFrontDepthPoint = kFrontDepthDir + 4;                                // vec4
+constexpr int kUniformFloats = kFrontDepthPoint + 4;
 constexpr int kUniformSize = kUniformFloats * 4;
 // Per tile in the view buffer: mat4 (world -> clip) + vec4 (point, near, far, 0).
 constexpr int kViewSize = 64 + 16;
@@ -95,9 +97,12 @@ void ShadowMaps::initialize(QRhi *rhi)
     atlas(QSize(DirectionalAtlasSize, DirectionalAtlasSize), m_directional, m_directionalRt);
     atlas(QSize(6 * PointFaceSize, MaxPoint * PointFaceSize), m_point, m_pointRt);
 
-    // Translucency map: the directional region, then the point region above it.
-    const QSize translucency(qMax(DirectionalAtlasSize, 6 * PointFaceSize) / TranslucencyScale,
-                             (DirectionalAtlasSize + MaxPoint * PointFaceSize) / TranslucencyScale);
+    // Translucency map: the directional region, then the point region above it; the same
+    // at FrontDepthScale on their right, for the front depth.
+    const int atlasesWidth = qMax(DirectionalAtlasSize, 6 * PointFaceSize);
+    const int atlasesHeight = DirectionalAtlasSize + MaxPoint * PointFaceSize;
+    const QSize translucency(atlasesWidth / TranslucencyScale + atlasesWidth / FrontDepthScale,
+                             qMax(atlasesHeight / TranslucencyScale, atlasesHeight / FrontDepthScale));
     m_translucency.reset(m_rhi->newTexture(QRhiTexture::RGBA16F, translucency, 1, QRhiTexture::RenderTarget));
     m_translucency->create();
     m_translucencyRt.reset(m_rhi->newTextureRenderTarget({ QRhiColorAttachment(m_translucency.get()) }));
@@ -148,7 +153,32 @@ void ShadowMaps::createPipelines()
     input.setBindings({ { quint32(sizeof(MeshVertex)) } });
     input.setAttributes({ { 0, 0, QRhiVertexInputAttribute::Float3, 0 } });
     const QShader vs = loadShader(QStringLiteral("shadow.vert")), fs = loadShader(QStringLiteral("shadow.frag"));
+    const QShader frontVs = loadShader(QStringLiteral("shadow_front.vert"));
+    const QShader frontFs = loadShader(QStringLiteral("shadow_front.frag"));
     m_materialVs = loadShader(QStringLiteral("shadow_material.vert"));
+
+    // Front depth: the faces the depth atlases leave out (closed meshes: their front faces),
+    // into the translucency map, keeping the nearest depth in alpha (rgb * 1: untouched).
+    QRhiGraphicsPipeline::TargetBlend frontBlend;
+    frontBlend.enable = true;
+    frontBlend.srcColor = QRhiGraphicsPipeline::DstColor;
+    frontBlend.dstColor = QRhiGraphicsPipeline::Zero;
+    frontBlend.srcAlpha = QRhiGraphicsPipeline::One;
+    frontBlend.dstAlpha = QRhiGraphicsPipeline::One;
+    frontBlend.opAlpha = QRhiGraphicsPipeline::Min;
+    for (int cull = 0; cull < CullModes; ++cull) {
+        auto &p = m_frontPipelines[cull];
+        p.reset(m_rhi->newGraphicsPipeline());
+        p->setShaderStages({ { QRhiShaderStage::Vertex, frontVs }, { QRhiShaderStage::Fragment, frontFs } });
+        p->setVertexInputLayout(input);
+        p->setShaderResourceBindings(m_layoutSrb.get());
+        p->setRenderPassDescriptor(m_translucencyRp.get());
+        p->setCullMode(cull == CullFront  ? QRhiGraphicsPipeline::Back // the opposite of the atlases
+                       : cull == CullBack ? QRhiGraphicsPipeline::Front
+                                          : QRhiGraphicsPipeline::None);
+        p->setTargetBlends({ frontBlend });
+        p->create();
+    }
 
     for (int cull = 0; cull < CullModes; ++cull) {
         auto &p = m_pipelines[cull];
@@ -220,6 +250,8 @@ void ShadowMaps::release()
 {
     for (auto &p : m_pipelines)
         p.reset();
+    for (auto &p : m_frontPipelines)
+        p.reset();
     m_layoutSrb.reset();
     m_layoutUbuf.reset();
     m_viewUbuf.reset();
@@ -261,7 +293,7 @@ QList<QRhiShaderResourceBinding> ShadowMaps::casterBindings(QRhiBuffer *entityUn
 {
     using B = QRhiShaderResourceBinding;
     return { B::uniformBuffer(0, B::VertexStage, entityUniforms),
-             B::uniformBufferWithDynamicOffset(1, B::VertexStage, m_viewUbuf.get(), 64) };
+             B::uniformBufferWithDynamicOffset(1, B::VertexStage, m_viewUbuf.get(), kViewSize) };
 }
 
 QRhiShaderResourceBinding ShadowMaps::materialViewBinding() const
@@ -271,19 +303,22 @@ QRhiShaderResourceBinding ShadowMaps::materialViewBinding() const
                                              kViewSize);
 }
 
-QPointF ShadowMaps::translucencyOrigin(bool point) const
+QPointF ShadowMaps::regionOrigin(bool point, bool front) const
 {
-    return point ? QPointF(0, DirectionalAtlasSize / TranslucencyScale) : QPointF(0, 0);
+    const int scale = front ? FrontDepthScale : TranslucencyScale;
+    const int x = front ? qMax(DirectionalAtlasSize, 6 * PointFaceSize) / TranslucencyScale : 0;
+    return QPointF(x, point ? DirectionalAtlasSize / scale : 0);
 }
 
-void ShadowMaps::translucencyMapping(bool point, float *dst) const
+void ShadowMaps::regionMapping(bool point, bool front, float *dst) const
 {
-    // The region is the atlas scaled by 1 / TranslucencyScale: atlas uv -> map uv is linear.
-    // Rows count from the bottom where framebuffers are y-up (OpenGL), from the top elsewhere.
+    // The region is the atlas scaled down: atlas uv -> map uv is linear. Rows count from
+    // the bottom where framebuffers are y-up (OpenGL), from the top elsewhere.
     const QSize atlas = (point ? m_point : m_directional)->pixelSize();
     const QSize map = m_translucency->pixelSize();
-    const QPointF origin = translucencyOrigin(point);
-    const float w = float(atlas.width()) / TranslucencyScale, h = float(atlas.height()) / TranslucencyScale;
+    const QPointF origin = regionOrigin(point, front);
+    const float scale = float(front ? FrontDepthScale : TranslucencyScale);
+    const float w = float(atlas.width()) / scale, h = float(atlas.height()) / scale;
     const float scaleU = w / float(map.width()), scaleV = h / float(map.height());
     const float offsetU = float(origin.x()) / float(map.width());
     const float offsetV = m_rhi->isYUpInFramebuffer() ? float(origin.y()) / float(map.height())
@@ -347,8 +382,10 @@ void ShadowMaps::prepare(QRhiResourceUpdateBatch *rub, const std::vector<Light> 
     const QSize pointAtlas = m_point->pixelSize();
     putVec4(data + kAtlas, 1.0f / directionalAtlas.width(), 1.0f / directionalAtlas.height(),
             1.0f / pointAtlas.width(), 1.0f / pointAtlas.height());
-    translucencyMapping(false, data + kTranslucencyDir);
-    translucencyMapping(true, data + kTranslucencyPoint);
+    regionMapping(false, false, data + kTranslucencyDir);
+    regionMapping(true, false, data + kTranslucencyPoint);
+    regionMapping(false, true, data + kFrontDepthDir);
+    regionMapping(true, true, data + kFrontDepthPoint);
 
     const QMatrix4x4 corr = m_rhi->clipSpaceCorrMatrix();
     QVector3D corners[8]; // of the meshes' bounds
@@ -488,10 +525,14 @@ void ShadowMaps::prepare(QRhiResourceUpdateBatch *rub, const std::vector<Light> 
     rub->updateDynamicBuffer(m_uniforms.get(), 0, kUniformSize, data);
 
     for (View &v : m_views) {
-        const QPointF origin = translucencyOrigin(v.point);
-        const float s = 1.0f / TranslucencyScale;
-        v.translucencyViewport = QRectF(origin.x() + v.viewport.x() * s, origin.y() + v.viewport.y() * s,
-                                        v.viewport.width() * s, v.viewport.height() * s);
+        auto inRegion = [&v, this](bool front) {
+            const QPointF origin = regionOrigin(v.point, front);
+            const float s = 1.0f / float(front ? FrontDepthScale : TranslucencyScale);
+            return QRectF(origin.x() + v.viewport.x() * s, origin.y() + v.viewport.y() * s, v.viewport.width() * s,
+                          v.viewport.height() * s);
+        };
+        v.translucencyViewport = inRegion(false);
+        v.frontDepthViewport = inRegion(true);
         const int index = v.point ? DirectionalViews + v.tile : v.tile;
         float m[kViewSize / 4];
         putMat4(m, v.clip);
@@ -559,6 +600,26 @@ void ShadowMaps::render(QRhiCommandBuffer *cb, QRhiResourceUpdateBatch *rub, con
     // Translucency map: cleared to "all the light, nothing in the way", then every
     // translucent caster in every tile (the blend does the rest; order doesn't matter).
     cb->beginPass(m_translucencyRt.get(), QColor::fromRgbF(1, 1, 1, 1), { 1.0f, 0 });
+    // Front depth: the built-in casters again, with the opposite faces.
+    for (int cull = 0; cull < CullModes; ++cull) {
+        bool bound = false;
+        for (const View &v : m_views) {
+            bool viewportSet = false;
+            for (const Caster &c : casters) {
+                if (c.pipeline || c.translucent || cullFor(c) != cull)
+                    continue;
+                if (!bound) {
+                    cb->setGraphicsPipeline(m_frontPipelines[cull].get());
+                    bound = true;
+                }
+                if (!viewportSet) {
+                    setViewport(v.frontDepthViewport);
+                    viewportSet = true;
+                }
+                draw(c, 1, viewOffset(v));
+            }
+        }
+    }
     for (const Caster &c : casters) {
         if (!c.pipeline || !c.translucent)
             continue;

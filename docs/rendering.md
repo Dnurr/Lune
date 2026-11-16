@@ -43,7 +43,7 @@ flowchart LR
 |---|---|---|---|
 | IBL maps | environment cubemaps, BRDF LUT | `cube.vert` + `equirect_to_cube.frag`, `irradiance.frag`, `prefilter.frag`; `fullscreen.vert` + `brdf_lut.frag` | Only when the environment's source changes (the LUT once): see [Image-based lighting](#image-based-lighting). |
 | Shadow atlases | two depth atlases | `shadow.vert` + `shadow.frag`; `shadow_material.vert` + a material's shadow variant for clip materials | Every visible mesh's depth from each shadowed light, one tile (viewport) per view; see [Shadows](#shadows). Always cleared. |
-| Translucency | translucency map (RGBA16F) | `shadow_material.vert` + a blend material's shadow variant | The light blend materials let through, and their nearest depth, per tile; see [Translucent shadows](#translucent-shadows). Always cleared. |
+| Translucency | translucency map (RGBA16F) | `shadow_material.vert` + a blend material's shadow variant; `shadow_front.vert` + `shadow_front.frag` | The light blend materials let through, and their nearest depth, per tile; see [Translucent shadows](#translucent-shadows). Then the front depth of every built-in caster in its own regions; see [Front depth](#front-depth). Always cleared. |
 | Background | scene (RGBA16F) | `background.vert` + `background.frag` | Only when the Environment's `background` is on: the environment in each view ray's direction. |
 | Grid | scene | `fullscreen.vert` + `grid.frag` | Fullscreen triangle; each pixel intersects its view ray with y = 0. No depth write: it's the background. Premultiplied alpha: opaque with its own sky, or only the lines over an environment background. Colors converted to linear on the CPU. |
 | Meshes | scene | `mesh.vert` + `mesh.frag` | Depth tested, two-sided, Cook-Torrance (GGX) shading with the scene lights and the environment maps. One draw per submesh, each with its material slot's pipeline (node material or default) and binding set. Writes linear values (can exceed 1). Blend materials last, sorted far to near by entity, with premultiplied-alpha blending and no depth writes; closed meshes in two draws, back faces then front faces, so a glass cube's far side never blends over its near side. |
@@ -174,9 +174,10 @@ without shadows; a scene without lights gets the default sun, which casts them).
 
 Blend materials (glass, smoke) don't write the depth atlases. Their shadows go into the
 **translucency map**: one RGBA16F texture at half the atlases' resolution
-(`TranslucencyScale`), 2048 × 3072: the directional atlas's region at the bottom (in
-QRhi's viewport convention), the point atlas's above it, each with the same tiles as its
-atlas. `translucencyDir` / `translucencyPoint` map an atlas uv to the map's uv.
+(`TranslucencyScale`): the directional atlas's region at the bottom (in QRhi's viewport
+convention), the point atlas's above it, each with the same tiles as its atlas.
+`translucencyDir` / `translucencyPoint` map an atlas uv to the map's uv. On their right,
+two more regions hold the [front depth](#front-depth), so the texture is 3072 × 3072.
 
 Cleared to 1 every frame, then every blend caster is drawn in every tile, two-sided, with
 one blend state doing two things:
@@ -191,6 +192,21 @@ A receiver uses rgb only where it's farther from the light than that depth, so t
 doesn't shadow itself and what stands between it and the light isn't darkened. Clear
 pixels (alpha below 1/255) are discarded, so they don't count as the nearest caster. Not
 handled: a receiver between two translucent layers gets both.
+
+### Front depth
+
+Closed meshes write only their far side into the depth atlases (see above), so the
+atlases say where light **leaves** a solid object, not where it enters. For thickness
+(subsurface scattering) the translucency map has two more regions, at a quarter of the
+atlases' resolution (`FrontDepthScale`), right of the translucency regions:
+`frontDepthDir` / `frontDepthPoint` map an atlas uv there. In the same pass as the
+translucency, every built-in caster is drawn again (`shadow_front.vert/.frag`) with the
+opposite culling (closed meshes: front faces; open meshes: both), writing rgb = 1 (the
+blend leaves it as it is) and the linear depth into a, which keeps the minimum: the
+nearest surface to the light. Thickness at a receiver ≈ its distance along the light's
+axis minus that depth (in world units after scaling by `dirShadowRange.x` or `far`).
+Clip and blend materials are not drawn into it. Half-float precision: a step of about
+1/2048 of the light's depth range.
 
 Bindings: the map is binding 19 of the mesh binding set. With the 15 samplers before it,
 `mesh.frag` uses 16, the most Direct3D 11 allows per shader stage: a new sampled texture in

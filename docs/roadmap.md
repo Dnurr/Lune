@@ -75,7 +75,8 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 - [ ] `main()`: discard below the cutoff, premultiplied output for blend (Author)
 - [ ] Translucent shadows in `Shadow()` from `shadowTranslucency` (Author)
 - [x] Material Output `subsurface`, `subsurfaceColor`, `subsurfaceRadius` (Claude)
-- [ ] Subsurface scattering in the light loop: wrap lighting, back light, thickness from the shadow map (Author)
+- [x] Front depth in the translucency map, for thickness (Claude)
+- [ ] Subsurface scattering in the light loop: wrap lighting, back light, thickness from the front depth (Author)
 - [ ] OBJ materials (.mtl) to node graphs (Claude)
 
 ### Color management

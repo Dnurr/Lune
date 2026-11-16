@@ -226,9 +226,11 @@ block). Cheap raster approximations, which combine:
   the subsurface color past the terminator.
 - **Back light**: light coming through the object toward the viewer,
   `pow(max(dot(V, -(L + N * distortion)), 0), power)`.
-- **Thickness**: the distance light traveled inside, from the shadow map
-  (`dReceiver - dBlocker` in `Shadow()`), attenuating the back light as
-  `exp(-thickness / subsurfaceRadius)`.
+- **Thickness**: the distance light traveled inside, attenuating the back light as
+  `exp(-thickness / subsurfaceRadius)`. Not `dReceiver - dBlocker`: closed meshes put
+  only their far side in the depth atlases, so for a solid that is about 0. The front
+  depth in `shadowTranslucency` has the side facing the light (see the comment above it in
+  `mesh.frag` and [rendering.md](rendering.md#front-depth)).
 
 ### Normal maps
 
