@@ -63,6 +63,24 @@ NodeGraph Material::defaultGraph()
     return g;
 }
 
+QString Material::alphaModeName(AlphaMode mode)
+{
+    switch (mode) {
+    case AlphaMode::Clip: return QStringLiteral("clip");
+    case AlphaMode::Blend: return QStringLiteral("blend");
+    default: return QStringLiteral("opaque");
+    }
+}
+
+AlphaMode Material::alphaModeFromName(const QString &name)
+{
+    if (name == QLatin1String("clip"))
+        return AlphaMode::Clip;
+    if (name == QLatin1String("blend"))
+        return AlphaMode::Blend;
+    return AlphaMode::Opaque;
+}
+
 MaterialId Scene::addMaterial(Material prototype)
 {
     prototype.id = m_nextMaterialId;
@@ -101,6 +119,17 @@ void Scene::setMaterialGraph(MaterialId id, const NodeGraph &graph)
     for (Material &m : m_materials) {
         if (m.id == id && !(m.graph == graph)) {
             m.graph = graph;
+            emit materialChanged(id);
+        }
+    }
+}
+
+void Scene::setMaterialAlpha(MaterialId id, AlphaMode mode, float cutoff)
+{
+    for (Material &m : m_materials) {
+        if (m.id == id && (m.alphaMode != mode || m.alphaCutoff != cutoff)) {
+            m.alphaMode = mode;
+            m.alphaCutoff = cutoff;
             emit materialChanged(id);
         }
     }

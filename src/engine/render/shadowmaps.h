@@ -4,6 +4,7 @@
 #include <QMatrix4x4>
 #include <QRectF>
 #include <QVector3D>
+#include <rhi/qshader.h>
 #include <array>
 #include <memory>
 #include <vector>
@@ -37,6 +38,14 @@ class QRhiTextureRenderTarget;
 // also keeps acne off lit surfaces. Open meshes (a plane) have no far side: both faces.
 // mesh.frag reads both atlases twice: through a comparison sampler (filtered shadow tests)
 // and as raw depth (for blocker searches, e.g. PCSS). See the shadow block in mesh.frag.
+//
+// Node materials whose alpha matters draw with their own pipelines (createMaterialPipeline),
+// whose fragment shader runs the material (shadow_material.glsl):
+//   clip   into the depth atlases, cut where the material is (two-sided)
+//   blend  not into the depth atlases but into the translucency map: one RGBA16F texture at
+//          1 / TranslucencyScale of the atlases' resolution, a region for each atlas with the
+//          same tiles. Cleared to 1; every translucent caster multiplies rgb by the light it
+//          lets through and keeps in alpha the smallest (nearest) linear depth.
 class ShadowMaps
 {
 public:
@@ -54,6 +63,9 @@ public:
     // search radii up to this many texels never need clamping.
     static constexpr int PointFaceBorder = 24;
     static constexpr int ViewCount = DirectionalViews + 6 * MaxPoint;
+    static constexpr int TranslucencyScale = 2; // translucency map: half the atlases' resolution
+    static constexpr int TranslucencyBinding = 19;  // shadowTranslucency in mesh.frag
+    static constexpr int MaterialViewBinding = 20;  // shadowViewBuf in shadow_material.vert/.glsl
 
     // One light of the frame, at index `lightIndex` in mesh.frag's lights[].
     struct Light
@@ -79,15 +91,22 @@ public:
         float shiftX = 0.0f; // OrbitCamera::shiftX
     };
 
-    // A mesh drawn into the shadow maps: its buffers and its binding set (casterBindings()).
+    // A mesh (or a range of its triangles: a submesh) drawn into the shadow maps.
+    //   pipeline null:  depth only, with the built-in pipelines; `srb` from casterBindings()
+    //   pipeline set:   a node material's (createMaterialPipeline, `translucent` as created
+    //                   with); `srb` has the mesh bindings for casters (meshBindings(true))
+    //                   plus materialViewBinding()
     struct Caster
     {
         QRhiBuffer *vertices = nullptr;
         QRhiBuffer *indices = nullptr;
+        quint32 firstIndex = 0;
         quint32 indexCount = 0;
         QRhiShaderResourceBindings *srb = nullptr;
-        bool closed = false;   // Mesh::closed: back faces only
+        bool closed = false;   // Mesh::closed: back faces only (built-in pipelines)
         bool mirrored = false; // the model matrix flips the winding (negative determinant)
+        QRhiGraphicsPipeline *pipeline = nullptr;
+        bool translucent = false; // into the translucency map instead of the depth atlases
     };
 
     ShadowMaps();
@@ -96,11 +115,22 @@ public:
     void initialize(QRhi *rhi);
     void release();
 
-    // Bindings 6..10 of every mesh SRB (the shadow block and both atlases, twice).
-    QList<QRhiShaderResourceBinding> meshBindings() const;
+    // Bindings 6..10 and 19 of every mesh SRB (the shadow block, both atlases twice, the
+    // translucency map). `forCasters`: for the SRBs of material casters, which draw into
+    // the atlases: 1x1 stand-ins instead of the atlases and the map (the material shader has
+    // mesh.frag's declarations, but must not read what it's drawing into).
+    QList<QRhiShaderResourceBinding> meshBindings(bool forCasters = false) const;
     // Bindings of a caster's SRB in the shadow passes: its entity uniforms (binding 0, only
     // `model` is read) and the view matrix (binding 1, dynamic offset per tile).
     QList<QRhiShaderResourceBinding> casterBindings(QRhiBuffer *entityUniforms) const;
+    // The view of material casters (MaterialViewBinding, dynamic offset per tile).
+    QRhiShaderResourceBinding materialViewBinding() const;
+    // A pipeline for a material's shadow fragment shader (mesh.frag's declarations + the
+    // material + shadow_material.glsl). `layout`: an SRB laid out like the casters'.
+    // nullptr if it can't be created.
+    std::unique_ptr<QRhiGraphicsPipeline> createMaterialPipeline(const QShader &fragment,
+                                                                 QRhiShaderResourceBindings *layout,
+                                                                 bool translucent) const;
 
     // Picks the shadowed lights (up to MaxDirectional + MaxPoint, in order), fits their
     // views (directional: cascades of the camera's view, up to the farthest mesh; point:
@@ -108,11 +138,11 @@ public:
     // `shadows` off, light without shadows.
     void prepare(QRhiResourceUpdateBatch *rub, const std::vector<Light> &lights, const Camera &camera,
                  const QVector3D &boundsMin, const QVector3D &boundsMax, bool hasMeshes);
-    // Records both atlas passes (always cleared, so they're valid to sample). `rub` goes
-    // with the first pass.
+    // Records both atlas passes and the translucency pass (always cleared, so they're valid
+    // to sample). `rub` goes with the first pass.
     void render(QRhiCommandBuffer *cb, QRhiResourceUpdateBatch *rub, const std::vector<Caster> &casters);
 
-    int passCount() const { return 2; }
+    int passCount() const { return 3; }
     int viewCount() const { return int(m_views.size()); } // tiles drawn in the last prepare()
 
 private:
@@ -122,6 +152,8 @@ private:
         int tile = 0;           // directional: slot * CascadeCount + cascade; point: slot * 6 + face
         QMatrix4x4 clip;        // world -> clip space, corrected for the backend
         QRectF viewport;        // in the atlas, QRhi convention (pixels, origin bottom-left)
+        QRectF translucencyViewport; // the same tile in the translucency map
+        float nearPlane = 0.0f, farPlane = 0.0f; // point lights
     };
 
     enum Cull { CullNone, CullFront, CullBack, CullModes };
@@ -129,14 +161,24 @@ private:
     void createPipelines();
     QRectF tileViewport(bool point, int tile, int directionalCount) const;
     QMatrix4x4 clipToTile(const QRectF &viewport, const QSize &atlas) const;
+    // Where an atlas's region starts in the translucency map (pixels, QRhi convention).
+    QPointF translucencyOrigin(bool point) const;
+    // Atlas uv -> translucency map uv: xy scale, zw offset.
+    void translucencyMapping(bool point, float *dst) const;
 
     QRhi *m_rhi = nullptr;
     std::unique_ptr<QRhiTexture> m_directional, m_point;
     std::unique_ptr<QRhiTextureRenderTarget> m_directionalRt, m_pointRt;
     std::unique_ptr<QRhiRenderPassDescriptor> m_rp; // depth only, shared by both atlases
+    std::unique_ptr<QRhiTexture> m_translucency;
+    std::unique_ptr<QRhiTextureRenderTarget> m_translucencyRt;
+    std::unique_ptr<QRhiRenderPassDescriptor> m_translucencyRp;
+    std::unique_ptr<QRhiSampler> m_translucencySampler;
+    std::unique_ptr<QRhiTexture> m_dummyDepth, m_dummyColor; // meshBindings(true)
+    QShader m_materialVs; // shadow_material.vert
     std::unique_ptr<QRhiSampler> m_compareSampler, m_depthSampler;
     std::unique_ptr<QRhiBuffer> m_uniforms; // the shadow block of mesh.frag
-    std::unique_ptr<QRhiBuffer> m_viewUbuf; // one aligned view matrix per tile (dynamic offsets)
+    std::unique_ptr<QRhiBuffer> m_viewUbuf; // per tile, aligned (dynamic offsets): view matrix + vec4 (point, near, far)
     std::unique_ptr<QRhiBuffer> m_layoutUbuf;
     std::unique_ptr<QRhiShaderResourceBindings> m_layoutSrb;
     std::unique_ptr<QRhiGraphicsPipeline> m_pipelines[CullModes];

@@ -25,6 +25,9 @@ struct GltfMaterial
     float occlusionStrength = 1.0f;
     QVector3D emissiveFactor;                // linear
     QString emissiveTexture;                 // sRGB
+    // Alpha: baseColorFactor.w times the base color texture's alpha.
+    enum Alpha { Opaque, Mask, Blend } alphaMode = Opaque;
+    float alphaCutoff = 0.5f;                // Mask: alpha below it is cut away
 };
 
 struct GltfModel

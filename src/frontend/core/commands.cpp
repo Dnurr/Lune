@@ -300,6 +300,43 @@ bool SetMaterialGraphCommand::mergeWith(const QUndoCommand *other)
     return true;
 }
 
+SetMaterialAlphaCommand::SetMaterialAlphaCommand(Scene *scene, MaterialId material, AlphaMode mode, float cutoff)
+    : m_scene(scene)
+    , m_material(material)
+    , m_afterMode(mode)
+    , m_afterCutoff(cutoff)
+{
+    if (const Material *m = scene->material(material)) {
+        m_beforeMode = m->alphaMode;
+        m_beforeCutoff = m->alphaCutoff;
+    }
+    setText(mode != m_beforeMode ? QStringLiteral("Set alpha mode") : QStringLiteral("Set alpha cutoff"));
+    m_lastEdit.start();
+}
+
+void SetMaterialAlphaCommand::redo()
+{
+    m_scene->setMaterialAlpha(m_material, m_afterMode, m_afterCutoff);
+}
+
+void SetMaterialAlphaCommand::undo()
+{
+    m_scene->setMaterialAlpha(m_material, m_beforeMode, m_beforeCutoff);
+}
+
+bool SetMaterialAlphaCommand::mergeWith(const QUndoCommand *other)
+{
+    // Only cutoff changes merge: a mode change is its own step.
+    const auto *o = static_cast<const SetMaterialAlphaCommand *>(other);
+    if (o->m_material != m_material || o->m_afterMode != m_afterMode || m_afterMode != m_beforeMode
+        || m_lastEdit.elapsed() > kMergeWindowMs)
+        return false;
+    m_afterCutoff = o->m_afterCutoff;
+    m_lastEdit.restart();
+    setObsolete(m_afterCutoff == m_beforeCutoff);
+    return true;
+}
+
 RenameMaterialCommand::RenameMaterialCommand(Scene *scene, MaterialId material, const QString &name)
     : m_scene(scene)
     , m_material(material)

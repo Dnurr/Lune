@@ -52,7 +52,9 @@ NodeType outputNode()
     normal.expression = QStringLiteral("normalize(v_normal)");
     PortDesc occlusion { QStringLiteral("occlusion"), PortType::Float, false, true, 1.0f, 0.0, 1.0, true };
     PortDesc emission { QStringLiteral("emission"), PortType::Vec3, true, true, QVector3D(0, 0, 0) };
-    t.inputs = { baseColor, roughness, metallic, normal, occlusion, emission };
+    // Used as the material's alpha mode says (Material::alphaMode): ignored when opaque.
+    PortDesc alpha { QStringLiteral("alpha"), PortType::Float, false, true, 1.0f, 0.0, 1.0, true };
+    t.inputs = { baseColor, roughness, metallic, normal, occlusion, emission, alpha };
     return t;
 }
 

@@ -130,6 +130,15 @@ NodeGraph graphFromGltf(const GltfMaterial &m, const NodeLibrary &library)
     else
         b.setOutput(QStringLiteral("baseColor"), toSRGB(baseFactor));
 
+    // Alpha: only where the material uses it (OPAQUE ignores it, by the glTF spec)
+    if (m.alphaMode != GltfMaterial::Opaque) {
+        const float alphaFactor = m.baseColorFactor.w();
+        if (textures && !m.baseColorTexture.isEmpty())
+            b.scaledToOutput(b.texture(m.baseColorTexture, false), QStringLiteral("alpha"), alphaFactor, QStringLiteral("alpha"));
+        else
+            b.setOutput(QStringLiteral("alpha"), alphaFactor);
+    }
+
     // Roughness, metallic: G and B of the metallic-roughness texture
     if (separate && !m.metallicRoughnessTexture.isEmpty()) {
         const int rgb = b.separate(b.texture(m.metallicRoughnessTexture, true));

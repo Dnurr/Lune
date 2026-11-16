@@ -49,6 +49,21 @@ Images load in the background: the material is drawn at once with a plain fallba
 what Qt reads (PNG, JPEG, BMP...), up to 8192 pixels (larger ones are scaled down). A
 material can use up to 8 images. Paths are saved relative to the scene file.
 
+### Alpha
+
+The Material Output's **alpha** input (0..1) is used as the material's **alpha mode**
+says, chosen in the row under the material combo box:
+
+| Mode | Surface | Shadow |
+|---|---|---|
+| Opaque | alpha is ignored | solid |
+| Clip | pixels with alpha below the **cutoff** are cut away, the rest is opaque (leaves, fences, chain links) | the same holes |
+| Blend | see-through by its alpha (glass, smoke, decals): drawn after the opaque meshes, far to near, blended over them | translucent: lets 1 − alpha of the light through (alpha 0.5: half of it), layers multiply |
+
+Link an Image Texture's `alpha` output (the image's alpha channel) into it, or type a
+value. Blend surfaces don't write depth, so they never hide each other; they are sorted
+per entity, not per triangle, so two crossing glass panes can show in the wrong order.
+
 ### Importing glTF materials
 
 Importing a glTF file (File > Import, double click or drag from Assets) adds its materials
@@ -61,10 +76,12 @@ to the scene as node graphs and puts them in the new entity's slots, in one undo
 | occlusion texture | R of its Image Texture (packed ORM images share one node) |
 | normal texture | Image Texture (Data) -> Normal Map node, into Normal (left unlinked while there is no Normal Map node, see below) |
 | emissive texture x factor | Image Texture (Color) x Multiply Color, into Emission |
+| `alphaMode` MASK / BLEND, `alphaCutoff` | alpha mode Clip / Blend and its cutoff; base color texture's alpha x base color factor's alpha, into Alpha (OPAQUE leaves alpha unlinked) |
 
 Factors of 1 add no Multiply node; without a texture the factor is the output's value.
 Images inside the file (`.glb`, data URIs) are referenced as `model.glb#image<N>`.
-Not imported: alpha (blend, mask), texture transforms, second UV sets.
+Not imported: texture transforms, second UV sets. Materials imported before alpha was
+supported stay opaque: set their mode by hand, or import the file again.
 
 ## How it works
 
@@ -76,6 +93,8 @@ flowchart LR
     C --> I["insertInto(mesh.frag)<br/>between the markers"]
     I --> B["QShaderBaker<br/>(runtime, current backend)"]
     B --> P["pipeline per shader<br/>(cached by code)"]
+    C --> S["shadowSource()<br/>mesh.frag declarations +<br/>shadow_material.glsl"]
+    S --> B
     G -. "unlinked input values" .-> U["materialParams[]<br/>entity uniforms"]
 ```
 
@@ -94,6 +113,12 @@ flowchart LR
   vec3 gives a float as its luminance and a vec2 as `.xy`; a vec2 gives a float as `.x`
   and a vec3 as `(x, y, 0)`.
 - Colors are sRGB in the editor and arrive linear in the shader.
+- Clip and blend materials also get a **shadow variant**: the declarations of `mesh.frag`
+  (everything above the begin marker), the same generated code, and the `main()` of
+  `shadow_material.glsl`, which discards what the material cuts away and, for blend,
+  writes the light let through and the depth. Compiled only for materials that need it.
+- The Renderer sets the pipelines from the alpha mode: blend materials draw with
+  blending and without depth writes, after the others, sorted far to near.
 
 ## Writing nodes (Author)
 
@@ -156,9 +181,26 @@ Until `main()` uses them they have no effect: `N` from `surf.normal` (keeping th
 two-sided flip), the ambient terms times `surf.occlusion`, `surf.emission` added to the
 result.
 
-New surface fields (alpha...) are added to `Surface`, to the default
-`materialSurface()`, and as inputs of the Material Output node (`outputNode()` in
-`nodelibrary.cpp`).
+New surface fields are added to `Surface`, to the default `materialSurface()`, and as
+inputs of the Material Output node (`outputNode()` in `nodelibrary.cpp`).
+
+### Alpha in mesh.frag
+
+`surf.alpha` arrives with the mode in the entity uniforms: `material.z` is the cutoff
+(clip materials only, 0 otherwise), `material.w` the mode (0 opaque, 1 clip, 2 blend).
+Until `main()` uses them, clip materials look opaque (their shadows already have the
+holes) and blend ones look opaque too:
+
+- **Clip**: `if (surf.alpha < material.z) discard;` near the top of `main()` (harmless
+  for the other modes, whose `z` is 0).
+- **Blend**: the pipeline blends premultiplied color, `result = src.rgb + (1 - src.a) *
+  dst.rgb`, so write `vec4(color * alpha, alpha)` for blend and alpha 1 otherwise. Which
+  terms to scale is a shading choice: light a clear surface still reflects (specular,
+  the environment's reflection) can stay unscaled, so glass keeps its highlights.
+- **Translucent shadows**: blend materials don't write the depth atlases, so `Shadow()`
+  doesn't see them yet. They are in `shadowTranslucency` (see the comment above it in
+  `mesh.frag` and [rendering.md](rendering.md#translucent-shadows)): where the receiver is
+  farther from the light than the stored depth, multiply its light by the stored rgb.
 
 ### Normal maps
 

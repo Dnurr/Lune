@@ -20,11 +20,11 @@ flowchart LR
     subgraph P0["0 &middot; IBL maps (only when the environment changes)"]
         conv[Equirect to cube] --> irr[Irradiance] --> pre[Prefiltered specular]
     end
-    subgraph PS["Shadow atlases (depth only)"]
-        sdir[Directional lights] --> spoint[Point lights, 6 faces each]
+    subgraph PS["Shadow maps"]
+        sdir[Directional atlas] --> spoint[Point atlas, 6 faces per light] --> strans[Translucency map]
     end
     subgraph P1["1 &middot; Scene (HDR, linear, color + depth)"]
-        bg[Environment background] --> grid[World grid] --> meshes[Meshes] --> outline[Selection outline]
+        bg[Environment background] --> grid[World grid] --> meshes[Opaque meshes] --> blend[See-through meshes, far to near] --> outline[Selection outline]
     end
     subgraph P2["2 &middot; Display (8 bit, sRGB)"]
         disp[Linear to sRGB<br/>future tonemapping] --> overlay[2D overlay: gizmo]
@@ -42,10 +42,11 @@ flowchart LR
 | Pass | Target | Shaders | Notes |
 |---|---|---|---|
 | IBL maps | environment cubemaps, BRDF LUT | `cube.vert` + `equirect_to_cube.frag`, `irradiance.frag`, `prefilter.frag`; `fullscreen.vert` + `brdf_lut.frag` | Only when the environment's source changes (the LUT once): see [Image-based lighting](#image-based-lighting). |
-| Shadow atlases | two depth atlases | `shadow.vert` + `shadow.frag` | Every visible mesh's depth from each shadowed light, one tile (viewport) per view; see [Shadows](#shadows). Always cleared. |
+| Shadow atlases | two depth atlases | `shadow.vert` + `shadow.frag`; `shadow_material.vert` + a material's shadow variant for clip materials | Every visible mesh's depth from each shadowed light, one tile (viewport) per view; see [Shadows](#shadows). Always cleared. |
+| Translucency | translucency map (RGBA16F) | `shadow_material.vert` + a blend material's shadow variant | The light blend materials let through, and their nearest depth, per tile; see [Translucent shadows](#translucent-shadows). Always cleared. |
 | Background | scene (RGBA16F) | `background.vert` + `background.frag` | Only when the Environment's `background` is on: the environment in each view ray's direction. |
 | Grid | scene | `fullscreen.vert` + `grid.frag` | Fullscreen triangle; each pixel intersects its view ray with y = 0. No depth write: it's the background. Premultiplied alpha: opaque with its own sky, or only the lines over an environment background. Colors converted to linear on the CPU. |
-| Meshes | scene | `mesh.vert` + `mesh.frag` | Depth tested, two-sided, Cook-Torrance (GGX) shading with the scene lights and the environment maps. One draw per submesh, each with its material slot's pipeline (node material or default) and binding set. Writes linear values (can exceed 1). |
+| Meshes | scene | `mesh.vert` + `mesh.frag` | Depth tested, two-sided, Cook-Torrance (GGX) shading with the scene lights and the environment maps. One draw per submesh, each with its material slot's pipeline (node material or default) and binding set. Writes linear values (can exceed 1). Blend materials last, sorted far to near by entity, with premultiplied-alpha blending and no depth writes. |
 | Outline | scene | `outline.vert` + `outline.frag` | Selected entity only. "Inverted hull": back faces pushed outwards in screen space, front faces culled. Its own binding set per entity (entity uniforms only): on Direct3D 11 a binding set's registers follow the first pipeline that used it, and `mesh.frag` puts the entity block in another register. |
 | Display | display (RGBA8) | `fullscreen.vert` + `display.frag` | Converts the linear HDR scene to sRGB for the screen. Exposure and tonemapping go here: `params.x` = exposure (EV), `params.y` = operator index (0 none, 1 Reinhard, 2 ACES, 3 AgX), set with `Renderer::setDisplayParams()` from the editor's `DisplaySettings`. |
 | Overlay | display | `overlay.vert` + `overlay.frag` | Triangles in widget pixels with premultiplied alpha (the gizmo), in display colors: interface, so exposure/tonemapping never touch it; still blurred behind panels. |
@@ -64,8 +65,10 @@ Resources:
   own buffer (a dynamic buffer must not be updated twice in one frame).
 - Each entity with a mesh has a uniform buffer and binding set per material slot
   (submesh): the same matrices, its material's values and textures. Slot 0's buffer also
-  serves the shadow and outline passes, which draw the whole mesh. Meshes are cached by
-  `Mesh*` and released when no entity uses them any more.
+  serves the shadow and outline passes, which draw the whole mesh (shadows: unless a slot
+  has a clip or blend material; then each slot casts on its own, those with their slot's
+  buffer and textures). Meshes are cached by `Mesh*` and released when no entity uses
+  them any more.
 - Vertices (`MeshVertex`, 48 bytes): position, normal, uv, tangent (xyz + handedness).
   UV (0, 0) is the top-left of an image (glTF convention; OBJ's v is flipped on import).
 - Material textures: bindings 11–18 (`materialTexture0..7`), from `TextureCache`
@@ -79,10 +82,12 @@ Resources:
   light gets one default sun, so older scenes and empty ones stay visible.
 - The environment goes in one more buffer (binding 2: rotation and parameters) and three
   textures (bindings 3–5: irradiance, prefiltered, BRDF LUT), shared by every mesh.
-- Shadows: binding 6 (matrices and parameters) and 7–10 (both atlases, each with a
-  comparison and a raw-depth sampler). The shadow passes have their own binding sets
-  (entity uniforms and the tile's view matrix, at a dynamic offset), since the scene's
-  ones sample the textures they write.
+- Shadows: binding 6 (matrices and parameters), 7–10 (both atlases, each with a
+  comparison and a raw-depth sampler) and 19 (the translucency map). The shadow passes
+  have their own binding sets (entity uniforms and the tile's view matrix, at a dynamic
+  offset), since the scene's ones sample the textures they write. Clip and blend
+  materials cast with all of `mesh.frag`'s bindings (their shader has its declarations),
+  with 1x1 stand-ins for the shadow maps, plus the view at binding 20.
 - Size-dependent textures are recreated on resize. Render pass descriptors are created
   once and reused, so the pipelines built with them stay valid.
 
@@ -161,6 +166,35 @@ without shadows; a scene without lights gets the default sun, which casts them).
   4 texels) and as raw depth (`sampler2D`, nearest), for blocker searches like PCSS.
 - **OpenGL**: the same texture bound with two samplers may not get both sampler states
   there; Direct3D 11 (the default), Vulkan and Metal are fine.
+- **Clip materials** (alpha mode Clip) are drawn into the atlases by their own pipeline,
+  two-sided, running the material to discard the pixels it cuts away: their shadows have
+  the same holes.
+
+### Translucent shadows
+
+Blend materials (glass, smoke) don't write the depth atlases. Their shadows go into the
+**translucency map**: one RGBA16F texture at half the atlases' resolution
+(`TranslucencyScale`), 2048 × 3072: the directional atlas's region at the bottom (in
+QRhi's viewport convention), the point atlas's above it, each with the same tiles as its
+atlas. `translucencyDir` / `translucencyPoint` map an atlas uv to the map's uv.
+
+Cleared to 1 every frame, then every blend caster is drawn in every tile, two-sided, with
+one blend state doing two things:
+
+- **rgb** = dst × src: each layer multiplies the light by what it lets through
+  (`shadow_material.glsl` writes 1 − alpha), so two alpha 0.5 panes let a quarter through,
+  in any order.
+- **a** = min(dst, src): the linear depth of the nearest translucent caster (directional:
+  the atlas depth; point: distance along the face's axis / far), 1 where there's none.
+
+A receiver uses rgb only where it's farther from the light than that depth, so the glass
+doesn't shadow itself and what stands between it and the light isn't darkened. Clear
+pixels (alpha below 1/255) are discarded, so they don't count as the nearest caster. Not
+handled: a receiver between two translucent layers gets both.
+
+Bindings: the map is binding 19 of the mesh binding set. With the 15 samplers before it,
+`mesh.frag` uses 16, the most Direct3D 11 allows per shader stage: a new sampled texture in
+`mesh.frag` needs another one removed or merged first.
 
 ## Glass panels
 
@@ -208,10 +242,11 @@ the root `CMakeLists.txt`.
 
 Uniform blocks use `std140`, binding 0; textures start at binding 1. Meshes use binding 1
 for the lights block, 2 for the environment block, 3–5 for the environment maps, 6 for
-the shadow block, 7–10 for the shadow atlases and 11–18 for the material textures. A
-block shared by several shaders must be declared identically in each (see `mesh.vert`,
-`mesh.frag`, `outline.vert`, `outline.frag`, `shadow.vert`; `mesh.frag` and `background.frag` for
-the environment block).
+the shadow block, 7–10 for the shadow atlases, 11–18 for the material textures and 19 for
+the translucency map (20: the shadow view of `shadow_material.vert`). A block shared by
+several shaders must be declared identically in each (see `mesh.vert`, `mesh.frag`,
+`outline.vert`, `outline.frag`, `shadow.vert`, `shadow_material.vert`; `mesh.frag` and
+`background.frag` for the environment block).
 
 ## Limits (current)
 

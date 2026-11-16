@@ -49,6 +49,7 @@ public:
     const Material *material(MaterialId id) const;
     void setMaterialGraph(MaterialId id, const NodeGraph &graph);
     void setMaterialName(MaterialId id, const QString &name);
+    void setMaterialAlpha(MaterialId id, AlphaMode mode, float cutoff);
     void setEntityMaterial(EntityId id, int slot, MaterialId material);
     QString uniqueMaterialName(const QString &base) const;
 
@@ -58,7 +59,7 @@ signals:
     void entityChanged(EntityId id); // name or transform
     void materialAdded(MaterialId id);
     void materialRemoved(MaterialId id);
-    void materialChanged(MaterialId id); // name or graph
+    void materialChanged(MaterialId id); // name, graph or alpha mode
 
 private:
     Entity *find(EntityId id);

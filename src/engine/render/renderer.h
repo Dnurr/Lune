@@ -125,6 +125,8 @@ private:
         std::unique_ptr<QRhiBuffer> uniforms;
         std::unique_ptr<QRhiShaderResourceBindings> srb; // scene pass (meshBindings)
         TextureSet textures {};                          // what srb binds at 11..18
+        // Shadow passes of a clip or blend material (casterBindings below); made when first needed.
+        std::unique_ptr<QRhiShaderResourceBindings> shadowSrb;
     };
     struct GpuEntity
     {
@@ -141,28 +143,49 @@ private:
     GpuMesh &gpuMesh(const MeshPtr &mesh, QRhiResourceUpdateBatch *rub);
     GpuEntity &gpuEntity(EntityId id, int slotCount);
     GpuSlot newSlot();
-    // Points the slot's binding set at these textures (rebuilt only if they changed).
+    // Points the slot's binding sets at these textures (rebuilt only if they changed).
     void bindTextures(GpuSlot &slot, const TextureSet &textures);
     TextureSet fallbackTextures() const; // white everywhere
     // Bindings of every mesh SRB: entity uniforms, what the whole scene shares, then the
-    // material's textures.
-    QList<QRhiShaderResourceBinding> meshBindings(QRhiBuffer *entityUniforms, const TextureSet &textures) const;
-    // Mesh pipeline with another fragment shader (node materials); same state as m_meshPipe.
-    std::unique_ptr<QRhiGraphicsPipeline> createMeshPipeline(const QShader &fragment);
-    // The pipeline for a material's generated code: compiled on first use, then cached.
-    // nullptr (and `error` set) if it doesn't compile.
-    QRhiGraphicsPipeline *materialPipeline(const QString &code, QString *error);
+    // material's textures. `forCasters`: see ShadowMaps::meshBindings().
+    QList<QRhiShaderResourceBinding> meshBindings(QRhiBuffer *entityUniforms, const TextureSet &textures,
+                                                  bool forCasters = false) const;
+    // The same for a material's shadow passes: shadow maps replaced by stand-ins
+    // (ShadowMaps::meshBindings(true)), plus the shadow view.
+    QList<QRhiShaderResourceBinding> casterBindings(QRhiBuffer *entityUniforms, const TextureSet &textures) const;
+    QRhiShaderResourceBindings *slotShadowSrb(GpuSlot &slot);
 
-    // A node material shader, by generated code. The pipeline is rebuilt after initialize()
-    // (it references the scene render pass); the compiled shader is kept.
+    // A node material shader, by generated code. Scene pipelines are rebuilt after
+    // initialize() (they reference the scene render pass); compiled shaders are kept. The
+    // shadow variant is compiled only for materials that need it (clip, blend).
     struct MaterialShader
     {
         QShader fragment;
         QString error;
-        std::unique_ptr<QRhiGraphicsPipeline> pipeline;
+        std::unique_ptr<QRhiGraphicsPipeline> pipeline;      // opaque and clip
+        std::unique_ptr<QRhiGraphicsPipeline> blendPipeline; // blend: blended over the scene, no depth writes
+        bool shadowCompiled = false;
+        QShader shadowFragment;
+        QString shadowError;
+        std::unique_ptr<QRhiGraphicsPipeline> clipShadowPipeline, translucentShadowPipeline;
     };
+    // GLSL (for the backend in use) -> shader, or an invalid one and `error`.
+    QShader compileFragment(const QString &source, const QString &name, QString *error) const;
+    // Mesh pipeline with another fragment shader (node materials); same state as m_meshPipe,
+    // or blended (premultiplied alpha, depth tested but not written).
+    std::unique_ptr<QRhiGraphicsPipeline> createMeshPipeline(const QShader &fragment, bool blend);
+    // The shader for a material's generated code: compiled on first use, then cached.
+    MaterialShader &materialShader(const QString &code);
+    // Its scene pipeline; nullptr (and `error` set) if it doesn't compile.
+    QRhiGraphicsPipeline *scenePipeline(MaterialShader &shader, bool blend, QString *error);
+    // Its shadow pipeline (clip: depth atlases, translucent: translucency map); nullptr
+    // (and `error` set) if it doesn't compile.
+    QRhiGraphicsPipeline *shadowPipeline(MaterialShader &shader, const QString &code, bool translucent, QString *error);
+
     std::unordered_map<QString, MaterialShader> m_materialShaders;
-    QString m_meshFragSource; // mesh.frag as GLSL, with the material markers
+    QString m_meshFragSource;      // mesh.frag as GLSL, with the material markers
+    QString m_shadowMaterialSource; // shadow_material.glsl
+    std::unique_ptr<QRhiShaderResourceBindings> m_shadowLayoutSrb; // layout of the slots' shadowSrb
     QHash<MaterialId, QString> m_materialErrors;
     bool m_materialErrorsChanged = false;
 

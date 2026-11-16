@@ -185,6 +185,10 @@ GltfMaterial readMaterial(const cgltf_data *data, const cgltf_material &m, const
     if (m.has_emissive_strength)
         g.emissiveFactor *= m.emissive_strength.emissive_strength;
     g.emissiveTexture = imageReference(data, m.emissive_texture, path);
+    g.alphaMode = m.alpha_mode == cgltf_alpha_mode_mask    ? GltfMaterial::Mask
+                  : m.alpha_mode == cgltf_alpha_mode_blend ? GltfMaterial::Blend
+                                                           : GltfMaterial::Opaque;
+    g.alphaCutoff = m.alpha_cutoff;
     return g;
 }
 

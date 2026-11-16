@@ -168,6 +168,8 @@ Optional root array `materials`, the scene's node materials:
 | `graph.nodes[].type` | A node type of `material_nodes.glsl` (`node_<type>`), or `"output"`. |
 | `graph.nodes[].values` | Unlinked input values by port name: a number, `[x, y]`, `[r, g, b]` (colors sRGB 0..1), or for images `{ "image": path, "linear": bool }` (path relative to the scene file like meshes; `file.glb#image2` for an image inside a glTF; `linear`: Data instead of Color). Missing = the type's default. |
 | `graph.links[]` | `from` an output `[node, port]` to an input `[node, port]`; links that would form a loop are dropped. |
+| `alphaMode` | Optional: `"opaque"` (default), `"clip"` or `"blend"`: how the Material Output's `alpha` is used (see [materials.md](materials.md#alpha)). |
+| `alphaCutoff` | Optional, 0..1, default 0.5: with `"clip"`, pixels with alpha below it are cut away. Written only for `clip` and `blend`. |
 
 An entity referencing a missing material loads without it (with a warning). Material
 slots follow the submeshes of the mesh file, in its order (for glTF: by material index).

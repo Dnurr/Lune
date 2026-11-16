@@ -175,4 +175,13 @@ QString insertInto(const QString &fragmentSource, const QString &code)
     const int afterBegin = begin + BeginMarker.size();
     return fragmentSource.left(afterBegin) + QLatin1Char('\n') + code + fragmentSource.mid(end);
 }
+
+QString shadowSource(const QString &fragmentSource, const QString &code, const QString &shadowMain)
+{
+    const int begin = fragmentSource.indexOf(BeginMarker);
+    const int end = fragmentSource.indexOf(EndMarker);
+    if (begin < 0 || end < begin)
+        return QString();
+    return fragmentSource.left(begin) + code + QLatin1Char('\n') + shadowMain;
+}
 } // namespace MaterialCompiler

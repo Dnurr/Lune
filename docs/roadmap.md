@@ -70,7 +70,10 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 - [x] `main()` uses `surf.normal`, `surf.occlusion`, `surf.emission` (Author)
 - [x] Normal Map node (`node_normal_map`, see docs/materials.md) (Author)
 - [ ] Shading nodes in `material_nodes.glsl`: noise, fresnel, triplanar, layering... (Author)
-- [ ] Alpha: masks and blending (both)
+- [x] Alpha modes (opaque, clip, blend) on materials, Material Output `alpha`, glTF alpha import, blended pipelines sorted far to near (Claude)
+- [x] Clip materials cut their shadows; translucency map with the light blend materials let through (Claude)
+- [ ] `main()`: discard below the cutoff, premultiplied output for blend (Author)
+- [ ] Translucent shadows in `Shadow()` from `shadowTranslucency` (Author)
 - [ ] OBJ materials (.mtl) to node graphs (Claude)
 
 ### Color management

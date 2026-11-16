@@ -69,6 +69,11 @@ CompiledMaterial compile(const NodeGraph &graph, const NodeLibrary &library);
 // Empty if the markers are missing.
 QString insertInto(const QString &fragmentSource, const QString &code);
 
+// The shadow pass shader of a material: what `fragmentSource` (mesh.frag) declares above the
+// begin marker, `code`, then `shadowMain` (shadow_material.glsl, with its own main()).
+// Empty if the markers are missing.
+QString shadowSource(const QString &fragmentSource, const QString &code, const QString &shadowMain);
+
 // Value of an input: its own, or the type's default.
 QVariant inputValue(const GraphNode &node, const PortDesc &port);
 } // namespace MaterialCompiler

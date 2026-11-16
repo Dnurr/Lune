@@ -5,6 +5,7 @@
 
 class NodeEditorView;
 class QComboBox;
+class QDoubleSpinBox;
 class QPointF;
 struct TextureValue;
 class QLabel;
@@ -19,7 +20,8 @@ class Viewport;
 // Node editor for materials (the Shading workspace):
 //   header      the material shown: the selected entity's, chosen from the scene's library
 //               (choosing one assigns it to the selected entity), + for a new one, rename;
-//               a slot chooser when the entity's mesh has several submeshes (materials)
+//               a slot chooser when the entity's mesh has several submeshes (materials);
+//               the material's alpha mode (opaque, clip with its cutoff, blend)
 //   canvas      NodeEditorView on the material's graph
 //   properties  values of the selected node's unlinked inputs (images: file, color/data)
 //   status      why the material can't be drawn (graph or shader error, images that can't
@@ -42,6 +44,7 @@ private:
     void showMaterial(MaterialId id);
     void refreshMaterials();       // combo contents
     void refreshGraph();
+    void refreshAlpha();
     void refreshStatus();
     void rebuildProperties();
     void newMaterial();
@@ -63,6 +66,10 @@ private:
 
     QComboBox *m_combo = nullptr;
     QComboBox *m_slotCombo = nullptr;
+    QWidget *m_alphaRow = nullptr;
+    QComboBox *m_alphaMode = nullptr;
+    QWidget *m_cutoffLabel = nullptr;
+    QDoubleSpinBox *m_cutoff = nullptr;
     QToolButton *m_new = nullptr;
     QToolButton *m_rename = nullptr;
     QLabel *m_status = nullptr;

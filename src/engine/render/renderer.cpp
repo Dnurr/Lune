@@ -9,6 +9,7 @@
 #include <rhi/qrhi.h>
 #include <rhi/qshaderbaker.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstring>
@@ -20,6 +21,7 @@ constexpr float kBlurRadius = 2;
 constexpr int kGridUbufSize = 64 + 8 * 16;
 constexpr int kCompositeUbufSize = 2 * 16 + Renderer::MaxGlassRects * 16;
 // See mesh.vert; mesh.frag adds the node material values at the end.
+constexpr int kEntityMaterialOffset = 3 * 64 + 4 * 16; // vec4 material
 constexpr int kEntityParamsOffset = 3 * 64 + 5 * 16; // materialParams[0]
 constexpr int kEntityUbufSize = kEntityParamsOffset + MaterialCompiler::MaxParams * 16;
 constexpr int kOverlayVertexSize = int(sizeof(OverlayVertex));
@@ -156,6 +158,12 @@ void Renderer::initialize(QRhi *rhi, QRhiRenderTarget *target)
             m_meshLayoutSrb->setBindings(b.cbegin(), b.cend());
         }
         m_meshLayoutSrb->create();
+        m_shadowLayoutSrb.reset(m_rhi->newShaderResourceBindings());
+        {
+            const auto b = casterBindings(m_layoutUbuf.get(), fallbackTextures());
+            m_shadowLayoutSrb->setBindings(b.cbegin(), b.cend());
+        }
+        m_shadowLayoutSrb->create();
         m_outlineLayoutSrb.reset(m_rhi->newShaderResourceBindings());
         m_outlineLayoutSrb->setBindings({ B::uniformBuffer(0, stages, m_layoutUbuf.get()) });
         m_outlineLayoutSrb->create();
@@ -306,8 +314,10 @@ void Renderer::createPipelines(QRhiRenderTarget *target)
     m_gridPipe = pipeline(fullscreen, QStringLiteral("grid.frag"), m_gridSrb.get(), m_sceneRp.get(), 1, grid);
     m_meshPipe = pipeline(loadShader(QStringLiteral("mesh.vert")), QStringLiteral("mesh.frag"), m_meshLayoutSrb.get(),
                           m_sceneRp.get(), 1, mesh);
-    for (auto &entry : m_materialShaders)
-        entry.second.pipeline.reset(); // recreated on next use, for the new render pass
+    for (auto &entry : m_materialShaders) { // recreated on next use, for the new render pass
+        entry.second.pipeline.reset();
+        entry.second.blendPipeline.reset();
+    }
     m_outlinePipe = pipeline(loadShader(QStringLiteral("outline.vert")), QStringLiteral("outline.frag"),
                              m_outlineLayoutSrb.get(), m_sceneRp.get(), 1, outline);
     m_displayPipe = pipeline(fullscreen, QStringLiteral("display.frag"), m_displaySrb.get(), m_ldrRp.get(), 1);
@@ -341,6 +351,7 @@ void Renderer::release()
     m_compositeSrb.reset();
     m_overlaySrb.reset();
     m_meshLayoutSrb.reset();
+    m_shadowLayoutSrb.reset();
     m_outlineLayoutSrb.reset();
     m_backgroundSrb.reset();
     for (auto &s : m_blurSrbs)
@@ -417,6 +428,22 @@ void Renderer::bindTextures(GpuSlot &slot, const TextureSet &textures)
     const auto bindings = meshBindings(slot.uniforms.get(), textures);
     slot.srb->setBindings(bindings.cbegin(), bindings.cend());
     slot.srb->create();
+    if (slot.shadowSrb) {
+        const auto shadow = casterBindings(slot.uniforms.get(), textures);
+        slot.shadowSrb->setBindings(shadow.cbegin(), shadow.cend());
+        slot.shadowSrb->create();
+    }
+}
+
+QRhiShaderResourceBindings *Renderer::slotShadowSrb(GpuSlot &slot)
+{
+    if (!slot.shadowSrb) {
+        slot.shadowSrb.reset(m_rhi->newShaderResourceBindings());
+        const auto bindings = casterBindings(slot.uniforms.get(), slot.textures);
+        slot.shadowSrb->setBindings(bindings.cbegin(), bindings.cend());
+        slot.shadowSrb->create();
+    }
+    return slot.shadowSrb.get();
 }
 
 Renderer::TextureSet Renderer::fallbackTextures() const
@@ -452,7 +479,7 @@ Renderer::GpuEntity &Renderer::gpuEntity(EntityId id, int slotCount)
     return g;
 }
 
-std::unique_ptr<QRhiGraphicsPipeline> Renderer::createMeshPipeline(const QShader &fragment)
+std::unique_ptr<QRhiGraphicsPipeline> Renderer::createMeshPipeline(const QShader &fragment, bool blend)
 {
     std::unique_ptr<QRhiGraphicsPipeline> p(m_rhi->newGraphicsPipeline());
     p->setShaderStages({ { QRhiShaderStage::Vertex, loadShader(QStringLiteral("mesh.vert")) },
@@ -462,13 +489,54 @@ std::unique_ptr<QRhiGraphicsPipeline> Renderer::createMeshPipeline(const QShader
     p->setRenderPassDescriptor(m_sceneRp.get());
     p->setCullMode(QRhiGraphicsPipeline::None); // like m_meshPipe
     p->setDepthTest(true);
-    p->setDepthWrite(true);
+    p->setDepthWrite(!blend); // see-through surfaces don't hide what's drawn after them
+    if (blend) {
+        QRhiGraphicsPipeline::TargetBlend b;
+        b.enable = true;
+        b.srcColor = QRhiGraphicsPipeline::One; // premultiplied alpha (see Surface.alpha in mesh.frag)
+        b.dstColor = QRhiGraphicsPipeline::OneMinusSrcAlpha;
+        b.srcAlpha = QRhiGraphicsPipeline::One;
+        b.dstAlpha = QRhiGraphicsPipeline::OneMinusSrcAlpha;
+        p->setTargetBlends({ b });
+    }
     if (!p->create())
         return nullptr;
     return p;
 }
 
-QRhiGraphicsPipeline *Renderer::materialPipeline(const QString &code, QString *error)
+QShader Renderer::compileFragment(const QString &source, const QString &name, QString *error) const
+{
+    // Compiled for the backend in use only: much faster than every target.
+    QShaderBaker baker;
+    QList<QShaderBaker::GeneratedShader> targets;
+    switch (m_rhi->backend()) {
+    case QRhi::Vulkan:
+        targets.append({ QShader::SpirvShader, QShaderVersion(100) });
+        break;
+    case QRhi::D3D11:
+    case QRhi::D3D12:
+        targets.append({ QShader::HlslShader, QShaderVersion(50) });
+        break;
+    case QRhi::Metal:
+        targets.append({ QShader::MslShader, QShaderVersion(12) });
+        break;
+    case QRhi::OpenGLES2:
+        targets.append({ QShader::GlslShader, QShaderVersion(330) });
+        targets.append({ QShader::GlslShader, QShaderVersion(300, QShaderVersion::GlslEs) });
+        break;
+    default:
+        break;
+    }
+    baker.setGeneratedShaders(targets);
+    baker.setGeneratedShaderVariants({ QShader::StandardShader });
+    baker.setSourceString(source.toUtf8(), QShader::FragmentStage, name);
+    QShader shader = baker.bake();
+    if (!shader.isValid())
+        *error = QStringLiteral("Shader error: ") + baker.errorMessage().trimmed();
+    return shader;
+}
+
+Renderer::MaterialShader &Renderer::materialShader(const QString &code)
 {
     auto it = m_materialShaders.find(code);
     if (it == m_materialShaders.end()) {
@@ -479,47 +547,50 @@ QRhiGraphicsPipeline *Renderer::materialPipeline(const QString &code, QString *e
                 m_meshFragSource = QString::fromUtf8(f.readAll());
         }
         const QString source = MaterialCompiler::insertInto(m_meshFragSource, code);
-        if (source.isEmpty()) {
+        if (source.isEmpty())
             s.error = QStringLiteral("mesh.frag has no material markers (//@material-begin, //@material-end).");
-        } else {
-            // Compiled for the backend in use only: much faster than every target.
-            QShaderBaker baker;
-            QList<QShaderBaker::GeneratedShader> targets;
-            switch (m_rhi->backend()) {
-            case QRhi::Vulkan:
-                targets.append({ QShader::SpirvShader, QShaderVersion(100) });
-                break;
-            case QRhi::D3D11:
-            case QRhi::D3D12:
-                targets.append({ QShader::HlslShader, QShaderVersion(50) });
-                break;
-            case QRhi::Metal:
-                targets.append({ QShader::MslShader, QShaderVersion(12) });
-                break;
-            case QRhi::OpenGLES2:
-                targets.append({ QShader::GlslShader, QShaderVersion(330) });
-                targets.append({ QShader::GlslShader, QShaderVersion(300, QShaderVersion::GlslEs) });
-                break;
-            default:
-                break;
-            }
-            baker.setGeneratedShaders(targets);
-            baker.setGeneratedShaderVariants({ QShader::StandardShader });
-            baker.setSourceString(source.toUtf8(), QShader::FragmentStage, QStringLiteral("material"));
-            s.fragment = baker.bake();
-            if (!s.fragment.isValid())
-                s.error = QStringLiteral("Shader error: ") + baker.errorMessage().trimmed();
-        }
+        else
+            s.fragment = compileFragment(source, QStringLiteral("material"), &s.error);
         it = m_materialShaders.emplace(code, std::move(s)).first;
     }
-    MaterialShader &s = it->second;
-    if (s.error.isEmpty() && !s.pipeline) {
-        s.pipeline = createMeshPipeline(s.fragment);
-        if (!s.pipeline)
+    return it->second;
+}
+
+QRhiGraphicsPipeline *Renderer::scenePipeline(MaterialShader &s, bool blend, QString *error)
+{
+    auto &pipeline = blend ? s.blendPipeline : s.pipeline;
+    if (s.error.isEmpty() && !pipeline) {
+        pipeline = createMeshPipeline(s.fragment, blend);
+        if (!pipeline)
             s.error = QStringLiteral("The material's pipeline couldn't be created.");
     }
     *error = s.error;
-    return s.error.isEmpty() ? s.pipeline.get() : nullptr;
+    return s.error.isEmpty() ? pipeline.get() : nullptr;
+}
+
+QRhiGraphicsPipeline *Renderer::shadowPipeline(MaterialShader &s, const QString &code, bool translucent, QString *error)
+{
+    if (!s.shadowCompiled) {
+        s.shadowCompiled = true;
+        if (m_shadowMaterialSource.isEmpty()) {
+            QFile f(QStringLiteral(":/shadersrc/shadow_material.glsl"));
+            if (f.open(QIODevice::ReadOnly))
+                m_shadowMaterialSource = QString::fromUtf8(f.readAll());
+        }
+        const QString source = MaterialCompiler::shadowSource(m_meshFragSource, code, m_shadowMaterialSource);
+        if (source.isEmpty() || m_shadowMaterialSource.isEmpty())
+            s.shadowError = QStringLiteral("The material's shadow shader can't be built.");
+        else
+            s.shadowFragment = compileFragment(source, QStringLiteral("material shadow"), &s.shadowError);
+    }
+    auto &pipeline = translucent ? s.translucentShadowPipeline : s.clipShadowPipeline;
+    if (s.shadowError.isEmpty() && !pipeline) {
+        pipeline = m_shadows.createMaterialPipeline(s.shadowFragment, m_shadowLayoutSrb.get(), translucent);
+        if (!pipeline)
+            s.shadowError = QStringLiteral("The material's shadow pipeline couldn't be created.");
+    }
+    *error = s.shadowError;
+    return s.shadowError.isEmpty() ? pipeline.get() : nullptr;
 }
 
 bool Renderer::takeMaterialErrorsChanged()
@@ -529,7 +600,8 @@ bool Renderer::takeMaterialErrorsChanged()
     return changed;
 }
 
-QList<QRhiShaderResourceBinding> Renderer::meshBindings(QRhiBuffer *entityUniforms, const TextureSet &textures) const
+QList<QRhiShaderResourceBinding> Renderer::meshBindings(QRhiBuffer *entityUniforms, const TextureSet &textures,
+                                                        bool forCasters) const
 {
     using B = QRhiShaderResourceBinding;
     const auto fs = B::FragmentStage;
@@ -539,9 +611,16 @@ QList<QRhiShaderResourceBinding> Renderer::meshBindings(QRhiBuffer *entityUnifor
                                            B::sampledTexture(3, fs, m_ibl.irradiance(), m_ibl.cubeSampler()),
                                            B::sampledTexture(4, fs, m_ibl.prefiltered(), m_ibl.cubeSampler()),
                                            B::sampledTexture(5, fs, m_ibl.brdfLut(), m_ibl.lutSampler()) };
-    b.append(m_shadows.meshBindings()); // 6..10
+    b.append(m_shadows.meshBindings(forCasters)); // 6..10, 19
     for (int i = 0; i < MaterialCompiler::MaxTextures; ++i) // 11..18
         b.append(B::sampledTexture(MaterialCompiler::FirstTextureBinding + i, fs, textures[size_t(i)], m_textures.sampler()));
+    return b;
+}
+
+QList<QRhiShaderResourceBinding> Renderer::casterBindings(QRhiBuffer *entityUniforms, const TextureSet &textures) const
+{
+    QList<QRhiShaderResourceBinding> b = meshBindings(entityUniforms, textures, true);
+    b.append(m_shadows.materialViewBinding());
     return b;
 }
 
@@ -662,10 +741,8 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
     struct Draw
     {
         GpuMesh *mesh;
-        QRhiShaderResourceBindings *shadowSrb;
         QRhiShaderResourceBindings *outlineSrb;
         bool selected;
-        bool mirrored; // negative scale: the model matrix flips the triangles' winding
     };
     struct SurfaceDraw
     {
@@ -673,9 +750,12 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         quint32 firstIndex, indexCount;
         QRhiShaderResourceBindings *srb;
         QRhiGraphicsPipeline *pipe; // m_meshPipe, or a node material's
+        bool blend;                 // see-through: drawn after the others, far to near
+        float distance2;            // squared distance from the camera to the entity's center
     };
     std::vector<Draw> draws;
     std::vector<SurfaceDraw> surfaces;
+    std::vector<ShadowMaps::Caster> casters;
     int boundTextures = 0;
     QVector3D boundsMin(1e30f, 1e30f, 1e30f), boundsMax(-1e30f, -1e30f, -1e30f); // of every drawn mesh, world space
 
@@ -683,8 +763,11 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
     struct FrameMaterial
     {
         CompiledMaterial compiled;
-        QRhiGraphicsPipeline *pipe = nullptr;
+        QRhiGraphicsPipeline *pipe = nullptr;       // scene pass
+        QRhiGraphicsPipeline *shadowPipe = nullptr; // clip / blend; nullptr: drawn like an opaque one
         const NodeGraph *graph = nullptr;
+        AlphaMode alphaMode = AlphaMode::Opaque;
+        float alphaCutoff = 0.5f;
     };
     QHash<MaterialId, FrameMaterial> frameMaterials;
     QHash<MaterialId, QString> errors;
@@ -696,10 +779,20 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         if (it == frameMaterials.end()) {
             FrameMaterial fm;
             fm.graph = &m->graph;
+            fm.alphaMode = m->alphaMode;
+            fm.alphaCutoff = m->alphaCutoff;
             fm.compiled = MaterialCompiler::compile(m->graph, NodeLibrary::instance());
             QString error = fm.compiled.error;
-            if (fm.compiled.ok())
-                fm.pipe = materialPipeline(fm.compiled.code, &error);
+            if (fm.compiled.ok()) {
+                MaterialShader &shader = materialShader(fm.compiled.code);
+                fm.pipe = scenePipeline(shader, fm.alphaMode == AlphaMode::Blend, &error);
+                if (fm.pipe && fm.alphaMode != AlphaMode::Opaque) {
+                    QString shadowError;
+                    fm.shadowPipe = shadowPipeline(shader, fm.compiled.code, fm.alphaMode == AlphaMode::Blend, &shadowError);
+                    if (!shadowError.isEmpty())
+                        error = QStringLiteral("Shadows: ") + shadowError; // still drawn, with opaque shadows
+                }
+            }
             errors.insert(id, error);
             it = frameMaterials.insert(id, std::move(fm));
         }
@@ -732,6 +825,21 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
                 v[0] = eye.x(); v[1] = eye.y(); v[2] = eye.z();
                 v += 4;
                 v[0] = e.roughness; v[1] = e.metallic;
+
+                const QVector3D center = model.map((e.mesh->boundsMin + e.mesh->boundsMax) * 0.5f);
+                const float distance2 = (center - eye).lengthSquared();
+                const bool mirrored = model.determinant() < 0.0;
+                // Shadows: the whole mesh in one draw, unless some slot has a clip or blend
+                // material; then each slot on its own.
+                struct SlotShadow
+                {
+                    quint32 firstIndex, indexCount;
+                    QRhiGraphicsPipeline *pipe; // nullptr: depth only
+                    QRhiShaderResourceBindings *srb;
+                    bool translucent;
+                };
+                std::vector<SlotShadow> slotShadows;
+                bool slotShadowsNeeded = false;
 
                 const NodeLibrary &library = NodeLibrary::instance();
                 for (int slot = 0; slot < slotCount; ++slot) {
@@ -777,16 +885,40 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
                             if (!value.image.isEmpty())
                                 ++boundTextures;
                         }
+                        // material.zw: alpha cutoff (clip only), alpha mode
+                        v = data + kEntityMaterialOffset / 4;
+                        v[2] = fm->alphaMode == AlphaMode::Clip ? fm->alphaCutoff : 0.0f;
+                        v[3] = float(int(fm->alphaMode));
                     }
                     rub->updateDynamicBuffer(gs.uniforms.get(), 0, kEntityUbufSize, data);
                     bindTextures(gs, textures);
 
                     const Submesh &sm = e.mesh->submeshes[size_t(slot)];
-                    if (sm.indexCount > 0)
-                        surfaces.push_back({ &gm, sm.firstIndex, sm.indexCount, gs.srb.get(), fm ? fm->pipe : m_meshPipe.get() });
+                    const bool blend = fm && fm->alphaMode == AlphaMode::Blend;
+                    if (sm.indexCount > 0) {
+                        surfaces.push_back({ &gm, sm.firstIndex, sm.indexCount, gs.srb.get(), fm ? fm->pipe : m_meshPipe.get(),
+                                             blend, distance2 });
+                        QRhiGraphicsPipeline *shadowPipe = fm ? fm->shadowPipe : nullptr;
+                        slotShadows.push_back({ sm.firstIndex, sm.indexCount, shadowPipe,
+                                                shadowPipe ? slotShadowSrb(gs) : nullptr, shadowPipe && blend });
+                        slotShadowsNeeded |= shadowPipe != nullptr;
+                    }
                 }
 
-                draws.push_back({ &gm, ge.shadowSrb.get(), ge.outlineSrb.get(), e.id == selected, model.determinant() < 0.0 });
+                if (!slotShadowsNeeded) {
+                    casters.push_back({ gm.vertices.get(), gm.indices.get(), 0, gm.indexCount, ge.shadowSrb.get(),
+                                        e.mesh->closed, mirrored });
+                } else {
+                    for (const SlotShadow &s : slotShadows) {
+                        if (s.pipe)
+                            casters.push_back({ gm.vertices.get(), gm.indices.get(), s.firstIndex, s.indexCount, s.srb,
+                                                false, mirrored, s.pipe, s.translucent });
+                        else
+                            casters.push_back({ gm.vertices.get(), gm.indices.get(), s.firstIndex, s.indexCount,
+                                                ge.shadowSrb.get(), e.mesh->closed, mirrored });
+                    }
+                }
+                draws.push_back({ &gm, ge.outlineSrb.get(), e.id == selected });
 
                 const QVector3D &lo = e.mesh->boundsMin, &hi = e.mesh->boundsMax;
                 for (int c = 0; c < 8; ++c) {
@@ -912,22 +1044,21 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
             m_stats.triangles += d.mesh->indexCount / 3;
         }
     }
-    for (const Draw &d : draws) { // once per shadow map tile
+    for (const ShadowMaps::Caster &c : casters) { // once per shadow map tile
         m_stats.drawCalls += m_shadows.viewCount();
-        m_stats.triangles += quint64(d.mesh->indexCount / 3) * quint64(m_shadows.viewCount());
+        m_stats.triangles += quint64(c.indexCount / 3) * quint64(m_shadows.viewCount());
     }
 
-    // 0. Shadow atlases: every mesh's depth from each shadowed light
-    {
-        std::vector<ShadowMaps::Caster> casters;
-        casters.reserve(draws.size());
-        for (const Draw &d : draws)
-            casters.push_back({ d.mesh->vertices.get(), d.mesh->indices.get(), d.mesh->indexCount, d.shadowSrb,
-                                d.mesh->mesh->closed, d.mirrored });
-        m_shadows.render(cb, rub, casters);
-    }
+    // 0. Shadow atlases (every mesh's depth from each shadowed light), translucency map
+    m_shadows.render(cb, rub, casters);
 
-    // 1. Scene (HDR, linear): environment and grid as background (no depth), meshes, selection outline
+    // 1. Scene (HDR, linear): environment and grid as background (no depth), opaque meshes,
+    //    see-through ones far to near, selection outline
+    std::stable_sort(surfaces.begin(), surfaces.end(), [](const SurfaceDraw &a, const SurfaceDraw &b) {
+        if (a.blend != b.blend)
+            return !a.blend;
+        return a.blend && a.distance2 > b.distance2;
+    });
     cb->beginPass(m_sceneRt.get(), black, { 1.0f, 0 });
     if (showBackground)
         fullscreen(m_backgroundPipe.get(), m_backgroundSrb.get(), m_pixelSize);

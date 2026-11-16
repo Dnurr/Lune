@@ -15,7 +15,8 @@ layout(std140, binding = 0) uniform buf {
     vec4 outline;
     vec4 viewport;
     vec4 cameraPos;
-    vec4 material;  // x: roughness, y: metallic (0..1)
+    vec4 material;  // x: roughness, y: metallic (0..1), z: alpha cutoff (Clip materials; 0 otherwise),
+                    // w: alpha mode of the node material (0 opaque, 1 clip, 2 blend; see Surface.alpha)
     vec4 materialParams[MAX_MATERIAL_PARAMS]; // node material: values typed into its nodes (see materialSurface())
 };
 
@@ -86,6 +87,8 @@ layout(std140, binding = 6) uniform shadowBuf {
     vec4 shadowAtlas;                                 // xy: texel size (uv) of the directional atlas, zw: point atlas
     vec4 cascadeSplits;                               // far distance of cascades 0..3 along the camera's view
     vec4 cameraForward;                               // xyz: the camera's view direction (unit)
+    vec4 translucencyDir;                             // directional atlas uv -> shadowTranslucency uv: uv * xy + zw
+    vec4 translucencyPoint;                           // point atlas uv -> shadowTranslucency uv: uv * xy + zw
 };
 // Each atlas twice. The comparison sampler gives the filtered shadow test:
 //     texture(dirShadowMap, vec3(uv, depth))  ->  1 = lit (depth <= the stored one), 0 = in shadow,
@@ -96,6 +99,22 @@ layout(binding = 7) uniform sampler2DShadow dirShadowMap;
 layout(binding = 8) uniform sampler2D dirShadowDepth;
 layout(binding = 9) uniform sampler2DShadow pointShadowMap;
 layout(binding = 10) uniform sampler2D pointShadowDepth;
+
+// Translucent shadows. Blend materials (glass, smoke) don't write the depth atlases: each
+// shadowed light's view of them goes into shadowTranslucency instead, at half resolution,
+// with the same tiles as the atlases (one region for each atlas: map the atlas uv p.xy
+// with translucencyDir / translucencyPoint above). Per texel:
+//   rgb  the fraction of the light that gets through them, multiplied over every layer
+//        (1 = all of it, i.e. no translucent caster; an alpha 0.5 surface: 0.5)
+//   a    linear depth of the nearest translucent caster, 0..1 (1 = none)
+//          directional: the same depth as the atlas, compare it with p.z
+//          point:       distance along the face's axis / far, i.e. a * far is comparable
+//                       with the receiver's distance along the axis (dReceiver)
+// Only a receiver farther from the light than that depth is behind them: its light is
+// multiplied by rgb (the translucent surface itself, or a vase standing on a glass table,
+// must not be). Linear filtering, like the comparison samplers: average a few samples
+// for soft edges. Opaque shadows still come from the depth atlases.
+layout(binding = 19) uniform sampler2D shadowTranslucency;
 
 // Direction in the world -> direction to sample the environment maps with.
 vec3 toEnvironment(vec3 dir)
@@ -136,6 +155,14 @@ struct Surface
     vec3 normal;     // world space, normalized (normal maps bend it); default: normalize(v_normal)
     float occlusion; // ambient occlusion, 0..1 (1 = none): meant for the ambient (environment) light
     vec3 emission;   // linear, added to the outgoing light
+    float alpha;     // 0..1, used by the material's alpha mode (material.w):
+                     //   opaque (0): ignore it, write alpha 1
+                     //   clip (1):   discard the pixel where alpha < material.z, the rest is opaque
+                     //   blend (2):  see-through: the pipeline blends PREMULTIPLIED color,
+                     //               result = fragColor.rgb + (1 - fragColor.a) * what's behind,
+                     //               so write vec4(color * alpha, alpha) (light that a clear
+                     //               surface still reflects, e.g. specular, may stay unscaled)
+                     // Discarding where alpha < material.z works for every mode (z is 0 unless clip).
 };
 //@material-begin
 Surface materialSurface()
@@ -147,6 +174,7 @@ Surface materialSurface()
     s.normal = normalize(v_normal);
     s.occlusion = 1.0;
     s.emission = vec3(0.0);
+    s.alpha = 1.0;
     return s;
 }
 //@material-end

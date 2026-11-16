@@ -175,6 +175,27 @@ private:
     QElapsedTimer m_lastEdit;
 };
 
+// A material's alpha mode and cutoff. Cutoff edits close together (dragging the value)
+// merge into one undo step.
+class SetMaterialAlphaCommand : public QUndoCommand
+{
+public:
+    SetMaterialAlphaCommand(Scene *scene, MaterialId material, AlphaMode mode, float cutoff);
+
+    void redo() override;
+    void undo() override;
+
+    int id() const override { return 5; }
+    bool mergeWith(const QUndoCommand *other) override;
+
+private:
+    Scene *m_scene;
+    MaterialId m_material;
+    AlphaMode m_beforeMode = AlphaMode::Opaque, m_afterMode;
+    float m_beforeCutoff = 0.5f, m_afterCutoff;
+    QElapsedTimer m_lastEdit;
+};
+
 class RenameMaterialCommand : public QUndoCommand
 {
 public:

@@ -94,6 +94,48 @@ NodesPanel::NodesPanel(Scene *scene, Selection *selection, QUndoStack *undoStack
     m_slotCombo->hide();
     column->addWidget(m_slotCombo);
 
+    // Alpha mode of the material: how the Material Output's alpha is used.
+    m_alphaRow = new QWidget(body);
+    auto *alpha = new QHBoxLayout(m_alphaRow);
+    alpha->setContentsMargins(3, 0, 3, 0);
+    alpha->setSpacing(6);
+    auto *alphaLabel = new QLabel(QStringLiteral("alpha"), m_alphaRow);
+    m_alphaMode = new QComboBox(m_alphaRow);
+    m_alphaMode->addItem(QStringLiteral("Opaque"));
+    m_alphaMode->addItem(QStringLiteral("Clip"));
+    m_alphaMode->addItem(QStringLiteral("Blend"));
+    m_alphaMode->setToolTip(QStringLiteral("How the Material Output's alpha is used:\n"
+                                           "Opaque: ignored\n"
+                                           "Clip: pixels below the cutoff are cut away (leaves, fences)\n"
+                                           "Blend: see-through (glass); its shadow lets 1 - alpha of the light through"));
+    auto *cutoffLabel = new DragLabel(QStringLiteral("cutoff"), m_alphaRow);
+    m_cutoffLabel = cutoffLabel;
+    m_cutoff = new QDoubleSpinBox(m_alphaRow);
+    m_cutoff->setButtonSymbols(QAbstractSpinBox::NoButtons);
+    m_cutoff->setDecimals(3);
+    m_cutoff->setRange(0.0, 1.0);
+    m_cutoff->setKeyboardTracking(false);
+    m_cutoff->setToolTip(QStringLiteral("Pixels with alpha below this are cut away"));
+    alpha->addWidget(alphaLabel);
+    alpha->addWidget(m_alphaMode, 1);
+    alpha->addWidget(cutoffLabel);
+    alpha->addWidget(m_cutoff, 1);
+    m_alphaRow->hide();
+    column->addWidget(m_alphaRow);
+    connect(m_alphaMode, &QComboBox::activated, this, [this](int index) {
+        const Material *m = m_scene->material(m_material);
+        if (m && AlphaMode(index) != m->alphaMode)
+            m_undo->push(new SetMaterialAlphaCommand(m_scene, m_material, AlphaMode(index), m->alphaCutoff));
+    });
+    connect(m_cutoff, &QDoubleSpinBox::valueChanged, this, [this](double value) {
+        const Material *m = m_scene->material(m_material);
+        if (m && float(value) != m->alphaCutoff)
+            m_undo->push(new SetMaterialAlphaCommand(m_scene, m_material, m->alphaMode, float(value)));
+    });
+    connect(cutoffLabel, &DragLabel::dragged, m_cutoff, [this](int dx, Qt::KeyboardModifiers mods) {
+        m_cutoff->setValue(m_cutoff->value() + dx * 0.005 * dragFactor(mods));
+    });
+
     m_status = new QLabel(body);
     m_status->setObjectName("NodesStatus");
     m_status->setWordWrap(true);
@@ -231,7 +273,22 @@ void NodesPanel::refreshGraph()
     m_hint->setVisible(!m);
     m_splitter->setVisible(m);
     rebuildProperties();
+    refreshAlpha();
     refreshStatus();
+}
+
+void NodesPanel::refreshAlpha()
+{
+    const Material *m = m_scene->material(m_material);
+    m_alphaRow->setVisible(m);
+    if (!m)
+        return;
+    QSignalBlocker blockMode(m_alphaMode), blockCutoff(m_cutoff);
+    m_alphaMode->setCurrentIndex(int(m->alphaMode));
+    m_cutoff->setValue(m->alphaCutoff);
+    const bool clip = m->alphaMode == AlphaMode::Clip;
+    m_cutoffLabel->setVisible(clip);
+    m_cutoff->setVisible(clip);
 }
 
 void NodesPanel::refreshStatus()

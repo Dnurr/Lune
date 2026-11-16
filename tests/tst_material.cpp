@@ -160,7 +160,8 @@ private slots:
         QVERIFY(c.code.contains("s.normal = (normalize(v_normal));"));
         QVERIFY(c.code.contains("s.occlusion = materialParams[4].x;"));
         QVERIFY(c.code.contains("s.emission = materialParams[5].xyz;"));
-        QCOMPARE(int(c.params.size()), 6);
+        QVERIFY(c.code.contains("s.alpha = materialParams[6].x;"));
+        QCOMPARE(int(c.params.size()), 7);
         QVERIFY(c.params[1].color);
         QCOMPARE(c.code.count("node_mix("), 2); // the library's definition + one call
     }
@@ -232,6 +233,15 @@ private slots:
         baker.setSourceString(source.toUtf8(), QShader::FragmentStage);
         const QShader shader = baker.bake();
         QVERIFY2(shader.isValid(), qPrintable(baker.errorMessage()));
+
+        // The shadow pass variant: mesh.frag's declarations + the same code + shadow_material.glsl.
+        const QString shadow = MaterialCompiler::shadowSource(readSource("mesh.frag"), c.code,
+                                                              readSource("shadow_material.glsl"));
+        QVERIFY(!shadow.isEmpty());
+        QVERIFY(!shadow.contains("//@material-begin"));
+        QCOMPARE(shadow.count("void main()"), 1); // mesh.frag's own main() isn't in it
+        baker.setSourceString(shadow.toUtf8(), QShader::FragmentStage);
+        QVERIFY2(baker.bake().isValid(), qPrintable(baker.errorMessage()));
     }
 
     void sceneFileRoundTrip()
@@ -258,7 +268,16 @@ private slots:
         QCOMPARE(int(loaded.materials().size()), 1);
         QCOMPARE(loaded.materials()[0].name, QStringLiteral("Rust"));
         QCOMPARE(loaded.materials()[0].graph, scene.materials()[0].graph);
+        QCOMPARE(loaded.materials()[0].alphaMode, AlphaMode::Opaque);
         QCOMPARE(loaded.entities()[0].material(), id);
+
+        // Alpha mode and cutoff
+        scene.setMaterialAlpha(id, AlphaMode::Clip, 0.3f);
+        QVERIFY(SceneIO::save(scene, path, {}));
+        Scene clipped;
+        QVERIFY(SceneIO::load(clipped, path, nullptr, nullptr));
+        QCOMPARE(clipped.materials()[0].alphaMode, AlphaMode::Clip);
+        QCOMPARE(clipped.materials()[0].alphaCutoff, 0.3f);
     }
 
     void unknownMaterialIsAWarning()
@@ -308,6 +327,19 @@ private slots:
         stack.redo();
         QCOMPARE(scene.entity(cube)->material(), id); // same id again
         QCOMPARE(scene.material(id)->graph.node(1)->values["roughness"].toFloat(), 0.3f);
+
+        // Alpha: a mode change is a step, cutoff scrubbing merges into one.
+        const int before = stack.count();
+        stack.push(new SetMaterialAlphaCommand(&scene, id, AlphaMode::Clip, 0.5f));
+        for (float c : { 0.4f, 0.3f, 0.2f })
+            stack.push(new SetMaterialAlphaCommand(&scene, id, AlphaMode::Clip, c));
+        QCOMPARE(stack.count(), before + 2);
+        QCOMPARE(scene.material(id)->alphaCutoff, 0.2f);
+        stack.undo();
+        QCOMPARE(scene.material(id)->alphaCutoff, 0.5f);
+        QCOMPARE(scene.material(id)->alphaMode, AlphaMode::Clip);
+        stack.undo();
+        QCOMPARE(scene.material(id)->alphaMode, AlphaMode::Opaque);
     }
 
     void materialSlots()
@@ -450,7 +482,8 @@ void node_outsampler(out sampler2D s) { }
 
     void gltfMaterialBecomesAGraph()
     {
-        const NodeLibrary lib(readSource("material_nodes.glsl"));
+        // First without a Normal Map node (the shipped one renamed away).
+        const NodeLibrary lib(readSource("material_nodes.glsl").replace("node_normal_map(", "node_no_normal_map("));
         GltfMaterial m;
         m.name = "Chair";
         m.baseColorTexture = "C:/m/base.png";
@@ -481,20 +514,20 @@ void node_outsampler(out sampler2D s) { }
         QVERIFY(source(g, rough->id, "a", &port)->type == "separate_rgb" && port == "g");
         QVERIFY(source(g, out, "metallic", &port)->type == "separate_rgb" && port == "b");
         QVERIFY(source(g, out, "occlusion", &port)->type == "separate_rgb" && port == "r");
-        // No Normal Map node in the shipped library: the normal texture stays unlinked.
+        // No Normal Map node in the library: the normal texture stays unlinked.
         QVERIFY(!g.linkTo(out, "normal"));
+        QVERIFY(!g.linkTo(out, "alpha")); // OPAQUE: alpha unused
+        QVERIFY(!g.node(out)->values.contains("alpha"));
 
         CompiledMaterial c = MaterialCompiler::compile(g, lib);
         QVERIFY2(c.ok(), qPrintable(c.error));
         QCOMPARE(int(c.textures.size()), 2); // the unlinked normal texture isn't generated
         QVERIFY2(bakeError(c).isEmpty(), qPrintable(bakeError(c)));
 
-        // With the Author's Normal Map node: linked, with glTF's scale.
+        // With the Author's Normal Map node (shipped): linked, with glTF's scale.
         m.normalScale = 0.7f;
-        const NodeLibrary withNormalMap(readSource("material_nodes.glsl") + QStringLiteral(R"(
-// @node Normal Map
-void node_normal_map(vec3 color, float strength, out vec3 normal) { normal = normalize(v_normal + (color - 0.5) * strength); }
-)"));
+        const NodeLibrary withNormalMap(readSource("material_nodes.glsl"));
+        QVERIFY(withNormalMap.type("normal_map"));
         const NodeGraph g2 = graphFromGltf(m, withNormalMap);
         const GraphNode *nm = source(g2, out, "normal");
         QVERIFY(nm && nm->type == "normal_map");
@@ -502,6 +535,36 @@ void node_normal_map(vec3 color, float strength, out vec3 normal) { normal = nor
         c = MaterialCompiler::compile(g2, withNormalMap);
         QVERIFY2(c.ok(), qPrintable(c.error));
         QCOMPARE(int(c.textures.size()), 3);
+    }
+
+    void gltfAlpha()
+    {
+        const NodeLibrary lib(readSource("material_nodes.glsl"));
+        GltfMaterial m;
+        m.baseColorTexture = "C:/m/leaf.png";
+        m.baseColorFactor = QVector4D(1, 1, 1, 0.5f);
+        m.alphaMode = GltfMaterial::Mask;
+        NodeGraph g = graphFromGltf(m, lib);
+        int out = 0;
+        for (const GraphNode &n : g.nodes)
+            if (n.type == "output")
+                out = n.id;
+        // Texture alpha x 0.5, from the same Image Texture as the color.
+        QString port;
+        const GraphNode *mul = source(g, out, "alpha");
+        QVERIFY(mul && mul->type == "multiply");
+        QCOMPARE(mul->values["b"].toFloat(), 0.5f);
+        const GraphNode *tex = source(g, mul->id, "a", &port);
+        QVERIFY(tex && tex->type == "image_texture" && port == "alpha");
+        QCOMPARE(countNodes(g, "image_texture"), 1);
+        QVERIFY2(bakeError(MaterialCompiler::compile(g, lib)).isEmpty(), "alpha graph doesn't compile");
+
+        // Blend without a texture: the factor as the value.
+        m.baseColorTexture.clear();
+        m.alphaMode = GltfMaterial::Blend;
+        g = graphFromGltf(m, lib);
+        QVERIFY(!g.linkTo(out, "alpha"));
+        QCOMPARE(g.node(out)->values["alpha"].toFloat(), 0.5f);
     }
 };
 

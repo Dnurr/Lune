@@ -39,6 +39,10 @@ ImportedModel importModel(const QString &path, QString *error)
             const GltfMaterial &g = gltf.materials[size_t(sm.sourceMaterial)];
             m.name = g.name.isEmpty() ? sm.name : g.name;
             m.graph = graphFromGltf(g, NodeLibrary::instance());
+            m.alphaMode = g.alphaMode == GltfMaterial::Mask    ? AlphaMode::Clip
+                          : g.alphaMode == GltfMaterial::Blend ? AlphaMode::Blend
+                                                               : AlphaMode::Opaque;
+            m.alphaCutoff = qBound(0.0f, g.alphaCutoff, 1.0f);
         }
         model.materials.push_back(m);
     }

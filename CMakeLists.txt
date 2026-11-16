@@ -111,6 +111,7 @@ qt6_add_shaders(Lune "shaders"
         src/engine/render/shaders/background.frag
         src/engine/render/shaders/shadow.vert
         src/engine/render/shaders/shadow.frag
+        src/engine/render/shaders/shadow_material.vert
 )
 
 if(WIN32)
@@ -132,11 +133,13 @@ if(LUNE_BUILD_TESTS)
 endif()
 
 # GLSL sources needed at runtime: node materials put generated code into mesh.frag and
-# compile it again; the node types are read from material_nodes.glsl.
+# compile it again (and, for their shadows, into shadow_material.glsl); the node types are
+# read from material_nodes.glsl.
 qt6_add_resources(Lune "shadersrc"
     PREFIX "/shadersrc"
     BASE "src/engine/render/shaders"
     FILES
         src/engine/render/shaders/mesh.frag
         src/engine/render/shaders/material_nodes.glsl
+        src/engine/render/shaders/shadow_material.glsl
 )

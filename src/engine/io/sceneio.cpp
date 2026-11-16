@@ -180,6 +180,10 @@ bool save(const Scene &scene, const QString &path, const QJsonObject &editorStat
         jm["id"] = double(m.id);
         jm["name"] = m.name;
         jm["graph"] = mapImages(m.graph, [&](const QString &path) { return relativePath(path, sceneDir); }).toJson();
+        if (m.alphaMode != AlphaMode::Opaque) {
+            jm["alphaMode"] = Material::alphaModeName(m.alphaMode);
+            jm["alphaCutoff"] = double(m.alphaCutoff);
+        }
         materials.append(jm);
     }
 
@@ -327,6 +331,8 @@ bool load(Scene &scene, const QString &path, QJsonObject *editorState, QStringLi
         m.graph = mapImages(NodeGraph::fromJson(jm["graph"].toObject()), [&](const QString &path) {
             return QDir::cleanPath(sceneDir.absoluteFilePath(path));
         });
+        m.alphaMode = Material::alphaModeFromName(jm["alphaMode"].toString());
+        m.alphaCutoff = float(qBound(0.0, jm["alphaCutoff"].toDouble(0.5), 1.0));
         if (m.id == NoMaterial || usedMaterials.contains(m.id)) {
             warn(QStringLiteral("Material %1: missing or duplicate id, skipped").arg(m.name));
             continue;

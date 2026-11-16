@@ -6,6 +6,7 @@
 #include <rhi/qrhi.h>
 
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 
 namespace
@@ -21,8 +22,12 @@ constexpr int kPointRange = kPointTile + 4 * 6 * ShadowMaps::MaxPoint;          
 constexpr int kAtlas = kPointRange + 4 * ShadowMaps::MaxPoint;                      // vec4
 constexpr int kCascadeSplits = kAtlas + 4;                                          // vec4
 constexpr int kCameraForward = kCascadeSplits + 4;                                  // vec4
-constexpr int kUniformFloats = kCameraForward + 4;
+constexpr int kTranslucencyDir = kCameraForward + 4;                                // vec4
+constexpr int kTranslucencyPoint = kTranslucencyDir + 4;                            // vec4
+constexpr int kUniformFloats = kTranslucencyPoint + 4;
 constexpr int kUniformSize = kUniformFloats * 4;
+// Per tile in the view buffer: mat4 (world -> clip) + vec4 (point, near, far, 0).
+constexpr int kViewSize = 64 + 16;
 
 constexpr int kLayoutUbufSize = 512; // at least the entity block of mesh.vert
 // Hardware depth bias of the shadow passes, growing with the surface's slope as seen from
@@ -90,6 +95,25 @@ void ShadowMaps::initialize(QRhi *rhi)
     atlas(QSize(DirectionalAtlasSize, DirectionalAtlasSize), m_directional, m_directionalRt);
     atlas(QSize(6 * PointFaceSize, MaxPoint * PointFaceSize), m_point, m_pointRt);
 
+    // Translucency map: the directional region, then the point region above it.
+    const QSize translucency(qMax(DirectionalAtlasSize, 6 * PointFaceSize) / TranslucencyScale,
+                             (DirectionalAtlasSize + MaxPoint * PointFaceSize) / TranslucencyScale);
+    m_translucency.reset(m_rhi->newTexture(QRhiTexture::RGBA16F, translucency, 1, QRhiTexture::RenderTarget));
+    m_translucency->create();
+    m_translucencyRt.reset(m_rhi->newTextureRenderTarget({ QRhiColorAttachment(m_translucency.get()) }));
+    m_translucencyRp.reset(m_translucencyRt->newCompatibleRenderPassDescriptor());
+    m_translucencyRt->setRenderPassDescriptor(m_translucencyRp.get());
+    m_translucencyRt->create();
+    m_translucencySampler.reset(m_rhi->newSampler(QRhiSampler::Linear, QRhiSampler::Linear, QRhiSampler::None,
+                                                  QRhiSampler::ClampToEdge, QRhiSampler::ClampToEdge));
+    m_translucencySampler->create();
+
+    // Stand-ins bound by material casters (never meant to be read).
+    m_dummyDepth.reset(m_rhi->newTexture(format, QSize(1, 1), 1, QRhiTexture::RenderTarget));
+    m_dummyDepth->create();
+    m_dummyColor.reset(m_rhi->newTexture(QRhiTexture::RGBA16F, QSize(1, 1)));
+    m_dummyColor->create();
+
     // texture(map, vec3(uv, depth)) = 1 where depth <= the stored depth, blended across 4 texels.
     m_compareSampler.reset(m_rhi->newSampler(QRhiSampler::Linear, QRhiSampler::Linear, QRhiSampler::None,
                                              QRhiSampler::ClampToEdge, QRhiSampler::ClampToEdge));
@@ -106,7 +130,7 @@ void ShadowMaps::initialize(QRhi *rhi)
         return b;
     };
     m_uniforms = ubuf(kUniformSize);
-    m_viewStride = m_rhi->ubufAligned(64);
+    m_viewStride = m_rhi->ubufAligned(kViewSize);
     m_viewUbuf = ubuf(m_viewStride * ViewCount);
     m_layoutUbuf = ubuf(kLayoutUbufSize);
 
@@ -124,6 +148,7 @@ void ShadowMaps::createPipelines()
     input.setBindings({ { quint32(sizeof(MeshVertex)) } });
     input.setAttributes({ { 0, 0, QRhiVertexInputAttribute::Float3, 0 } });
     const QShader vs = loadShader(QStringLiteral("shadow.vert")), fs = loadShader(QStringLiteral("shadow.frag"));
+    m_materialVs = loadShader(QStringLiteral("shadow_material.vert"));
 
     for (int cull = 0; cull < CullModes; ++cull) {
         auto &p = m_pipelines[cull];
@@ -142,6 +167,46 @@ void ShadowMaps::createPipelines()
         p->setSlopeScaledDepthBias(cull == CullNone ? kSlopeBias : kBackFaceSlopeBias);
         p->create();
     }
+}
+
+std::unique_ptr<QRhiGraphicsPipeline> ShadowMaps::createMaterialPipeline(const QShader &fragment,
+                                                                         QRhiShaderResourceBindings *layout,
+                                                                         bool translucent) const
+{
+    QRhiVertexInputLayout input; // everything the material may read (like mesh.vert)
+    input.setBindings({ { quint32(sizeof(MeshVertex)) } });
+    input.setAttributes({ { 0, 0, QRhiVertexInputAttribute::Float3, quint32(offsetof(MeshVertex, position)) },
+                          { 0, 1, QRhiVertexInputAttribute::Float3, quint32(offsetof(MeshVertex, normal)) },
+                          { 0, 2, QRhiVertexInputAttribute::Float2, quint32(offsetof(MeshVertex, uv)) },
+                          { 0, 3, QRhiVertexInputAttribute::Float4, quint32(offsetof(MeshVertex, tangent)) } });
+
+    std::unique_ptr<QRhiGraphicsPipeline> p(m_rhi->newGraphicsPipeline());
+    p->setShaderStages({ { QRhiShaderStage::Vertex, m_materialVs }, { QRhiShaderStage::Fragment, fragment } });
+    p->setVertexInputLayout(input);
+    p->setShaderResourceBindings(layout);
+    // Two-sided: cut-out and see-through surfaces are usually open (leaves, panes); a closed
+    // translucent mesh (a glass ball) lets light through both of its surfaces.
+    p->setCullMode(QRhiGraphicsPipeline::None);
+    if (translucent) {
+        p->setRenderPassDescriptor(m_translucencyRp.get());
+        QRhiGraphicsPipeline::TargetBlend b;
+        b.enable = true;
+        b.srcColor = QRhiGraphicsPipeline::DstColor; // rgb = src * dst: multiplied layer by layer
+        b.dstColor = QRhiGraphicsPipeline::Zero;
+        b.opColor = QRhiGraphicsPipeline::Add;
+        b.srcAlpha = QRhiGraphicsPipeline::One; // a = min(src, dst): the nearest depth
+        b.dstAlpha = QRhiGraphicsPipeline::One;
+        b.opAlpha = QRhiGraphicsPipeline::Min;
+        p->setTargetBlends({ b });
+    } else {
+        p->setRenderPassDescriptor(m_rp.get());
+        p->setDepthTest(true);
+        p->setDepthWrite(true);
+        p->setSlopeScaledDepthBias(kSlopeBias);
+    }
+    if (!p->create())
+        return nullptr;
+    return p;
 }
 
 ShadowMaps::Cull ShadowMaps::cullFor(const Caster &c)
@@ -166,19 +231,30 @@ void ShadowMaps::release()
     m_rp.reset();
     m_directional.reset();
     m_point.reset();
+    m_translucencyRt.reset();
+    m_translucencyRp.reset();
+    m_translucency.reset();
+    m_translucencySampler.reset();
+    m_dummyDepth.reset();
+    m_dummyColor.reset();
+    m_materialVs = {};
     m_views.clear();
     m_rhi = nullptr;
 }
 
-QList<QRhiShaderResourceBinding> ShadowMaps::meshBindings() const
+QList<QRhiShaderResourceBinding> ShadowMaps::meshBindings(bool forCasters) const
 {
     using B = QRhiShaderResourceBinding;
     const auto fs = B::FragmentStage;
+    QRhiTexture *directional = forCasters ? m_dummyDepth.get() : m_directional.get();
+    QRhiTexture *point = forCasters ? m_dummyDepth.get() : m_point.get();
+    QRhiTexture *translucency = forCasters ? m_dummyColor.get() : m_translucency.get();
     return { B::uniformBuffer(6, fs, m_uniforms.get()),
-             B::sampledTexture(7, fs, m_directional.get(), m_compareSampler.get()),
-             B::sampledTexture(8, fs, m_directional.get(), m_depthSampler.get()),
-             B::sampledTexture(9, fs, m_point.get(), m_compareSampler.get()),
-             B::sampledTexture(10, fs, m_point.get(), m_depthSampler.get()) };
+             B::sampledTexture(7, fs, directional, m_compareSampler.get()),
+             B::sampledTexture(8, fs, directional, m_depthSampler.get()),
+             B::sampledTexture(9, fs, point, m_compareSampler.get()),
+             B::sampledTexture(10, fs, point, m_depthSampler.get()),
+             B::sampledTexture(TranslucencyBinding, fs, translucency, m_translucencySampler.get()) };
 }
 
 QList<QRhiShaderResourceBinding> ShadowMaps::casterBindings(QRhiBuffer *entityUniforms) const
@@ -186,6 +262,33 @@ QList<QRhiShaderResourceBinding> ShadowMaps::casterBindings(QRhiBuffer *entityUn
     using B = QRhiShaderResourceBinding;
     return { B::uniformBuffer(0, B::VertexStage, entityUniforms),
              B::uniformBufferWithDynamicOffset(1, B::VertexStage, m_viewUbuf.get(), 64) };
+}
+
+QRhiShaderResourceBinding ShadowMaps::materialViewBinding() const
+{
+    using B = QRhiShaderResourceBinding;
+    return B::uniformBufferWithDynamicOffset(MaterialViewBinding, B::VertexStage | B::FragmentStage, m_viewUbuf.get(),
+                                             kViewSize);
+}
+
+QPointF ShadowMaps::translucencyOrigin(bool point) const
+{
+    return point ? QPointF(0, DirectionalAtlasSize / TranslucencyScale) : QPointF(0, 0);
+}
+
+void ShadowMaps::translucencyMapping(bool point, float *dst) const
+{
+    // The region is the atlas scaled by 1 / TranslucencyScale: atlas uv -> map uv is linear.
+    // Rows count from the bottom where framebuffers are y-up (OpenGL), from the top elsewhere.
+    const QSize atlas = (point ? m_point : m_directional)->pixelSize();
+    const QSize map = m_translucency->pixelSize();
+    const QPointF origin = translucencyOrigin(point);
+    const float w = float(atlas.width()) / TranslucencyScale, h = float(atlas.height()) / TranslucencyScale;
+    const float scaleU = w / float(map.width()), scaleV = h / float(map.height());
+    const float offsetU = float(origin.x()) / float(map.width());
+    const float offsetV = m_rhi->isYUpInFramebuffer() ? float(origin.y()) / float(map.height())
+                                                      : 1.0f - (float(origin.y()) + h) / float(map.height());
+    putVec4(dst, scaleU, scaleV, offsetU, offsetV);
 }
 
 QRectF ShadowMaps::tileViewport(bool point, int tile, int directionalCount) const
@@ -244,6 +347,8 @@ void ShadowMaps::prepare(QRhiResourceUpdateBatch *rub, const std::vector<Light> 
     const QSize pointAtlas = m_point->pixelSize();
     putVec4(data + kAtlas, 1.0f / directionalAtlas.width(), 1.0f / directionalAtlas.height(),
             1.0f / pointAtlas.width(), 1.0f / pointAtlas.height());
+    translucencyMapping(false, data + kTranslucencyDir);
+    translucencyMapping(true, data + kTranslucencyPoint);
 
     const QMatrix4x4 corr = m_rhi->clipSpaceCorrMatrix();
     QVector3D corners[8]; // of the meshes' bounds
@@ -367,6 +472,8 @@ void ShadowMaps::prepare(QRhiResourceUpdateBatch *rub, const std::vector<Light> 
                 v.tile = slot * 6 + face;
                 v.clip = corr * projection * view;
                 v.viewport = tileViewport(true, v.tile, directionalTotal);
+                v.nearPlane = kPointNear;
+                v.farPlane = far;
                 const QMatrix4x4 toTile = clipToTile(v.viewport, pointAtlas);
                 putMat4(data + kPointMatrix + 16 * v.tile, toTile * v.clip);
                 const QVector3D a = toTile.map(QVector3D(-1, -1, 0)), b = toTile.map(QVector3D(1, 1, 0));
@@ -380,47 +487,86 @@ void ShadowMaps::prepare(QRhiResourceUpdateBatch *rub, const std::vector<Light> 
     }
     rub->updateDynamicBuffer(m_uniforms.get(), 0, kUniformSize, data);
 
-    for (const View &v : m_views) {
+    for (View &v : m_views) {
+        const QPointF origin = translucencyOrigin(v.point);
+        const float s = 1.0f / TranslucencyScale;
+        v.translucencyViewport = QRectF(origin.x() + v.viewport.x() * s, origin.y() + v.viewport.y() * s,
+                                        v.viewport.width() * s, v.viewport.height() * s);
         const int index = v.point ? DirectionalViews + v.tile : v.tile;
-        float m[16];
+        float m[kViewSize / 4];
         putMat4(m, v.clip);
-        rub->updateDynamicBuffer(m_viewUbuf.get(), quint32(index) * m_viewStride, 64, m);
+        putVec4(m + 16, v.point ? 1.0f : 0.0f, v.nearPlane, v.farPlane, 0.0f);
+        rub->updateDynamicBuffer(m_viewUbuf.get(), quint32(index) * m_viewStride, kViewSize, m);
     }
 }
 
 void ShadowMaps::render(QRhiCommandBuffer *cb, QRhiResourceUpdateBatch *rub, const std::vector<Caster> &casters)
 {
+    auto viewOffset = [this](const View &v) {
+        return quint32(v.point ? DirectionalViews + v.tile : v.tile) * m_viewStride;
+    };
+    auto setViewport = [cb](const QRectF &r) {
+        cb->setViewport({ float(r.x()), float(r.y()), float(r.width()), float(r.height()) });
+    };
+    auto draw = [cb](const Caster &c, int viewBinding, quint32 offset) {
+        const QRhiCommandBuffer::DynamicOffset dynamicOffset(viewBinding, offset);
+        cb->setShaderResources(c.srb, 1, &dynamicOffset);
+        const QRhiCommandBuffer::VertexInput vin(c.vertices, 0);
+        cb->setVertexInput(0, 1, &vin, c.indices, 0, QRhiCommandBuffer::IndexUInt32);
+        cb->drawIndexed(c.indexCount, 1, c.firstIndex);
+    };
+
     const QColor black(Qt::black);
     for (bool point : { false, true }) {
         cb->beginPass(point ? m_pointRt.get() : m_directionalRt.get(), black, { 1.0f, 0 }, point ? nullptr : rub);
-        // Grouped by pipeline (cull mode), then by tile.
+        // Built-in pipelines, grouped by cull mode, then by tile.
         for (int cull = 0; cull < CullModes; ++cull) {
             bool bound = false;
             for (const View &v : m_views) {
                 if (v.point != point)
                     continue;
-                const quint32 offset = quint32(point ? DirectionalViews + v.tile : v.tile) * m_viewStride;
-                const QRhiCommandBuffer::DynamicOffset dynamicOffset(1, offset);
                 bool viewportSet = false;
                 for (const Caster &c : casters) {
-                    if (cullFor(c) != cull)
+                    if (c.pipeline || c.translucent || cullFor(c) != cull)
                         continue;
                     if (!bound) {
                         cb->setGraphicsPipeline(m_pipelines[cull].get());
                         bound = true;
                     }
                     if (!viewportSet) {
-                        cb->setViewport({ float(v.viewport.x()), float(v.viewport.y()), float(v.viewport.width()),
-                                          float(v.viewport.height()) });
+                        setViewport(v.viewport);
                         viewportSet = true;
                     }
-                    cb->setShaderResources(c.srb, 1, &dynamicOffset);
-                    const QRhiCommandBuffer::VertexInput vin(c.vertices, 0);
-                    cb->setVertexInput(0, 1, &vin, c.indices, 0, QRhiCommandBuffer::IndexUInt32);
-                    cb->drawIndexed(c.indexCount);
+                    draw(c, 1, viewOffset(v));
                 }
+            }
+        }
+        // Clip materials: each with its own pipeline.
+        for (const Caster &c : casters) {
+            if (!c.pipeline || c.translucent)
+                continue;
+            cb->setGraphicsPipeline(c.pipeline);
+            for (const View &v : m_views) {
+                if (v.point != point)
+                    continue;
+                setViewport(v.viewport);
+                draw(c, MaterialViewBinding, viewOffset(v));
             }
         }
         cb->endPass();
     }
+
+    // Translucency map: cleared to "all the light, nothing in the way", then every
+    // translucent caster in every tile (the blend does the rest; order doesn't matter).
+    cb->beginPass(m_translucencyRt.get(), QColor::fromRgbF(1, 1, 1, 1), { 1.0f, 0 });
+    for (const Caster &c : casters) {
+        if (!c.pipeline || !c.translucent)
+            continue;
+        cb->setGraphicsPipeline(c.pipeline);
+        for (const View &v : m_views) {
+            setViewport(v.translucencyViewport);
+            draw(c, MaterialViewBinding, viewOffset(v));
+        }
+    }
+    cb->endPass();
 }
