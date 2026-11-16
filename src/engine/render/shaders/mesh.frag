@@ -284,9 +284,10 @@ vec3 Translucency(int type, vec3 p, vec4 tile, vec2 texel, float radius, mat2 ro
     return sum / 16.0;
 }
 
-vec3 Shadow(int i, int type, vec3 N)
+vec3 Shadow(int i, int type, vec3 N, out float thickness)
 {
     vec3 lit = vec3(0.0);
+    thickness = 1e4;
 
     int slot = int(lightShadow[i].x);
     int t = 0;
@@ -376,7 +377,11 @@ vec3 Shadow(int i, int type, vec3 N)
 
     float depthScale = type == 0 ? dirShadowRange[t].x : far;
     float bias = 2.0 * 2.0 * texelWorld;
-    if (count == 0) return Translucency(type, p, tile, texel, searchTexels, rot, dReceiver, depthScale, bias);
+    if (count == 0)
+    {
+        thickness = 0.0;
+        return Translucency(type, p, tile, texel, searchTexels, rot, dReceiver, depthScale, bias);
+    }
 
     float dBlocker = sum / float(count);
     float penumbraWorld = type == 0 ? (dReceiver - dBlocker) * spread : 2.0 * size * (dReceiver - dBlocker) / dBlocker;
@@ -389,6 +394,21 @@ vec3 Shadow(int i, int type, vec3 N)
         lit += type == 0 ? textureLod(dirShadowMap, vec3(uv, p.z), 0.0) : textureLod(pointShadowMap, vec3(uv, p.z), 0.0);
     }
 
+    vec4 fm = type == 0 ? frontDepthDir : frontDepthPoint;
+    float frontRadius = 8.0;
+    float sumT = 0.0;
+    int n = 0;
+
+    for (int k = 0; k < 16; k++)
+    {
+        vec2 uv = clamp(p.xy + rot * poisson[k] * frontRadius * texel, tile.xy, tile.zw);
+        float a = textureLod(shadowTranslucency, uv * fm.xy + fm.zw, 0.0).a;
+
+        sumT += a < 0.999 ? max(dReceiver - a * depthScale, 0.0) : 0.0;
+        n++;
+    }
+
+    thickness = n > 0 ? sumT / float(n) : 0.0;
     return lit / 16.0 * Translucency(type, p, tile, texel, radius, rot, dReceiver, depthScale, bias);
 }
 
@@ -450,20 +470,31 @@ void main()
         
         vec3 kD = (1.0 - F) * (1.0 - metallic);
 
+        float thickness = 0.0;
         vec3 shadow = vec3(1.0);
         int slot = int(lightShadow[i].x);
         if (slot >= 0)
-            shadow = Shadow(i, int(lights[i].position.w), Ng);
+            shadow = Shadow(i, int(lights[i].position.w), Ng, thickness);
+        else thickness = surf.subsurfaceRadius;
 
-        final += (kD * albedo / PI + spec) * radiance * NdotL * shadow;
+        vec3 Lt = L + N * 0.2;
+        float back = pow(max(dot(V, -Lt), 0.0), 4.0);
+        float atten = exp(-thickness / max(surf.subsurfaceRadius, 1e-4));
+
+        vec3 wc = surf.subsurface * surf.subsurfaceColor;          // quanto gira ogni canale
+        vec3 wrapC = clamp((dot(N, L) + wc) / (1.0 + wc), 0.0, 1.0);
+        vec3 diffuseShape = mix(vec3(NdotL), wrapC, surf.subsurface);
+        vec3 sssShadow = mix(shadow, max(shadow, vec3(atten)), surf.subsurface);
+        final += kD * albedo / PI * diffuseShape * radiance * sssShadow
+            + spec * NdotL * radiance * shadow;
+        final += albedo * surf.subsurfaceColor * radiance * back * atten * surf.subsurface * kD;
     }
 
     vec3 kD = (1.0 - kS) * (1.0 - metallic);
     vec3 irradiance = texture(irradianceMap, toEnvironment(N)).rgb;
     vec3 ambient = kD * albedo * irradiance * envParams.x * surf.occlusion;
-    
-    final *= alpha;
-    final += ambient + ambientSpec + surf.emission;
+
+    final += (ambient + ambientSpec) * alpha + surf.emission;
 
     fragColor = vec4(final, surf.alpha);
 }
