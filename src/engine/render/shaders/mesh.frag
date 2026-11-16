@@ -222,9 +222,46 @@ vec3 FresnelRoughness(float NdotV, vec3 F0, float roughness)
     return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(1.0 - NdotV, 5.0);
 }
 
-float Shadow(int i, int type, vec3 N)
+const vec2 poisson[16] = vec2[](
+    vec2(-0.94201624, -0.39906216),
+    vec2( 0.94558609, -0.76890725),
+    vec2(-0.09418410, -0.92938870),
+    vec2( 0.34495938,  0.29387760),
+    vec2(-0.91588581,  0.45771432),
+    vec2(-0.81544232, -0.87912464),
+    vec2(-0.38277543,  0.27676845),
+    vec2( 0.97484398,  0.75648379),
+    vec2( 0.44323325, -0.97511554),
+    vec2( 0.53742981, -0.47373420),
+    vec2(-0.26496911, -0.41893023),
+    vec2( 0.79197514,  0.19090188),
+    vec2(-0.24188840,  0.99706507),
+    vec2(-0.81409955,  0.91437590),
+    vec2( 0.19984126,  0.78641367),
+    vec2( 0.14383161, -0.14100790)
+);
+
+vec3 Translucency(int type, vec3 p, vec4 tile, vec2 texel, float radius, mat2 rot, float dReceiver, float depthScale, float bias)
 {
-    float lit = 0.0;
+    vec4 map = type == 0 ? translucencyDir : translucencyPoint;
+    vec3 sum = vec3(0.0);
+
+    for (int k = 0; k < 16; k++)
+    {
+        vec2 uv = clamp(p.xy + rot * poisson[k] * radius * texel, tile.xy, tile.zw);
+        vec4 t = textureLod(shadowTranslucency, uv * map.xy + map.zw, 0.0);
+
+        bool behind = t.a * depthScale < dReceiver - bias;
+
+        sum += behind ? t.rgb : vec3(1.0);
+    }
+
+    return sum / 16.0;
+}
+
+vec3 Shadow(int i, int type, vec3 N)
+{
+    vec3 lit = vec3(0.0);
 
     int slot = int(lightShadow[i].x);
     int t = 0;
@@ -240,25 +277,6 @@ float Shadow(int i, int type, vec3 N)
     vec2 texel;
     float spread = 2.0 * tan(radians(size) / 2.0);
 
-    const vec2 poisson[16] = vec2[](
-        vec2(-0.94201624, -0.39906216),
-        vec2( 0.94558609, -0.76890725),
-        vec2(-0.09418410, -0.92938870),
-        vec2( 0.34495938,  0.29387760),
-        vec2(-0.91588581,  0.45771432),
-        vec2(-0.81544232, -0.87912464),
-        vec2(-0.38277543,  0.27676845),
-        vec2( 0.97484398,  0.75648379),
-        vec2( 0.44323325, -0.97511554),
-        vec2( 0.53742981, -0.47373420),
-        vec2(-0.26496911, -0.41893023),
-        vec2( 0.79197514,  0.19090188),
-        vec2(-0.24188840,  0.99706507),
-        vec2(-0.81409955,  0.91437590),
-        vec2( 0.19984126,  0.78641367),
-        vec2( 0.14383161, -0.14100790)
-    );
-
     float angle = 6.2831853 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
     mat2 rot = mat2(cos(angle), sin(angle), -sin(angle), cos(angle));
 
@@ -269,7 +287,7 @@ float Shadow(int i, int type, vec3 N)
     if (type == 0)
     {
         float camDepth = dot(v_world - cameraPos.xyz, cameraForward.xyz);
-        if (camDepth > cascadeSplits.w) return 1.0; // too far = no shadows
+        if (camDepth > cascadeSplits.w) return vec3(1.0); // too far = no shadows
 
         int cascade = int(camDepth > cascadeSplits.x) + int(camDepth > cascadeSplits.y)
                     + int(camDepth > cascadeSplits.z);
@@ -289,7 +307,7 @@ float Shadow(int i, int type, vec3 N)
         p = (dirShadowMatrix[t] * vec4(pos, 1.0)).xyz;
         tile = dirShadowTile[t];
      
-        if (any(lessThan(p.xy, tile.xy)) || any(greaterThan(p.xy, tile.zw))) return 1.0;
+        if (any(lessThan(p.xy, tile.xy)) || any(greaterThan(p.xy, tile.zw))) return vec3(1.0);
      
         texel = shadowAtlas.xy;
         
@@ -331,7 +349,9 @@ float Shadow(int i, int type, vec3 N)
         if (z < p.z) { sum += dist; count++; }
     }
 
-    if (count == 0) return 1.0;
+    float depthScale = type == 0 ? dirShadowRange[t].x : far;
+    float bias = 2.0 * 2.0 * texelWorld;
+    if (count == 0) return Translucency(type, p, tile, texel, searchTexels, rot, dReceiver, depthScale, bias);
 
     float dBlocker = sum / float(count);
     float penumbraWorld = type == 0 ? (dReceiver - dBlocker) * spread : 2.0 * size * (dReceiver - dBlocker) / dBlocker;
@@ -344,13 +364,14 @@ float Shadow(int i, int type, vec3 N)
         lit += type == 0 ? textureLod(dirShadowMap, vec3(uv, p.z), 0.0) : textureLod(pointShadowMap, vec3(uv, p.z), 0.0);
     }
 
-    return lit / 16.0;
+    return lit / 16.0 * Translucency(type, p, tile, texel, radius, rot, dReceiver, depthScale, bias);
 }
 
 // Cook-Torrance PBR Model
 void main()
 {
     Surface surf = materialSurface();
+    if (surf.alpha < material.z) discard;
     
     vec3 Ng = normalize(v_normal);
     vec3 N = surf.normal;
@@ -362,6 +383,7 @@ void main()
     vec3 albedo = surf.baseColor;
     float roughness = max(surf.roughness, 0.045);
     float metallic = surf.metallic;
+    float alpha = material.w > 1.5 ? surf.alpha : 1.0;
 
     vec3 F0 = vec3(0.04);
     F0 = mix(F0, albedo, metallic);
@@ -403,7 +425,7 @@ void main()
         
         vec3 kD = (1.0 - F) * (1.0 - metallic);
 
-        float shadow = 1.0;
+        vec3 shadow = vec3(1.0);
         int slot = int(lightShadow[i].x);
         if (slot >= 0)
             shadow = Shadow(i, int(lights[i].position.w), Ng);
@@ -414,6 +436,9 @@ void main()
     vec3 kD = (1.0 - kS) * (1.0 - metallic);
     vec3 irradiance = texture(irradianceMap, toEnvironment(N)).rgb;
     vec3 ambient = kD * albedo * irradiance * envParams.x * surf.occlusion;
+    
+    final *= alpha;
+    final += ambient + ambientSpec + surf.emission;
 
-    fragColor = vec4(final + ambient + ambientSpec + surf.emission, 1.0);
+    fragColor = vec4(final, surf.alpha);
 }

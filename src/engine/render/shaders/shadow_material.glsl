@@ -31,5 +31,6 @@ void main()
     }
     // The light a surface with this alpha lets through (the depth pass has no color target
     // and ignores it).
-    fragColor = vec4(vec3(1.0 - surf.alpha), depth);
+    vec3 through = mix(vec3(1.0), surf.baseColor * (1.0 - surf.absorption), surf.alpha);
+    fragColor = vec4(through, depth);
 }
