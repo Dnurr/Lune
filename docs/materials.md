@@ -61,7 +61,9 @@ says, chosen in the row under the material combo box:
 | Blend | see-through by its alpha (glass, smoke, decals): drawn after the opaque meshes, far to near, blended over them | translucent: lets 1 − alpha of the light through (alpha 0.5: half of it), layers multiply |
 
 Link an Image Texture's `alpha` output (the image's alpha channel) into it, or type a
-value. Blend surfaces don't write depth, so they never hide each other; they are sorted
+value. For blend materials, **absorption** (0..1, default 0) is the share of light a fully
+opaque surface absorbs instead of letting through: it shapes the translucent shadow
+(`shadow_material.glsl` decides how), so a clear white glass can still cast a faint one. Blend surfaces don't write depth, so they never hide each other; they are sorted
 per entity, not per triangle, so two crossing glass panes can show in the wrong order.
 
 ### Importing glTF materials

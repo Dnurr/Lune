@@ -163,6 +163,9 @@ struct Surface
                      //               so write vec4(color * alpha, alpha) (light that a clear
                      //               surface still reflects, e.g. specular, may stay unscaled)
                      // Discarding where alpha < material.z works for every mode (z is 0 unless clip).
+    float absorption; // 0..1, blend materials: the share of light a fully opaque (alpha 1) surface
+                      // absorbs instead of letting through; used by its translucent shadow
+                      // (shadow_material.glsl). Default 0.
 };
 //@material-begin
 Surface materialSurface()
@@ -175,6 +178,7 @@ Surface materialSurface()
     s.occlusion = 1.0;
     s.emission = vec3(0.0);
     s.alpha = 1.0;
+    s.absorption = 0.0;
     return s;
 }
 //@material-end

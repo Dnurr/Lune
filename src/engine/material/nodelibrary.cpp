@@ -54,7 +54,10 @@ NodeType outputNode()
     PortDesc emission { QStringLiteral("emission"), PortType::Vec3, true, true, QVector3D(0, 0, 0) };
     // Used as the material's alpha mode says (Material::alphaMode): ignored when opaque.
     PortDesc alpha { QStringLiteral("alpha"), PortType::Float, false, true, 1.0f, 0.0, 1.0, true };
-    t.inputs = { baseColor, roughness, metallic, normal, occlusion, emission, alpha };
+    // Blend materials: how much of the light a fully opaque (alpha 1) surface absorbs
+    // instead of letting it through, for its translucent shadow (shadow_material.glsl).
+    PortDesc absorption { QStringLiteral("absorption"), PortType::Float, false, true, 0.0f, 0.0, 1.0, true };
+    t.inputs = { baseColor, roughness, metallic, normal, occlusion, emission, alpha, absorption };
     return t;
 }
 
