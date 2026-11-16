@@ -316,7 +316,8 @@ void Renderer::createPipelines(QRhiRenderTarget *target)
                           m_sceneRp.get(), 1, mesh);
     for (auto &entry : m_materialShaders) { // recreated on next use, for the new render pass
         entry.second.pipeline.reset();
-        entry.second.blendPipeline.reset();
+        for (auto &p : entry.second.blendPipelines)
+            p.reset();
     }
     m_outlinePipe = pipeline(loadShader(QStringLiteral("outline.vert")), QStringLiteral("outline.frag"),
                              m_outlineLayoutSrb.get(), m_sceneRp.get(), 1, outline);
@@ -479,7 +480,7 @@ Renderer::GpuEntity &Renderer::gpuEntity(EntityId id, int slotCount)
     return g;
 }
 
-std::unique_ptr<QRhiGraphicsPipeline> Renderer::createMeshPipeline(const QShader &fragment, bool blend)
+std::unique_ptr<QRhiGraphicsPipeline> Renderer::createMeshPipeline(const QShader &fragment, bool blend, MeshCull cull)
 {
     std::unique_ptr<QRhiGraphicsPipeline> p(m_rhi->newGraphicsPipeline());
     p->setShaderStages({ { QRhiShaderStage::Vertex, loadShader(QStringLiteral("mesh.vert")) },
@@ -487,7 +488,9 @@ std::unique_ptr<QRhiGraphicsPipeline> Renderer::createMeshPipeline(const QShader
     p->setVertexInputLayout(meshInputLayout());
     p->setShaderResourceBindings(m_meshLayoutSrb.get());
     p->setRenderPassDescriptor(m_sceneRp.get());
-    p->setCullMode(QRhiGraphicsPipeline::None); // like m_meshPipe
+    p->setCullMode(cull == CullFront  ? QRhiGraphicsPipeline::Front
+                   : cull == CullBack ? QRhiGraphicsPipeline::Back
+                                      : QRhiGraphicsPipeline::None); // two-sided, like m_meshPipe
     p->setDepthTest(true);
     p->setDepthWrite(!blend); // see-through surfaces don't hide what's drawn after them
     if (blend) {
@@ -556,11 +559,11 @@ Renderer::MaterialShader &Renderer::materialShader(const QString &code)
     return it->second;
 }
 
-QRhiGraphicsPipeline *Renderer::scenePipeline(MaterialShader &s, bool blend, QString *error)
+QRhiGraphicsPipeline *Renderer::scenePipeline(MaterialShader &s, bool blend, QString *error, MeshCull cull)
 {
-    auto &pipeline = blend ? s.blendPipeline : s.pipeline;
+    auto &pipeline = blend ? s.blendPipelines[size_t(cull)] : s.pipeline;
     if (s.error.isEmpty() && !pipeline) {
-        pipeline = createMeshPipeline(s.fragment, blend);
+        pipeline = createMeshPipeline(s.fragment, blend, cull);
         if (!pipeline)
             s.error = QStringLiteral("The material's pipeline couldn't be created.");
     }
@@ -764,6 +767,8 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
     {
         CompiledMaterial compiled;
         QRhiGraphicsPipeline *pipe = nullptr;       // scene pass
+        // Blend, closed meshes: front faces culled (back faces drawn), back faces culled.
+        QRhiGraphicsPipeline *cullFrontPipe = nullptr, *cullBackPipe = nullptr;
         QRhiGraphicsPipeline *shadowPipe = nullptr; // clip / blend; nullptr: drawn like an opaque one
         const NodeGraph *graph = nullptr;
         AlphaMode alphaMode = AlphaMode::Opaque;
@@ -786,6 +791,11 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
             if (fm.compiled.ok()) {
                 MaterialShader &shader = materialShader(fm.compiled.code);
                 fm.pipe = scenePipeline(shader, fm.alphaMode == AlphaMode::Blend, &error);
+                if (fm.pipe && fm.alphaMode == AlphaMode::Blend) {
+                    QString cullError;
+                    fm.cullFrontPipe = scenePipeline(shader, true, &cullError, CullFront);
+                    fm.cullBackPipe = scenePipeline(shader, true, &cullError, CullBack);
+                }
                 if (fm.pipe && fm.alphaMode != AlphaMode::Opaque) {
                     QString shadowError;
                     fm.shadowPipe = shadowPipeline(shader, fm.compiled.code, fm.alphaMode == AlphaMode::Blend, &shadowError);
@@ -896,8 +906,19 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
                     const Submesh &sm = e.mesh->submeshes[size_t(slot)];
                     const bool blend = fm && fm->alphaMode == AlphaMode::Blend;
                     if (sm.indexCount > 0) {
-                        surfaces.push_back({ &gm, sm.firstIndex, sm.indexCount, gs.srb.get(), fm ? fm->pipe : m_meshPipe.get(),
-                                             blend, distance2 });
+                        if (blend && e.mesh->closed && fm->cullFrontPipe && fm->cullBackPipe) {
+                            // A closed see-through mesh (a glass cube): its far side first, then
+                            // its near side over it. Two-sided in one draw, the faces would blend
+                            // in index order, the far ones sometimes over the near ones.
+                            // (A mirrored model matrix flips which faces are the back ones.)
+                            surfaces.push_back({ &gm, sm.firstIndex, sm.indexCount, gs.srb.get(),
+                                                 mirrored ? fm->cullBackPipe : fm->cullFrontPipe, blend, distance2 });
+                            surfaces.push_back({ &gm, sm.firstIndex, sm.indexCount, gs.srb.get(),
+                                                 mirrored ? fm->cullFrontPipe : fm->cullBackPipe, blend, distance2 });
+                        } else {
+                            surfaces.push_back({ &gm, sm.firstIndex, sm.indexCount, gs.srb.get(),
+                                                 fm ? fm->pipe : m_meshPipe.get(), blend, distance2 });
+                        }
                         QRhiGraphicsPipeline *shadowPipe = fm ? fm->shadowPipe : nullptr;
                         slotShadows.push_back({ sm.firstIndex, sm.indexCount, shadowPipe,
                                                 shadowPipe ? slotShadowSrb(gs) : nullptr, shadowPipe && blend });

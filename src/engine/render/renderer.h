@@ -162,8 +162,10 @@ private:
     {
         QShader fragment;
         QString error;
-        std::unique_ptr<QRhiGraphicsPipeline> pipeline;      // opaque and clip
-        std::unique_ptr<QRhiGraphicsPipeline> blendPipeline; // blend: blended over the scene, no depth writes
+        std::unique_ptr<QRhiGraphicsPipeline> pipeline; // opaque and clip
+        // Blend: blended over the scene, no depth writes; by MeshCull (two-sided, or one side
+        // for closed meshes, drawn back faces first).
+        std::array<std::unique_ptr<QRhiGraphicsPipeline>, 3> blendPipelines;
         bool shadowCompiled = false;
         QShader shadowFragment;
         QString shadowError;
@@ -171,13 +173,14 @@ private:
     };
     // GLSL (for the backend in use) -> shader, or an invalid one and `error`.
     QShader compileFragment(const QString &source, const QString &name, QString *error) const;
+    enum MeshCull { CullNone, CullFront, CullBack };
     // Mesh pipeline with another fragment shader (node materials); same state as m_meshPipe,
-    // or blended (premultiplied alpha, depth tested but not written).
-    std::unique_ptr<QRhiGraphicsPipeline> createMeshPipeline(const QShader &fragment, bool blend);
+    // or blended (premultiplied alpha, depth tested but not written, culling `cull`).
+    std::unique_ptr<QRhiGraphicsPipeline> createMeshPipeline(const QShader &fragment, bool blend, MeshCull cull = CullNone);
     // The shader for a material's generated code: compiled on first use, then cached.
     MaterialShader &materialShader(const QString &code);
     // Its scene pipeline; nullptr (and `error` set) if it doesn't compile.
-    QRhiGraphicsPipeline *scenePipeline(MaterialShader &shader, bool blend, QString *error);
+    QRhiGraphicsPipeline *scenePipeline(MaterialShader &shader, bool blend, QString *error, MeshCull cull = CullNone);
     // Its shadow pipeline (clip: depth atlases, translucent: translucency map); nullptr
     // (and `error` set) if it doesn't compile.
     QRhiGraphicsPipeline *shadowPipeline(MaterialShader &shader, const QString &code, bool translucent, QString *error);
