@@ -166,6 +166,11 @@ struct Surface
     float absorption; // 0..1, blend materials: the share of light a fully opaque (alpha 1) surface
                       // absorbs instead of letting through; used by its translucent shadow
                       // (shadow_material.glsl). Default 0.
+    float subsurface;       // 0..1, share of the diffuse light that scatters inside the surface
+                            // (skin, wax, leaves, marble); 0 = none (default)
+    vec3 subsurfaceColor;   // linear, tint of the scattered light
+    float subsurfaceRadius; // world units, how far light travels inside before it's absorbed
+                            // (e.g. against the thickness dReceiver - dBlocker in Shadow())
 };
 //@material-begin
 Surface materialSurface()
@@ -179,6 +184,9 @@ Surface materialSurface()
     s.emission = vec3(0.0);
     s.alpha = 1.0;
     s.absorption = 0.0;
+    s.subsurface = 0.0;
+    s.subsurfaceColor = vec3(1.0, 0.4, 0.25);
+    s.subsurfaceRadius = 0.1;
     return s;
 }
 //@material-end

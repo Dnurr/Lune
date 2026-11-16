@@ -74,6 +74,8 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 - [x] Clip materials cut their shadows; translucency map with the light blend materials let through (Claude)
 - [ ] `main()`: discard below the cutoff, premultiplied output for blend (Author)
 - [ ] Translucent shadows in `Shadow()` from `shadowTranslucency` (Author)
+- [x] Material Output `subsurface`, `subsurfaceColor`, `subsurfaceRadius` (Claude)
+- [ ] Subsurface scattering in the light loop: wrap lighting, back light, thickness from the shadow map (Author)
 - [ ] OBJ materials (.mtl) to node graphs (Claude)
 
 ### Color management

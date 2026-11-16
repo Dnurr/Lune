@@ -57,7 +57,13 @@ NodeType outputNode()
     // Blend materials: how much of the light a fully opaque (alpha 1) surface absorbs
     // instead of letting it through, for its translucent shadow (shadow_material.glsl).
     PortDesc absorption { QStringLiteral("absorption"), PortType::Float, false, true, 0.0f, 0.0, 1.0, true };
-    t.inputs = { baseColor, roughness, metallic, normal, occlusion, emission, alpha, absorption };
+    // Subsurface scattering, applied by mesh.frag's light loop: how much of the diffuse light
+    // scatters inside, its tint, and how far it travels (world units).
+    PortDesc subsurface { QStringLiteral("subsurface"), PortType::Float, false, true, 0.0f, 0.0, 1.0, true };
+    PortDesc subsurfaceColor { QStringLiteral("subsurfaceColor"), PortType::Vec3, true, true, QVector3D(1.0f, 0.4f, 0.25f) };
+    PortDesc subsurfaceRadius { QStringLiteral("subsurfaceRadius"), PortType::Float, false, true, 0.1f, 0.0, 1.0, true };
+    t.inputs = { baseColor, roughness, metallic, normal, occlusion, emission, alpha, absorption,
+                 subsurface, subsurfaceColor, subsurfaceRadius };
     return t;
 }
 

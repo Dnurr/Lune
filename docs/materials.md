@@ -69,6 +69,13 @@ Blend surfaces don't write depth, so they never hide each other; they are sorted
 entity, not per triangle, so two crossing glass panes can show in the wrong order. Closed
 meshes (a glass cube or ball) draw their far side first, then their near side.
 
+### Subsurface
+
+**subsurface** (0..1, default 0) is the share of the diffuse light that scatters inside the
+surface instead of bouncing off it (skin, wax, leaves, marble, milk), **subsurfaceColor** the
+tint it picks up, **subsurfaceRadius** how far it travels inside, in world units. They take
+effect once `mesh.frag`'s light loop uses them (see [below](#subsurface-in-meshfrag)).
+
 ### Importing glTF materials
 
 Importing a glTF file (File > Import, double click or drag from Assets) adds its materials
@@ -181,7 +188,8 @@ float metallic = surf.metallic;
 ```
 
 `Surface` also carries `normal` (world space, normalized: what normal maps bend; default
-the interpolated vertex normal), `occlusion` (0..1, 1 = none) and `emission` (linear).
+the interpolated vertex normal), `occlusion` (0..1, 1 = none) and `emission` (linear), plus
+`alpha`, `absorption` and the subsurface fields (sections below).
 Until `main()` uses them they have no effect: `N` from `surf.normal` (keeping the
 two-sided flip), the ambient terms times `surf.occlusion`, `surf.emission` added to the
 result.
@@ -206,6 +214,21 @@ holes) and blend ones look opaque too:
   doesn't see them yet. They are in `shadowTranslucency` (see the comment above it in
   `mesh.frag` and [rendering.md](rendering.md#translucent-shadows)): where the receiver is
   farther from the light than the stored depth, multiply its light by the stored rgb.
+
+### Subsurface in mesh.frag
+
+`surf.subsurface`, `surf.subsurfaceColor` and `surf.subsurfaceRadius` are meant for the
+light loop in `main()`, where each light's direction, radiance and shadow are at hand (node
+functions can read `lights[]`, but not `Shadow()`, which is declared after the material
+block). Cheap raster approximations, which combine:
+
+- **Wrap lighting**: diffuse from `(dot(N, L) + w) / (1 + w)` instead of `NdotL`, tinted by
+  the subsurface color past the terminator.
+- **Back light**: light coming through the object toward the viewer,
+  `pow(max(dot(V, -(L + N * distortion)), 0), power)`.
+- **Thickness**: the distance light traveled inside, from the shadow map
+  (`dReceiver - dBlocker` in `Shadow()`), attenuating the back light as
+  `exp(-thickness / subsurfaceRadius)`.
 
 ### Normal maps
 

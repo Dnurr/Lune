@@ -162,7 +162,11 @@ private slots:
         QVERIFY(c.code.contains("s.emission = materialParams[5].xyz;"));
         QVERIFY(c.code.contains("s.alpha = materialParams[6].x;"));
         QVERIFY(c.code.contains("s.absorption = materialParams[7].x;"));
-        QCOMPARE(int(c.params.size()), 8);
+        QVERIFY(c.code.contains("s.subsurface = materialParams[8].x;"));
+        QVERIFY(c.code.contains("s.subsurfaceColor = materialParams[9].xyz;"));
+        QVERIFY(c.code.contains("s.subsurfaceRadius = materialParams[10].x;"));
+        QCOMPARE(int(c.params.size()), 11);
+        QVERIFY(c.params[9].color);
         QVERIFY(c.params[1].color);
         QCOMPARE(c.code.count("node_mix("), 2); // the library's definition + one call
     }
