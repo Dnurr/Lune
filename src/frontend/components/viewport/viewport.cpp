@@ -124,6 +124,21 @@ bool Viewport::isStatsVisible() const
     return m_stats->isVisible();
 }
 
+void Viewport::setOverlaysVisible(bool visible)
+{
+    if (m_overlays == visible)
+        return;
+    if (!visible && m_gizmo.isDragging()) { // cancel the drag, like a right click
+        if (m_scene && m_selection)
+            m_scene->setTransform(m_selection->current(), m_gizmo.dragStart());
+        m_gizmo.endDrag();
+    }
+    m_gizmo.setHovered(Gizmo::None);
+    m_overlays = visible;
+    m_renderer.setGridLinesVisible(visible);
+    redraw();
+}
+
 void Viewport::setGizmoMode(Gizmo::Mode mode)
 {
     if (m_gizmo.isDragging())
@@ -159,7 +174,7 @@ void Viewport::render(QRhiCommandBuffer *cb)
     updateGlassRects();
 
     std::vector<OverlayVertex> overlay;
-    if (m_scene)
+    if (m_scene && m_overlays)
         LightIcons::append(*m_scene, m_camera, QSizeF(size()), m_selection ? m_selection->current() : InvalidEntity,
                            overlay);
     if (layoutGizmo()) // after the icons: drawn on top of them
@@ -168,7 +183,8 @@ void Viewport::render(QRhiCommandBuffer *cb)
     if (m_display)
         m_renderer.setDisplayParams(float(m_display->exposure()), m_display->tonemapper());
 
-    const EntityId selected = m_selection ? m_selection->current() : InvalidEntity;
+    // Without overlays nothing is outlined.
+    const EntityId selected = m_selection && m_overlays ? m_selection->current() : InvalidEntity;
     m_renderer.render(cb, renderTarget(), m_camera, m_scene, selected);
     if (m_renderer.takeMaterialErrorsChanged())
         emit materialErrorsChanged();
@@ -210,7 +226,7 @@ void Viewport::updateGlassRects()
 
 bool Viewport::layoutGizmo()
 {
-    if (!m_scene || !m_selection)
+    if (!m_scene || !m_selection || !m_overlays)
         return false;
     const Entity *e = m_scene->entity(m_selection->current());
     if (!e)
@@ -280,7 +296,8 @@ void Viewport::mousePressEvent(QMouseEvent *event)
             }
         }
         // Light icons sit on top of the scene, so they are tested before the meshes.
-        if (const EntityId light = LightIcons::hitTest(*m_scene, m_camera, QSizeF(size()), pos)) {
+        const EntityId light = m_overlays ? LightIcons::hitTest(*m_scene, m_camera, QSizeF(size()), pos) : InvalidEntity;
+        if (light) {
             m_selection->select(light);
             event->accept();
             return;

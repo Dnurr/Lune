@@ -678,10 +678,12 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         // Sky top alpha = sky opacity: 0 over an environment background, so only the lines are drawn
         v = putLinearColor(v, QColor("#1C1C20"), showBackground ? 0.0f : 1.0f); // sky top
         v = putLinearColor(v, QColor("#121214"), 1.0f); // sky bottom / horizon
-        v = putLinearColor(v, QColor("#2E2E34"), 1.0f); // minor lines
-        v = putLinearColor(v, QColor("#46464E"), 1.0f); // major lines
-        v = putLinearColor(v, QColor("#C8434F"), 0.9f); // X axis
-        putLinearColor(v, QColor("#3F6FD8"), 0.9f);     // Z axis (navy-blue accent)
+        // Line strengths: 0 hides them (setGridLinesVisible).
+        const float lines = m_gridLines ? 1.0f : 0.0f;
+        v = putLinearColor(v, QColor("#2E2E34"), lines);         // minor lines
+        v = putLinearColor(v, QColor("#46464E"), lines);         // major lines
+        v = putLinearColor(v, QColor("#C8434F"), 0.9f * lines);  // X axis
+        putLinearColor(v, QColor("#3F6FD8"), 0.9f * lines);      // Z axis (navy-blue accent)
         rub->updateDynamicBuffer(m_gridUbuf.get(), 0, kGridUbufSize, data);
     }
 

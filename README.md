@@ -164,6 +164,7 @@ Third-party libraries are downloaded on the first configure into `build/_deps`
 | Ctrl+Z / Ctrl+Y | Undo / redo (also Ctrl+Shift+Z) |
 | Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S | New / open / save / save as |
 | Ctrl+I | Import mesh (OBJ, glTF, GLB) |
+| Shift+Alt+Z | Editor overlays on / off: grid lines, light icons, gizmo, selection outline (View > Overlays), for clean screenshots |
 | F12 | Stats overlay |
 
 ## Project layout

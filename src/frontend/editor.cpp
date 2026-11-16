@@ -174,9 +174,18 @@ void Editor::createMenus()
     connect(m_viewport, &Viewport::cameraModeChanged, freeCamera,
             [freeCamera](CameraMode mode) { freeCamera->setChecked(mode == CameraMode::Free); });
 
+    // Editor overlays (grid lines, light icons, gizmo, selection outline): off for clean
+    // screenshots. Shift+Alt+Z, as in Blender.
+    auto *overlays = new QAction("Overlays", this);
+    overlays->setShortcut(QKeySequence(Qt::SHIFT | Qt::ALT | Qt::Key_Z));
+    overlays->setCheckable(true);
+    overlays->setChecked(true);
+    connect(overlays, &QAction::toggled, m_viewport, &Viewport::setOverlaysVisible);
+
     QMenu *view = menuBar()->addMenu("View");
     view->addAction(m_collapsePanels);
     view->addAction(freeCamera);
+    view->addAction(overlays);
     view->addAction(stats);
     view->addSeparator();
 

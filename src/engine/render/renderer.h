@@ -94,6 +94,10 @@ public:
     // params.y = tonemapping operator index.
     void setDisplayParams(float exposureEv, int tonemapper);
 
+    // The world grid's lines (on by default). Off: the grid pass still draws its sky (when
+    // there's no environment background), without lines.
+    void setGridLinesVisible(bool visible) { m_gridLines = visible; }
+
     const FrameStats &lastFrameStats() const { return m_stats; }
     const char *backendName() const;
 
@@ -201,6 +205,7 @@ private:
     FrameStats m_stats;
     float m_exposure = 0.0f;
     int m_tonemapper = 0;
+    bool m_gridLines = true;
     std::vector<OverlayVertex> m_overlay;
     float m_overlayScale = 1.0f;
 

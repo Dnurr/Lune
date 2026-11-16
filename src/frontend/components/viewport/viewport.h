@@ -70,6 +70,12 @@ public:
     void setStatsVisible(bool visible);
     bool isStatsVisible() const;
 
+    // Editor overlays: the grid's lines, the light icons, the gizmo and the selection
+    // outline (on by default). Off, e.g. for screenshots: only the scene is drawn, and
+    // the icons and the gizmo can't be clicked either (clicking still picks meshes).
+    void setOverlaysVisible(bool visible);
+    bool overlaysVisible() const { return m_overlays; }
+
     // Where the camera is going: input moves this one, and the camera drawn on screen
     // follows it smoothly (see advanceCamera()). Jumps there in setCamera().
     const OrbitCamera &camera() const { return m_goal; }
@@ -155,6 +161,7 @@ private:
 
     QStringList m_dropSuffixes;
     bool m_centerInFreeArea = false;
+    bool m_overlays = true;
     CameraMode m_cameraMode = CameraMode::Orbit;
     float m_flySpeed = 4.0f;
     bool m_flying = false;   // free camera, right button held
