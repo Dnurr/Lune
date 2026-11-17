@@ -605,7 +605,7 @@ void Editor::renderImages(bool allPasses)
     request.size = m_renderSettings.imageSize(m_viewport->size() * m_viewport->devicePixelRatio());
     request.exposure = float(m_display->exposure());
     request.tonemapper = m_display->tonemapper();
-    request.skybox = m_renderSettings.skybox;
+    request.skybox = m_viewport->viewSettings().skybox; // what the viewport shows
     for (const ImagePass *p : passes)
         request.views.push_back(p->view);
 

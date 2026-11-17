@@ -243,7 +243,8 @@ write instead of the shaded color (`DebugView` in `renderer.h`):
 Views 1, 2, 3 and 5 are data: the Renderer sets exposure 0 and no tonemapping for them,
 and `main()` writes each value through `debugValue()` (the inverse of the display's sRGB
 encoding), so the 8-bit image holds the value itself (a normal pass reads back as the
-normal). View 4 is an image and keeps the Display settings. Blend materials keep their
+normal). They are drawn on black: no environment background, no sky (an HDR sky without
+tonemapping would just clip). View 4 is an image and keeps the Display settings. Blend materials keep their
 alpha in every view.
 
 ## Image renders

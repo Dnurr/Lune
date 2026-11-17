@@ -9,7 +9,7 @@ class QCheckBox;
 class QLineEdit;
 class QSpinBox;
 
-// Render > Render Settings: image size, output folder, background, and which passes
+// Render > Render Settings: image size, output folder, and which passes
 // Render Passes (F6) writes.
 class RenderSettingsDialog : public QDialog
 {
@@ -30,6 +30,5 @@ private:
     QSpinBox *m_width = nullptr;
     QSpinBox *m_height = nullptr;
     QLineEdit *m_folder = nullptr;
-    QCheckBox *m_skybox = nullptr;
     QHash<QString, QCheckBox *> m_passes; // by pass id
 };

@@ -692,12 +692,16 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
             }
         }
     }
-    const bool showBackground = hasEnvironment && environment.background && m_view.skybox;
+    const DebugView view = m_view.shading == Shading::Unlit ? DebugView::Unlit : m_view.debug;
+    // Data views (base color, normals, depth, shadows): shown without exposure or tonemapping,
+    // and on black: no environment, no sky.
+    const bool dataView = view != DebugView::None && view != DebugView::DirectOnly;
+    const bool showBackground = hasEnvironment && environment.background && m_view.skybox && !dataView;
     // Wireframe without line drawing (OpenGL ES): like Clay.
     const bool wireOnly = m_view.shading == Shading::Wireframe && m_wirePipe;
     const bool clay = m_view.shading == Shading::Clay || (m_view.shading == Shading::Wireframe && !m_wirePipe);
     const bool sceneLights = m_view.shading != Shading::Preview; // Preview: the environment only
-    const DebugView debugView = m_view.shading == Shading::Unlit ? DebugView::Unlit : m_view.debug;
+    const DebugView debugView = view;
     // Recomputes the maps (before anything samples them) only when the source changed.
     const int iblPasses = m_ibl.update(cb, { environment.image, environment.skyColor, environment.groundColor });
 
@@ -723,7 +727,7 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         v[3] = 10.0f;
         v += 4;
         // Sky top alpha = sky opacity: 0 over an environment background, so only the lines are drawn
-        v = putLinearColor(v, QColor("#1C1C20"), showBackground ? 0.0f : 1.0f); // sky top
+        v = putLinearColor(v, QColor("#1C1C20"), showBackground || dataView ? 0.0f : 1.0f); // sky top
         v = putLinearColor(v, QColor("#121214"), 1.0f); // sky bottom / horizon
         // Line strengths: 0 hides them (setGridLinesVisible).
         const float lines = m_gridLines ? 1.0f : 0.0f;
@@ -1069,9 +1073,7 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
 
     // --- Display uniforms: x = exposure (EV), y = tonemapper index, zw free ---
     {
-        // Data views (base color, normals, depth, shadows): shown as they are.
-        const bool data = debugView != DebugView::None && debugView != DebugView::DirectOnly;
-        const float p[4] = { data ? 0.0f : m_exposure, data ? 0.0f : float(m_tonemapper), 0.0f, 0.0f };
+        const float p[4] = { dataView ? 0.0f : m_exposure, dataView ? 0.0f : float(m_tonemapper), 0.0f, 0.0f };
         rub->updateDynamicBuffer(m_displayUbuf.get(), 0, 16, p);
     }
 

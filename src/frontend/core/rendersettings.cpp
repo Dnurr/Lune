@@ -21,7 +21,6 @@ QJsonObject RenderSettings::toJson() const
     json["height"] = height;
     if (!folder.isEmpty())
         json["folder"] = folder;
-    json["skybox"] = skybox;
     json["passes"] = QJsonArray::fromStringList(passes);
     return json;
 }
@@ -33,7 +32,6 @@ RenderSettings RenderSettings::fromJson(const QJsonObject &json)
     s.width = qBound(MinSize, json["width"].toInt(s.width), MaxSize);
     s.height = qBound(MinSize, json["height"].toInt(s.height), MaxSize);
     s.folder = json["folder"].toString();
-    s.skybox = json["skybox"].toBool(s.skybox);
     if (json.contains("passes")) {
         s.passes.clear();
         for (const QJsonValue &v : json["passes"].toArray()) {

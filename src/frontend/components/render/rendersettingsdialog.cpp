@@ -43,10 +43,9 @@ RenderSettingsDialog::RenderSettingsDialog(const RenderSettings &settings, const
     size->addWidget(new QLabel("x", image));
     size->addWidget(m_height);
     form->addRow("Size", size);
-    m_skybox = new QCheckBox("Environment as background", image);
-    m_skybox->setToolTip("Off: the plain sky behind the scene, even when the environment has a background");
-    m_skybox->setChecked(settings.skybox);
-    form->addRow(m_skybox);
+    auto *sky = new QLabel("Background: as the viewport's Sky toggle shows it", image);
+    sky->setEnabled(false);
+    form->addRow(sky);
     layout->addWidget(image);
 
     // Output
@@ -106,7 +105,6 @@ RenderSettings RenderSettingsDialog::settings() const
     s.width = m_width->value();
     s.height = m_height->value();
     s.folder = m_folder->text().trimmed();
-    s.skybox = m_skybox->isChecked();
     s.passes.clear();
     for (const ImagePass &p : imagePasses()) // in the passes' order
         if (m_passes.value(p.id)->isChecked())

@@ -227,7 +227,9 @@ int IblMaps::update(QRhiCommandBuffer *cb, const IblSource &source)
     const float flip = (m_rhi->isYUpInNDC() != m_rhi->isYUpInFramebuffer()) ? 1.0f : 0.0f;
     QRhiResourceUpdateBatch *rub = m_rhi->nextResourceUpdateBatch();
     // cube.vert parameters: x = face, y = flip V, z = roughness, w = size of the input in pixels.
-    auto setUniforms = [rub](Pass &pass, int face, float flipV, float roughness, float inputSize) {
+    // `rub` by reference: a pass consumes the batch and a new one takes its place (the LUT and
+    // the conversion in the same frame), and the uniforms must go into the current one.
+    auto setUniforms = [&rub](Pass &pass, int face, float flipV, float roughness, float inputSize) {
         const float u[4] = { float(face), flipV, roughness, inputSize };
         rub->updateDynamicBuffer(pass.uniforms.get(), 0, 16, u);
     };

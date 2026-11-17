@@ -120,10 +120,9 @@ Written by the editor (`Editor::editorState()`):
 | `display.exposure` | Viewport exposure in EV, clamped to ±10. |
 | `display.tonemapper` | `"none"`, `"reinhard"`, `"aces"` or `"agx"`; unknown values fall back to `"none"`. |
 | `shading.mode` | Viewport shading: `"wireframe"`, `"clay"`, `"unlit"`, `"preview"` or `"rendered"` (default, also for unknown values). |
-| `shading.skybox` | The environment as background in the viewport (default `true`). |
+| `shading.skybox` | The environment as background in the viewport and in rendered images (default `true`). |
 | `render.viewportSize` | Render at the viewport's size (default `true`); otherwise `render.width` x `render.height` (16–16384, default 1920 x 1080). |
 | `render.folder` | Folder of the rendered images, absolute or relative to the scene's folder; missing: `renders` next to the scene. |
-| `render.skybox` | The environment as background in rendered images (default `true`). |
 | `render.passes` | Pass ids written by Render Passes (F6), e.g. `["rendered", "clay"]`; unknown ids are dropped. Missing: rendered, wireframe, clay, unlit, preview. |
 
 ## Compatibility rules

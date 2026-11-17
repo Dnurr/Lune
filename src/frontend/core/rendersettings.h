@@ -12,6 +12,8 @@
 //   F5  Render Video    not yet
 //   F6  Render Passes   one image per pass listed in `passes` (ids of imagePasses())
 //
+// The background follows the viewport's Sky toggle (ViewSettings::skybox).
+//
 // Files: <folder>/<scene>_frame0001.png, and <scene>_frame0001_<pass>.png for F6. The
 // folder defaults to "renders" next to the scene file (Pictures/Lune for an unsaved scene).
 struct RenderSettings
@@ -20,7 +22,6 @@ struct RenderSettings
     int width = 1920;
     int height = 1080;
     QString folder;           // empty: the default folder
-    bool skybox = true;       // the environment as background, when it has one
     QStringList passes = defaultPasses();
     int frame = 1;            // the current frame (no animation yet)
 

@@ -32,14 +32,12 @@ private slots:
         s.width = 2560;
         s.height = 1440;
         s.folder = QStringLiteral("out/frames");
-        s.skybox = false;
         s.passes = { QStringLiteral("clay"), QStringLiteral("normals") };
         const RenderSettings r = RenderSettings::fromJson(s.toJson());
         QCOMPARE(r.viewportSize, false);
         QCOMPARE(r.width, 2560);
         QCOMPARE(r.height, 1440);
         QCOMPARE(r.folder, s.folder);
-        QCOMPARE(r.skybox, false);
         QCOMPARE(r.passes, s.passes);
     }
 
