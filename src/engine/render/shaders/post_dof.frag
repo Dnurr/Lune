@@ -3,7 +3,7 @@
 // Depth of field (HDR, before tonemapping). Author: to be written.
 //
 // texA      the scene (linear HDR)
-// depthTex  its depth (see camera.z for the convention, camera.xy for near and far)
+// depthTex  its depth (see the binding below for turning it into a distance; camera.xy = near, far)
 // params0   x = focus distance (world units), y = f-stop, z = max blur radius in pixels
 //           (already scaled to this image's height), w = focal length in mm (from the
 //           vertical field of view, for a 24 mm tall sensor)
@@ -19,15 +19,16 @@ layout(std140, binding = 0) uniform PostBuf {
     vec4 inputSize;  // texture a: xy = size in pixels, zw = 1 / size (one texel)
     vec4 outputSize; // this pass's target: xy = size in pixels, zw = 1 / size
     vec4 camera;     // x = near plane, y = far plane,
-                     // z = depth mode: 1 = depth 0..1 (D3D, Vulkan, Metal), 0 = -1..1 (OpenGL),
-                     //     -1 = no depth texture (depthTex is a white 1x1 stand-in)
+                     // z = 1 with a depth texture, -1 without (depthTex is a white 1x1 stand-in)
                      // w = seconds (0 for now: the timeline will drive it)
     vec4 params0;    // the effect's settings: see below
     vec4 params1;
 };
 layout(binding = 1) uniform sampler2D texA;     // linear filtering, clamped to the edge
 layout(binding = 2) uniform sampler2D texB;     // linear filtering, clamped to the edge
-layout(binding = 3) uniform sampler2D depthTex; // the scene's depth buffer (raw values), nearest
+layout(binding = 3) uniform sampler2D depthTex; // the scene's depth buffer, nearest: values 0..1 on every
+                                                // backend (OpenGL-style projection, remapped per backend):
+                                                // view distance = 2nf / (f + n - (2d - 1)(f - n))
 
 void main()
 {

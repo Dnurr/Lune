@@ -203,10 +203,11 @@ void PostProcessor::prepare(QRhiResourceUpdateBatch *rub, const Frame &frame)
             m_ldrPasses.push_back(Fxaa);
     }
 
-    // camera: near, far, depth mode (1: depth 0..1, 0: -1..1 (OpenGL), -1: no depth texture), seconds
+    // camera: near, far, depth texture (1) or the stand-in (-1), seconds. The depth values are
+    // 0..1 on every backend: the projection is OpenGL's, remapped by clipSpaceCorrMatrix().
     m_camera[0] = frame.nearPlane;
     m_camera[1] = frame.farPlane;
-    m_camera[2] = !m_depth ? -1.0f : m_rhi->isClipDepthZeroToOne() ? 1.0f : 0.0f;
+    m_camera[2] = m_depth ? 1.0f : -1.0f;
     m_camera[3] = frame.seconds;
 
     const QSize full = m_pixelSize;

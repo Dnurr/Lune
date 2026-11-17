@@ -281,8 +281,9 @@ when the shading bar's **Post** toggle is on (`ViewSettings::post`). The order i
   settings are for a 1080-pixel-tall image and arrive scaled, so the look doesn't depend
   on the resolution.
 - The depth is the scene pass's depth buffer, a `D32F` texture where the backend can
-  sample it (`camera.z` tells the convention: 1 = 0..1, 0 = −1..1 on OpenGL); otherwise a
-  render buffer, and `camera.z = -1` with a white stand-in.
+  sample it (`camera.z = 1`); otherwise a render buffer, and `camera.z = -1` with a white
+  stand-in. Its values are 0..1 on every backend (the projection is OpenGL's, remapped by
+  `clipSpaceCorrMatrix()`): the distance along the view is `2nf / (f + n - (2d - 1)(f - n))`.
 - The shaders start as plain copies (bloom's composite returns the scene): the effects
   themselves are the author's to write.
 

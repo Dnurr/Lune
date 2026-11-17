@@ -29,12 +29,12 @@
 //
 // Every effect shader (shaders/post_*.frag, written by the author: they start as plain
 // copies) has the same bindings:
-//   0  PostBuf uniforms: inputSize, outputSize, camera (near, far, depth mode, seconds),
+//   0  PostBuf uniforms: inputSize, outputSize, camera (near, far, has depth, seconds),
 //      params0, params1 (the effect's settings, see prepare())
 //   1  texture a (the image to process), linear filtering, clamped
 //   2  texture b (a second image: bloom's pyramid), linear, clamped
-//   3  the scene's depth (raw depth buffer values), nearest; a 1x1 stand-in where the
-//      backend can't sample depth (camera.z = -1)
+//   3  the scene's depth (depth buffer values, 0..1 on every backend), nearest; a 1x1
+//      stand-in where the backend can't sample depth (camera.z = -1)
 class PostProcessor
 {
 public:
