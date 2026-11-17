@@ -219,7 +219,7 @@ Bindings: the map is binding 19 of the mesh binding set. With the 15 samplers be
 
 ## Viewport shading
 
-`Renderer::setViewSettings()` (the shading menu at the top left of the viewport, View >
+`Renderer::setViewSettings()` (the shading bar at the top left of the viewport: a dropdown of modes, then the Sky and Post toggles; View >
 Shading, and every pass of an image render):
 
 | Shading | What the Renderer does |
@@ -256,7 +256,7 @@ alpha in every view.
 
 The effects of the scene camera's **Post Process** component (`PostProcess` in
 `entity.h`), run by `PostProcessor` (`engine/render/postprocess.h`) in Rendered shading
-when the shading bar's **Post** is on (`ViewSettings::post`). The order is fixed:
+when the shading bar's **Post** toggle is on (`ViewSettings::post`). The order is fixed:
 
 | Stage | Effect | Shader | Reads |
 |---|---|---|---|

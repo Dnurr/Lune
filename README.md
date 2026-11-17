@@ -190,7 +190,8 @@ src/
   frontend/            the editor (Qt Widgets)
     core/              selection and undo commands
     components/        viewport + gizmo, panels (inspector, outliner, assets), palette, widgets
-    theme/             palette and stylesheet
+    theme/             palette, stylesheet, icons (tinted with the theme's colors)
+assets/icons/          interface icons: white SVGs, embedded at :/icons/<name>.svg
 tests/                 Qt Test suites, one executable per tst_*.cpp
 cmake/                 third-party dependencies
 scripts/               build helpers used by run.bat and test.bat

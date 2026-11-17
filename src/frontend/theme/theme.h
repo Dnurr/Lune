@@ -40,4 +40,6 @@ void apply(QApplication &app, Mode mode = Mode::System);
 void apply(QApplication &app, const Palette &palette, bool dark);
 
 Mode currentMode();
+// The colors in use (set by apply()).
+const Palette &currentPalette();
 } // namespace Theme

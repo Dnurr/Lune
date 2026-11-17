@@ -81,6 +81,7 @@ add_executable(Lune
     src/frontend/editor.cpp
     src/frontend/frameanimationdriver.cpp
     src/frontend/theme/theme.cpp
+    src/frontend/theme/icons.cpp
     src/main.cpp
 )
 target_link_libraries(Lune PRIVATE lune_editor_core Qt6::Widgets)
@@ -149,6 +150,15 @@ if(LUNE_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
+
+# Interface icons (assets/icons/*.svg, white on transparent), at :/icons/<name>.svg; the
+# editor tints them with the theme's colors (frontend/theme/icons.h).
+file(GLOB LUNE_ICONS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/*.svg")
+qt6_add_resources(Lune "icons"
+    PREFIX "/icons"
+    BASE "assets/icons"
+    FILES ${LUNE_ICONS}
+)
 
 # GLSL sources needed at runtime: node materials put generated code into mesh.frag and
 # compile it again (and, for their shadows, into shadow_material.glsl); the node types are

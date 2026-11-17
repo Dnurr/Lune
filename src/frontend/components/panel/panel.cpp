@@ -7,6 +7,7 @@
 #include <QLabel>
 #include <QMouseEvent>
 #include <QPropertyAnimation>
+#include <QScrollArea>
 #include <QWheelEvent>
 
 #include <algorithm>
@@ -39,10 +40,31 @@ Panel::Panel(const QString &title, QWidget *parent, Side side)
     m_content->setSpacing(8);
     // m_body fills the area below the title; m_content is aligned inside it
     // (top or left, see applyOrientation) so children stay packed at that edge.
-    m_body = new QBoxLayout(QBoxLayout::TopToBottom);
-    m_body->setContentsMargins(0, 0, 0, 0);
-    m_body->addLayout(m_content);
-    root->addLayout(m_body, 1);
+    if (qobject_cast<Panel *>(parent)) {
+        // Nested: as tall as its content, laid out by the host (which scrolls).
+        m_body = new QBoxLayout(QBoxLayout::TopToBottom);
+        m_body->setContentsMargins(0, 0, 0, 0);
+        m_body->addLayout(m_content);
+        root->addLayout(m_body, 1);
+    } else {
+        // Top-level: the content scrolls when it's taller than the panel. The content
+        // widget remembers its panel, so nested panels inside it still find their host.
+        m_scroll = new QScrollArea(this);
+        m_scroll->setObjectName("PanelScroll");
+        m_scroll->setFrameShape(QFrame::NoFrame);
+        m_scroll->setWidgetResizable(true);
+        m_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        m_scroll->viewport()->setAutoFillBackground(false);
+        auto *inner = new QWidget;
+        inner->setObjectName("PanelContent");
+        inner->setAutoFillBackground(false);
+        inner->setProperty("panelOwner", QVariant::fromValue(static_cast<QObject *>(this)));
+        m_body = new QBoxLayout(QBoxLayout::TopToBottom, inner);
+        m_body->setContentsMargins(0, 0, 0, 0);
+        m_body->addLayout(m_content);
+        m_scroll->setWidget(inner);
+        root->addWidget(m_scroll, 1);
+    }
 
     m_snap = new QPropertyAnimation(this, "geometry", this);
     m_snap->setDuration(180);
@@ -69,7 +91,15 @@ Panel::Panel(const QString &title, QWidget *parent, Side side)
 
 Panel *Panel::hostPanel() const
 {
-    return qobject_cast<Panel *>(parentWidget());
+    QWidget *p = parentWidget();
+    if (p && p->objectName() == QLatin1String("PanelContent")) // inside a top-level panel's scroll area
+        return qobject_cast<Panel *>(p->property("panelOwner").value<QObject *>());
+    return qobject_cast<Panel *>(p);
+}
+
+QWidget *Panel::contentWidget() const
+{
+    return m_content->parentWidget(); // the scroll area's content, or the panel itself
 }
 
 void Panel::setSide(Side side)
@@ -315,7 +345,10 @@ void Panel::mousePressEvent(QMouseEvent *event)
 
 void Panel::wheelEvent(QWheelEvent *event)
 {
-    event->accept(); // scrolling over a panel never zooms the viewport
+    if (isNested())
+        event->ignore(); // on to the host, which scrolls
+    else
+        event->accept(); // scrolling over a panel never zooms the viewport
 }
 
 void Panel::leaveEvent(QEvent *event)
@@ -434,7 +467,7 @@ void Panel::dropNested()
     const int myIndex = lay->indexOf(this);
     if (myIndex < 0) {
         // Not in the host's content layout: nothing to reorder, just let the layout put it back.
-        host->layout()->invalidate();
+        host->contentWidget()->layout()->invalidate();
         return;
     }
 
@@ -452,7 +485,7 @@ void Panel::dropNested()
 
     lay->removeWidget(this);
     lay->insertWidget(newIndex, this);
-    host->layout()->activate(); // apply the new order right away
+    host->contentWidget()->layout()->activate(); // apply the new order right away
 
     // Slide every nested panel from where it was to its new slot.
     for (auto it = before.cbegin(); it != before.cend(); ++it) {
@@ -479,8 +512,11 @@ void Panel::applyOrientation()
     // Only the main axis is aligned: the content keeps its natural length along it
     // (packed at the top/left) and fills the whole cross axis.
     m_body->setAlignment(m_content, m_fills ? Qt::Alignment() : isVertical() ? Qt::AlignTop : Qt::AlignLeft);
+    // Only side panels scroll (vertically); bottom panels lay their content out across.
+    if (m_scroll)
+        m_scroll->setVerticalScrollBarPolicy(isVertical() ? Qt::ScrollBarAsNeeded : Qt::ScrollBarAlwaysOff);
 
-    for (Panel *child : findChildren<Panel *>(Qt::FindDirectChildrenOnly))
+    for (Panel *child : contentWidget()->findChildren<Panel *>(Qt::FindDirectChildrenOnly))
         child->updateNestedSizing();
 }
 

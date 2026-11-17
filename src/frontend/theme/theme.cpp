@@ -21,6 +21,7 @@ namespace
 {
 
 Mode g_mode = Mode::System;
+Palette g_palette; // the one applied last
 bool g_initialized = false;
 
 QColor withAlpha(const QColor &c, qreal alpha)
@@ -173,6 +174,8 @@ QPushButton#FileButton, QPushButton#FileClearButton {
 }
 QPushButton#FileClearButton { padding: 4px 0; text-align: center; color: @onSurfaceVariant; }
 QPushButton#FileButton:hover, QPushButton#FileClearButton:hover { border-color: @primary; background-color: @surfaceContainerLow; }
+/* Top-level panels scroll their content: no background of their own (the glass shows) */
+QScrollArea#PanelScroll, QWidget#PanelContent { background: transparent; border: none; }
 /* Heading over a group of Inspector rows (e.g. one effect of Post Process) */
 QToolButton#PropertyGroup {
     color: @onSurfaceVariant; font-size: 10px; font-weight: 600; padding: 2px 0; border: none;
@@ -231,6 +234,8 @@ QFrame#CameraMenu, QFrame#ShadingMenu {
 QToolButton#CameraMenuButton { color: @onSurfaceVariant; padding: 3px 10px; border-radius: 7px; font-weight: 600; }
 QToolButton#CameraMenuButton:checked { background-color: @secondaryContainer; color: @onSecondaryContainer; }
 QFrame#ShadingMenuSeparator { background: @glassBorder; }
+/* The shading dropdown: the current mode is highlighted (its icon takes the check's place) */
+QMenu#ShadingModeMenu::item:checked { background-color: @secondaryContainer; color: @onSecondaryContainer; }
 QLabel#CameraMenuSpeed { color: @onSurfaceVariant; padding: 0 8px 0 6px; background: transparent; }
 /* Workspace tabs, right end of the menu bar */
 QToolButton#WorkspaceTab { color: @onSurfaceVariant; padding: 3px 12px; border-radius: 7px; font-weight: 600; }
@@ -552,6 +557,7 @@ void applyPalette(QApplication &app, const Palette &p)
     font.setPointSizeF(10.0);
     app.setFont(font);
 
+    g_palette = p;
     app.setPalette(buildPalette(p));
     app.setStyleSheet(buildStyleSheet(p));
 }
@@ -646,6 +652,11 @@ void apply(QApplication &app, const Palette &palette, bool dark)
     initOnce(app);
     QGuiApplication::styleHints()->setColorScheme(dark ? Qt::ColorScheme::Dark : Qt::ColorScheme::Light);
     applyPalette(app, palette);
+}
+
+const Palette &currentPalette()
+{
+    return g_palette;
 }
 
 Mode currentMode()

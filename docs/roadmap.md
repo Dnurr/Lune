@@ -96,7 +96,7 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 
 - [x] Post-process chain in the Renderer: ping-pong targets, ordered passes, settings UI (Claude)
 - [x] Scene cameras: Camera component, Camera View with passepartout, renders from the camera (Claude)
-- [ ] Inspector scrolling: long components (Post Process) in short windows (Claude)
+- [x] Inspector scrolling: long components (Post Process) in short windows (Claude)
 - [ ] Bloom (Author)
 - [ ] Depth of field (Author)
 - [ ] Vignette, chromatic aberration, film grain (Author)

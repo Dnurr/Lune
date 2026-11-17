@@ -4,6 +4,7 @@
 #include <QCheckBox>
 #include <QColorDialog>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -38,6 +39,31 @@ QString swatchStyle(const QColor &c)
                           " border-radius: 6px; min-height: 20px; padding: 0; }")
         .arg(c.name());
 }
+// The wheel over a number or a list that isn't being edited scrolls the panel instead of
+// changing the value (it's easy to change one by accident while scrolling).
+class WheelGuard : public QObject
+{
+public:
+    using QObject::QObject;
+
+    static void install(QWidget *w)
+    {
+        static WheelGuard guard;
+        w->setFocusPolicy(Qt::StrongFocus); // no focus from the wheel
+        w->installEventFilter(&guard);
+    }
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        auto *w = qobject_cast<QWidget *>(watched);
+        if (event->type() == QEvent::Wheel && w && !w->hasFocus() && w->parentWidget()) {
+            QCoreApplication::sendEvent(w->parentWidget(), event); // on to the scroll area
+            return true;
+        }
+        return QObject::eventFilter(watched, event);
+    }
+};
 } // namespace
 
 InspectorPanel::InspectorPanel(Scene *scene, Selection *selection, QUndoStack *undoStack, QWidget *parent)
@@ -112,7 +138,6 @@ void InspectorPanel::rebuild()
         // group's rows, with the group's "enabled" switch in it when it has one.
         QString group;
         QBoxLayout *rows = section->contentLayout(); // where the rows go: the section, or the open group
-        auto groupToggles = std::make_shared<QList<QToolButton *>>(); // one group open at a time (panels don't scroll)
         for (int pi = 0; pi < int(comp.properties.size()); ++pi) {
             const PropertyDesc &prop = comp.properties[size_t(pi)];
             Row row { ci, pi, {} };
@@ -145,18 +170,13 @@ void InspectorPanel::rebuild()
                     toggle->setChecked(open);
                     toggle->setArrowType(open ? Qt::DownArrow : Qt::RightArrow);
                     body->setVisible(open);
-                    groupToggles->append(toggle);
-                    connect(toggle, &QToolButton::toggled, this, [this, toggle, body, key, groupToggles](bool on) {
+                    connect(toggle, &QToolButton::toggled, this, [this, toggle, body, key](bool on) {
                         toggle->setArrowType(on ? Qt::DownArrow : Qt::RightArrow);
                         body->setVisible(on);
-                        if (on) {
+                        if (on)
                             m_openGroups.insert(key);
-                            for (QToolButton *other : *groupToggles)
-                                if (other != toggle)
-                                    other->setChecked(false);
-                        } else {
+                        else
                             m_openGroups.remove(key);
-                        }
                     });
 
                     // The group's switch goes in the heading.
@@ -176,6 +196,8 @@ void InspectorPanel::rebuild()
             switch (prop.type) {
             case PropertyType::Vector3: {
                 auto *v = new Vector3(prop.name, section);
+                for (QDoubleSpinBox *coordinate : v->findChildren<QDoubleSpinBox *>())
+                    WheelGuard::install(coordinate);
                 v->setDragStep(prop.dragStep);
                 v->setEnabled(!prop.readOnly);
                 connect(v, &Vector3::valueChanged, this,
@@ -191,6 +213,7 @@ void InspectorPanel::rebuild()
                 auto *l = rowLayout(w);
                 auto *label = new DragLabel(prop.name, w);
                 auto *spin = new QDoubleSpinBox(w);
+                WheelGuard::install(spin);
                 spin->setButtonSymbols(QAbstractSpinBox::NoButtons);
                 spin->setRange(prop.minimum, prop.maximum);
                 spin->setDecimals(3);
@@ -253,6 +276,7 @@ void InspectorPanel::rebuild()
                 auto *l = rowLayout(w);
                 auto *label = new QLabel(prop.name, w);
                 auto *combo = new QComboBox(w);
+                WheelGuard::install(combo);
                 for (const QString &id : prop.options) // "point" -> "Point"
                     combo->addItem(id.left(1).toUpper() + id.mid(1));
                 combo->setEnabled(!prop.readOnly);

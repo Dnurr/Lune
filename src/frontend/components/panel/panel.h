@@ -7,6 +7,7 @@
 class QBoxLayout;
 class QLabel;
 class QPropertyAnimation;
+class QScrollArea;
 
 // Floating panel drawn on top of its parent widget (e.g. the viewport).
 //
@@ -26,7 +27,9 @@ class QPropertyAnimation;
 //
 // Top-level panels can be resized from their inner edge (the one facing the viewport).
 // Mouse presses and wheel events on a panel stop there: they never reach the viewport
-// behind it, even outside any control.
+// behind it, even outside any control. The content of a left/right panel scrolls when it's
+// taller than the panel (nested panels live inside that scroll area; hostPanel() still
+// finds their host).
 //
 // Collapsing (setCollapsed on the parent): every top-level panel slides out and hides;
 // expanding brings back the ones that want to be visible (setPanelVisible).
@@ -95,7 +98,8 @@ protected:
     void hideEvent(QHideEvent *event) override;
 
 private:
-    Panel *hostPanel() const; // parent Panel when nested, otherwise nullptr
+    Panel *hostPanel() const; // parent Panel when nested (also through its scroll area), otherwise nullptr
+    QWidget *contentWidget() const; // the widget contentLayout() lays out: the scroll area's content, or this
     bool isVertical() const { return m_side != Side::Bottom; }
     bool isOnTitle(const QPoint &pos) const;
     bool isOnResizeEdge(const QPoint &pos) const; // inner edge of a top-level panel
@@ -115,6 +119,7 @@ private:
     QLabel *m_title = nullptr;
     QBoxLayout *m_body = nullptr;    // area below the title; m_content is aligned top/left inside it
     QBoxLayout *m_content = nullptr;
+    QScrollArea *m_scroll = nullptr; // top-level panels: scrolls the content (side panels only)
     QPropertyAnimation *m_snap = nullptr;
     Side m_side = Side::Right;
     int m_margin = 12;
