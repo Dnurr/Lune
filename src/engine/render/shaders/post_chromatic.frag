@@ -1,11 +1,9 @@
 #version 440
 
-// Chromatic aberration (display colors, after tonemapping). Author: to be written.
+// Chromatic aberration (display colors, after tonemapping)
 //
 // texA      the image
 // params0   x = intensity, y = pixel scale (image height / 1080)
-//
-// Until then: a copy.
 
 layout(location = 0) in vec2 v_uv;  // 0..1 over the target, (0,0) = top left on every backend
 layout(location = 1) in vec2 v_ndc;
@@ -29,5 +27,12 @@ layout(binding = 3) uniform sampler2D depthTex; // the scene's depth buffer, nea
 
 void main()
 {
-    fragColor = texture(texA, v_uv);
+    vec2 center = v_uv - vec2(0.5);
+    float intensity = length(v_uv - 0.5) * sqrt(2.0) * params0.x;
+
+    float r = texture(texA, v_uv + (center * intensity * -0.006)).r;
+    float g = texture(texA, v_uv + (center * intensity * -0.003)).g;
+    float b = texture(texA, v_uv + (center * intensity * -0.015)).b;
+    
+    fragColor = vec4(vec3(r, g, b), 1.0);
 }
