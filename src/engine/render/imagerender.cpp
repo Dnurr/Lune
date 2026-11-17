@@ -171,6 +171,7 @@ std::vector<QImage> renderImages(QRhi::Implementation backend, QWindow *window, 
 
         for (ViewSettings v : request.views) {
             v.skybox = request.skybox;
+            v.post = request.post;
             renderer.setViewSettings(v);
             QElapsedTimer waiting;
             waiting.start();

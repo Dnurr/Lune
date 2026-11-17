@@ -92,6 +92,35 @@ void DeleteEntityCommand::undo()
 // Rename
 // ---------------------------------------------------------------------------
 
+SetComponentCommand::SetComponentCommand(Scene *scene, EntityId id, int component, bool present)
+    : m_scene(scene)
+    , m_entity(id)
+    , m_component(component)
+    , m_present(present)
+{
+    if (const Entity *e = scene->entity(id))
+        m_before = *e;
+    const QString name = components()[size_t(component)].name;
+    setText(present ? QStringLiteral("Add %1").arg(name) : QStringLiteral("Remove %1").arg(name));
+}
+
+void SetComponentCommand::redo()
+{
+    const ComponentDesc &c = components()[size_t(m_component)];
+    m_scene->modifyEntity(m_entity, [&](Entity &e) {
+        if (m_present && c.add)
+            c.add(e);
+        else if (!m_present && c.remove)
+            c.remove(e);
+    });
+}
+
+void SetComponentCommand::undo()
+{
+    const Entity before = m_before;
+    m_scene->modifyEntity(m_entity, [&](Entity &e) { e = before; });
+}
+
 RenameEntityCommand::RenameEntityCommand(Scene *scene, EntityId id, const QString &newName)
     : m_scene(scene)
     , m_id(id)

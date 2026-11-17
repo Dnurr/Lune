@@ -1,6 +1,7 @@
 #include "camera.h"
 
 #include <QtMath>
+#include <cmath>
 
 QVector3D OrbitCamera::eye() const
 {
@@ -21,11 +22,58 @@ QVector3D OrbitCamera::right() const
     return QVector3D(qCos(y), 0.0f, -qSin(y)); // forward x world up, flattened
 }
 
+QVector3D OrbitCamera::up() const
+{
+    const QVector3D f = forward();
+    const QVector3D r = QVector3D::crossProduct(f, QVector3D(0, 1, 0)).normalized(); // pitch < 90: never zero
+    const QVector3D u = QVector3D::crossProduct(r, f);
+    if (roll == 0.0f)
+        return u;
+    const float a = qDegreesToRadians(roll);
+    return (u * qCos(a) + r * qSin(a)).normalized();
+}
+
 QMatrix4x4 OrbitCamera::view() const
 {
     QMatrix4x4 m;
-    m.lookAt(eye(), target, QVector3D(0, 1, 0));
+    m.lookAt(eye(), target, up());
     return m;
+}
+
+OrbitCamera OrbitCamera::fromSceneCamera(const Transform &transform, const Camera &camera, float distance)
+{
+    const QQuaternion q = transform.rotationQuaternion();
+    const QVector3D f = q.rotatedVector(QVector3D(0, 0, -1)).normalized();
+    const QVector3D upAxis = q.rotatedVector(QVector3D(0, 1, 0)).normalized();
+
+    OrbitCamera c;
+    c.fieldOfView = camera.fieldOfView;
+    c.nearPlane = camera.nearPlane;
+    c.farPlane = camera.farPlane;
+    c.distance = distance;
+    // The eye sits at the target + (cos p sin y, sin p, cos p cos y) * distance: that offset is -f.
+    c.pitch = qBound(-89.0f, qRadiansToDegrees(std::asin(qBound(-1.0f, -f.y(), 1.0f))), 89.0f);
+    c.yaw = qRadiansToDegrees(std::atan2(-f.x(), -f.z()));
+    if (std::hypot(f.x(), f.z()) < 1e-6f) // straight up or down: the yaw comes from the camera's up
+        c.yaw = qRadiansToDegrees(std::atan2(f.y() > 0 ? upAxis.x() : -upAxis.x(), f.y() > 0 ? upAxis.z() : -upAxis.z()));
+    c.target = QVector3D(0, 0, 0);
+    c.target = transform.position - c.eye(); // eye() is target + offset: now the eye is the position
+
+    // Roll: the camera's up measured from the unrolled up, around the view direction.
+    c.roll = 0.0f;
+    const QVector3D fw = c.forward();
+    const QVector3D r = QVector3D::crossProduct(fw, QVector3D(0, 1, 0)).normalized();
+    const QVector3D u = QVector3D::crossProduct(r, fw);
+    c.roll = qRadiansToDegrees(std::atan2(QVector3D::dotProduct(upAxis, r), QVector3D::dotProduct(upAxis, u)));
+    return c;
+}
+
+QVector3D OrbitCamera::sceneCameraRotation(const QVector3D &closeTo) const
+{
+    const QVector3D z = -forward();
+    const QVector3D y = up();
+    const QVector3D x = QVector3D::crossProduct(y, z).normalized();
+    return Transform::eulerFromQuaternion(QQuaternion::fromAxes(x, y, z), closeTo);
 }
 
 QMatrix4x4 OrbitCamera::projection(float aspect) const
@@ -105,6 +153,7 @@ void OrbitCamera::moveTowards(const OrbitCamera &goal, float amount)
     // Distance: in log space, so zooming feels the same near and far.
     distance *= qPow(goal.distance / distance, t);
     shiftX += (goal.shiftX - shiftX) * t;
+    roll += (goal.roll - roll) * t;
     fieldOfView = goal.fieldOfView;
     nearPlane = goal.nearPlane;
     farPlane = goal.farPlane;
@@ -115,7 +164,7 @@ bool OrbitCamera::isCloseTo(const OrbitCamera &other) const
     const float eps = 1e-4f * qMax(1.0f, distance);
     return (target - other.target).length() < eps && qAbs(yaw - other.yaw) < 0.01f
         && qAbs(pitch - other.pitch) < 0.01f && qAbs(distance - other.distance) < eps
-        && qAbs(shiftX - other.shiftX) < 1e-4f;
+        && qAbs(shiftX - other.shiftX) < 1e-4f && qAbs(roll - other.roll) < 0.01f;
 }
 
 void OrbitCamera::fly(const QVector3D &move)

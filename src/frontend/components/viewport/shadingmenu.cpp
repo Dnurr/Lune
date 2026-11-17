@@ -82,6 +82,14 @@ ShadingMenu::ShadingMenu(Viewport *viewport)
         m_viewport->setViewSettings(v);
     });
 
+    m_post = button("Post", "Rendered: apply the scene camera's Post Process effects (bloom, depth of field...)");
+    row->addWidget(m_post);
+    connect(m_post, &QToolButton::clicked, this, [this](bool on) {
+        ViewSettings v = m_viewport->viewSettings();
+        v.post = on;
+        m_viewport->setViewSettings(v);
+    });
+
     connect(m_viewport, &Viewport::viewSettingsChanged, this, &ShadingMenu::sync);
 
     // Stay in the corner when the viewport resizes or the left-side panels move.
@@ -99,6 +107,7 @@ void ShadingMenu::sync()
     for (int i = 0; i < m_modes.size(); ++i)
         m_modes[i]->setChecked(kModes[i].shading == v.shading);
     m_sky->setChecked(v.skybox);
+    m_post->setChecked(v.post);
     reposition();
 }
 

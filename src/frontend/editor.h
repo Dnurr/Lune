@@ -84,6 +84,12 @@ private:
     // False and `error` set if the file can't be loaded.
     bool addModel(const QString &path, QString *error, const QVector3D &position = QVector3D(), bool restOnGround = false);
     void addLight(Light::Type type);
+    // A camera where the viewport looks from (with a Post Process, every effect off).
+    void addCamera();
+    // Moves the scene camera to the viewport's view (one undo step); adds one if there's none.
+    void alignCameraToView();
+    // The viewport's passepartout and camera icons follow the render size.
+    void updateRenderAspect();
     static Entity lightPrototype(Light::Type type); // name, transform and light of a new light
     void importMeshFile();
     void deleteSelected();

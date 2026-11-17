@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QSet>
+#include <QString>
 #include <functional>
 #include <vector>
 
@@ -13,8 +15,10 @@ class Selection;
 
 // Inspector built automatically from the component descriptors (engine/scene/components.h):
 // one nested section per component the selected entity has, one row per property,
-// with an editor chosen by the property type (Vector3, number, color, checkbox, text).
-// Edits become undoable SetPropertyCommands. Hidden while nothing is selected.
+// with an editor chosen by the property type (Vector3, number, color, checkbox, text), and
+// a small heading over each group of rows. Optional components get a Remove button, and
+// Add Component lists the ones the entity can take. Edits become undoable commands
+// (SetPropertyCommand, SetComponentCommand). Hidden while nothing is selected.
 class InspectorPanel : public Panel
 {
     Q_OBJECT
@@ -42,6 +46,8 @@ private:
     EntityId m_shown = InvalidEntity;
     std::vector<bool> m_shownComponents;
     std::vector<Panel *> m_sections;
+    class QPushButton *m_addButton = nullptr; // Add Component (when the entity can take one)
+    QSet<QString> m_openGroups; // "Component/group" of the property groups shown open
     std::vector<Row> m_rows;
     bool m_updating = false; // true while refresh() writes into the editors
 };

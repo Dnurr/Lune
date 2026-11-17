@@ -89,6 +89,16 @@ public:
     const OrbitCamera &camera() const { return m_goal; }
     void setCamera(const OrbitCamera &camera);
 
+    // Camera View: look through the scene camera (Scene::sceneCamera()), following it while
+    // it moves. Orbiting, panning, zooming or flying leaves it, keeping the view where it is.
+    // Turns itself off when the scene has no camera.
+    void setCameraView(bool on);
+    bool cameraView() const { return m_cameraView; }
+    // Width / height of the rendered image, or 0 for the viewport's own (Render Settings).
+    // In Camera View the parts of the viewport outside it are darkened; the camera icons
+    // are drawn with it.
+    void setRenderAspect(float aspect);
+
     void setCameraMode(CameraMode mode);
     CameraMode cameraMode() const { return m_cameraMode; }
     // Free camera speed, world units per second.
@@ -120,6 +130,7 @@ signals:
     void cameraModeChanged(CameraMode mode);
     void flySpeedChanged(float speed);
     void viewSettingsChanged();
+    void cameraViewChanged(bool on);
 
 protected:
     bool event(QEvent *event) override;
@@ -153,6 +164,13 @@ private:
     // Once per frame, before drawing: flies the goal by the held keys, then moves the
     // drawn camera towards the goal. Returns true while it's still moving.
     bool advanceCamera();
+    // Leaves Camera View before the input moves the camera (no-op outside it).
+    void leaveCameraView();
+    // Camera View: where the rendered image is, in widget pixels (the whole widget when
+    // the render has the viewport's aspect).
+    QRectF cameraFrame() const;
+    // Aspect of the camera icons' frustums: the render's.
+    float iconAspect() const;
 
     Renderer m_renderer;
     OrbitCamera m_camera; // drawn (also used by picking and the gizmo: what you see)
@@ -173,6 +191,9 @@ private:
     bool m_overlays = true;
     ViewSettings m_view;
     CameraMode m_cameraMode = CameraMode::Orbit;
+    bool m_cameraView = false;
+    float m_renderAspect = 0.0f;
+    float m_editorFieldOfView = 50.0f; // the editor camera's lens, restored when leaving Camera View
     float m_flySpeed = 4.0f;
     bool m_flying = false;   // free camera, right button held
     QPoint m_lookAnchor;     // global cursor position, kept there while looking

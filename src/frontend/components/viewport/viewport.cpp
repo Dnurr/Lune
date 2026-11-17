@@ -8,6 +8,7 @@
 #include <QElapsedTimer>
 #include <QKeyEvent>
 #include <QtMath>
+#include <cmath>
 #include <rhi/qrhi.h>
 #include <QMouseEvent>
 #include <QUndoStack>
@@ -19,6 +20,7 @@
 #include "frontend/core/displaysettings.h"
 #include "frontend/core/selection.h"
 #include "lighticons.h"
+#include "overlaydraw.h"
 #include "statsoverlay.h"
 
 Viewport::Viewport(QWidget *parent)
@@ -78,11 +80,70 @@ void Viewport::setEditorContext(Scene *scene, Selection *selection, QUndoStack *
 
 void Viewport::setCamera(const OrbitCamera &camera)
 {
+    leaveCameraView();
     const float shift = m_goal.shiftX; // the lens shift follows the panels, not the scene
     m_camera = camera;
     m_goal = camera;
     m_camera.shiftX = m_goal.shiftX = shift;
     redraw();
+}
+
+void Viewport::setCameraView(bool on)
+{
+    if (on && !(m_scene && m_scene->sceneCamera()))
+        on = false;
+    if (on == m_cameraView)
+        return;
+    if (!on) {
+        leaveCameraView();
+        return;
+    }
+    stopFlying();
+    m_editorFieldOfView = m_goal.fieldOfView;
+    m_cameraView = true; // advanceCamera() moves the goal to the scene camera every frame
+    emit cameraViewChanged(true);
+    redraw();
+}
+
+void Viewport::leaveCameraView()
+{
+    if (!m_cameraView)
+        return;
+    m_cameraView = false;
+    // The view stays where it is, upright again, with the editor's lens.
+    m_goal.roll = 0.0f;
+    m_goal.fieldOfView = m_editorFieldOfView;
+    updateLensShift();
+    emit cameraViewChanged(false);
+    redraw();
+}
+
+void Viewport::setRenderAspect(float aspect)
+{
+    aspect = qMax(0.0f, aspect);
+    if (qAbs(aspect - m_renderAspect) < 1e-5f)
+        return;
+    m_renderAspect = aspect;
+    redraw();
+}
+
+float Viewport::iconAspect() const
+{
+    return m_renderAspect > 0.0f ? m_renderAspect : float(width()) / float(qMax(1, height()));
+}
+
+QRectF Viewport::cameraFrame() const
+{
+    const QRectF all(QPointF(0, 0), QSizeF(size()));
+    if (m_renderAspect <= 0.0f || height() <= 0)
+        return all;
+    const double widgetAspect = double(width()) / height();
+    if (m_renderAspect >= widgetAspect) { // wider: bars above and below
+        const double h = width() / m_renderAspect;
+        return QRectF(0, (height() - h) * 0.5, width(), h);
+    }
+    const double w = height() * m_renderAspect; // narrower: bars on the sides
+    return QRectF((width() - w) * 0.5, 0, w, height());
 }
 
 void Viewport::setCameraMode(CameraMode mode)
@@ -199,9 +260,28 @@ void Viewport::render(QRhiCommandBuffer *cb)
     updateGlassRects();
 
     std::vector<OverlayVertex> overlay;
+    const Entity *lookingThrough = m_cameraView && m_scene ? m_scene->sceneCamera() : nullptr;
+    if (lookingThrough && m_overlays && m_renderAspect > 0.0f) {
+        // Passepartout: what falls outside the rendered image is darkened, with a thin frame.
+        const QRectF f = cameraFrame();
+        const QColor shade(0, 0, 0, 140), line(255, 255, 255, 70);
+        const double w = width(), h = height();
+        if (f.top() > 0.5) {
+            OverlayDraw::quad(overlay, { 0, 0 }, { w, 0 }, { w, f.top() }, { 0, f.top() }, shade);
+            OverlayDraw::quad(overlay, { 0, f.bottom() }, { w, f.bottom() }, { w, h }, { 0, h }, shade);
+        }
+        if (f.left() > 0.5) {
+            OverlayDraw::quad(overlay, { 0, 0 }, { f.left(), 0 }, { f.left(), h }, { 0, h }, shade);
+            OverlayDraw::quad(overlay, { f.right(), 0 }, { w, 0 }, { w, h }, { f.right(), h }, shade);
+        }
+        OverlayDraw::segment(overlay, f.topLeft(), f.topRight(), 1.0f, line);
+        OverlayDraw::segment(overlay, f.bottomLeft(), f.bottomRight(), 1.0f, line);
+        OverlayDraw::segment(overlay, f.topLeft(), f.bottomLeft(), 1.0f, line);
+        OverlayDraw::segment(overlay, f.topRight(), f.bottomRight(), 1.0f, line);
+    }
     if (m_scene && m_overlays)
         LightIcons::append(*m_scene, m_camera, QSizeF(size()), m_selection ? m_selection->current() : InvalidEntity,
-                           overlay);
+                           iconAspect(), lookingThrough ? lookingThrough->id : InvalidEntity, overlay);
     if (layoutGizmo()) // after the icons: drawn on top of them
         m_gizmo.appendGeometry(overlay);
     m_renderer.setOverlay(std::move(overlay), float(devicePixelRatio()));
@@ -322,7 +402,10 @@ void Viewport::mousePressEvent(QMouseEvent *event)
             }
         }
         // Light icons sit on top of the scene, so they are tested before the meshes.
-        const EntityId light = m_overlays ? LightIcons::hitTest(*m_scene, m_camera, QSizeF(size()), pos) : InvalidEntity;
+        const Entity *lookingThrough = m_cameraView ? m_scene->sceneCamera() : nullptr;
+        const EntityId light = m_overlays ? LightIcons::hitTest(*m_scene, m_camera, QSizeF(size()), pos, iconAspect(),
+                                                                lookingThrough ? lookingThrough->id : InvalidEntity)
+                                          : InvalidEntity;
         if (light) {
             m_selection->select(light);
             event->accept();
@@ -337,6 +420,7 @@ void Viewport::mousePressEvent(QMouseEvent *event)
 
     if (event->button() == Qt::RightButton && m_cameraMode == CameraMode::Free) {
         // Look around: the cursor hides and stays put, only its motion counts.
+        leaveCameraView();
         m_flying = true;
         m_lookAnchor = event->globalPosition().toPoint();
         m_flyKeys.clear();
@@ -391,6 +475,11 @@ void Viewport::mouseMoveEvent(QMouseEvent *event)
     const QPoint p = pos.toPoint();
     const QPoint d = p - m_lastMouse;
     m_lastMouse = p;
+    if (d.isNull()) {
+        event->accept();
+        return;
+    }
+    leaveCameraView();
     if (m_dragButton == Qt::RightButton)
         m_goal.orbit(-d.x() * 0.3f, d.y() * 0.3f);
     else
@@ -428,6 +517,8 @@ void Viewport::mouseReleaseEvent(QMouseEvent *event)
 void Viewport::wheelEvent(QWheelEvent *event)
 {
     const float steps = event->angleDelta().y() / 120.0f;
+    if (!m_flying)
+        leaveCameraView();
     if (m_flying)
         setFlySpeed(m_flySpeed * qPow(1.2f, steps)); // while looking: flying speed
     else if (m_cameraMode == CameraMode::Free)
@@ -463,6 +554,8 @@ void Viewport::updateLensShift()
         if (right > left)
             shift = float((left + right) * 0.5 - width() * 0.5) / float(width()) * 2.0f;
     }
+    if (m_cameraView)
+        return; // centered on the camera's frame (advanceCamera())
     if (qAbs(shift - m_goal.shiftX) > 1e-4f) {
         m_goal.shiftX = shift;
         redraw();
@@ -624,6 +717,24 @@ bool Viewport::advanceCamera()
     const float elapsed = m_frameClock.isValid() ? float(m_frameClock.restart()) / 1000.0f : 0.0f;
     if (!m_frameClock.isValid())
         m_frameClock.start();
+    if (m_cameraView) {
+        const Entity *cam = m_scene ? m_scene->sceneCamera() : nullptr;
+        if (!cam) {
+            leaveCameraView(); // the camera was deleted or disabled
+        } else {
+            OrbitCamera goal = OrbitCamera::fromSceneCamera(cam->transform, *cam->camera, m_goal.distance);
+            // The camera's vertical field of view covers the frame; the viewport shows more
+            // above and below when the frame is shorter than the widget.
+            const QRectF frame = cameraFrame();
+            if (frame.height() > 0.0 && frame.height() < height() - 0.5) {
+                const double t = std::tan(qDegreesToRadians(double(goal.fieldOfView)) * 0.5) * height() / frame.height();
+                goal.fieldOfView = float(qRadiansToDegrees(2.0 * std::atan(t)));
+            }
+            goal.shiftX = 0.0f; // centered, like the render
+            goal.yaw += 360.0f * std::round((m_camera.yaw - goal.yaw) / 360.0f); // the short way round
+            m_goal = goal;
+        }
+    }
     const float dt = m_animating ? qBound(0.0f, elapsed, 0.1f) : 1.0f / 60.0f;
 
     QVector3D dir;

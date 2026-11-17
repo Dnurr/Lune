@@ -163,6 +163,41 @@ private slots:
         QVERIFY(scene->entity(id)->visible);
     }
 
+    void addAndRemoveComponents()
+    {
+        Entity proto;
+        proto.camera = Camera {};
+        const EntityId id = scene->createEntity(proto);
+        const int post = componentIndex(QStringLiteral("Post Process"));
+        const int camera = componentIndex(QStringLiteral("Camera"));
+        const ComponentDesc &postDesc = components()[size_t(post)];
+
+        // Post Process only goes on cameras.
+        QVERIFY(postDesc.addable(*scene->entity(id)));
+        const EntityId empty = scene->createEntity(QStringLiteral("Empty"));
+        QVERIFY(!postDesc.addable(*scene->entity(empty)));
+        Entity mesh;
+        mesh.mesh = Primitives::cube();
+        QVERIFY(!components()[size_t(camera)].addable(mesh)); // and cameras don't go on meshes
+
+        stack->push(new SetComponentCommand(scene, id, post, true));
+        QVERIFY(scene->entity(id)->postProcess);
+        QVERIFY(!postDesc.addable(*scene->entity(id))); // only once
+        scene->modifyEntity(id, [](Entity &e) { e.postProcess->bloom = true; });
+
+        // Removing the camera takes the post-processing with it; undo brings both back as they were.
+        stack->push(new SetComponentCommand(scene, id, camera, false));
+        QVERIFY(!scene->entity(id)->camera);
+        QVERIFY(!scene->entity(id)->postProcess);
+        stack->undo();
+        QVERIFY(scene->entity(id)->camera);
+        QVERIFY(scene->entity(id)->postProcess && scene->entity(id)->postProcess->bloom);
+        stack->undo();
+        QVERIFY(!scene->entity(id)->postProcess);
+        stack->redo();
+        QVERIFY(scene->entity(id)->postProcess);
+    }
+
     void gizmoTransformUsesExplicitBefore()
     {
         const EntityId id = scene->createEntity(QStringLiteral("A"));

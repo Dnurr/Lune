@@ -34,6 +34,7 @@ add_library(lune_engine STATIC
     src/engine/render/iblmaps.cpp
     src/engine/render/shadowmaps.cpp
     src/engine/render/imagerender.cpp
+    src/engine/render/postprocess.cpp
 )
 # Includes are relative to src/: "engine/scene/scene.h", "frontend/core/selection.h"
 target_include_directories(lune_engine PUBLIC src)
@@ -121,6 +122,14 @@ qt6_add_shaders(Lune "shaders"
         src/engine/render/shaders/shadow_front.frag
         src/engine/render/shaders/wireframe.vert
         src/engine/render/shaders/wireframe.frag
+        src/engine/render/shaders/post_dof.frag
+        src/engine/render/shaders/post_bloom_down.frag
+        src/engine/render/shaders/post_bloom_up.frag
+        src/engine/render/shaders/post_bloom_composite.frag
+        src/engine/render/shaders/post_chromatic.frag
+        src/engine/render/shaders/post_vignette.frag
+        src/engine/render/shaders/post_grain.frag
+        src/engine/render/shaders/post_fxaa.frag
 )
 
 if(WIN32)

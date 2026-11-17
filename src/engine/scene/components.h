@@ -35,6 +35,11 @@ struct PropertyDesc
     bool readOnly = false;
     QStringList options; // Enum: one id per value, used in files and shown in the Inspector
     QString fileFilter;  // File: filter of the open dialog, e.g. "HDR images (*.hdr)"
+    // Rows with the same group are shown under a small heading in the Inspector, and saved
+    // as "group.name" (names only need to be unique within their group).
+    QString group;
+
+    QString key() const { return group.isEmpty() ? name : group + QLatin1Char('.') + name; }
 };
 
 struct ComponentDesc
@@ -47,6 +52,13 @@ struct ComponentDesc
     // Optional components only: gives the entity the component with default values
     // (used when loading a file that has it).
     std::function<void(Entity &)> add;
+    // Optional components only: takes it away (Inspector: Remove Component).
+    std::function<void(Entity &)> remove;
+    // Optional components only: can the user add it to this entity (Inspector: Add Component)?
+    // Unset: any entity that doesn't have it yet.
+    std::function<bool(const Entity &)> canAdd;
+
+    bool addable(const Entity &e) const { return add && !present(e) && (!canAdd || canAdd(e)); }
 };
 
 // All components, in Inspector order.

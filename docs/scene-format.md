@@ -90,10 +90,26 @@ like the triangle count, are derived). Current components:
 | | `background` | boolean: show the environment behind the scene |
 | | `blur` | number, 0–1: background blur |
 | | `enabled` | boolean |
+| `Camera` (only on cameras) | `field of view` | number, 1–170 (default 50): vertical, degrees |
+| | `near`, `far` | numbers (default 0.1, 1000): clip planes |
+| | `enabled` | boolean |
+| `Post Process` (only on cameras) | `enabled` | boolean: all effects |
+| | `depth of field.enabled`, `.focus distance`, `.f-stop`, `.max blur` | boolean; numbers (default 5, 2.8, 8 pixels at 1080p) |
+| | `bloom.enabled`, `.intensity`, `.threshold`, `.radius` | boolean; numbers (default 0.05, 1, 0.6) |
+| | `chromatic aberration.enabled`, `.intensity` | boolean; number (default 0.5) |
+| | `vignette.enabled`, `.intensity`, `.smoothness` | boolean; numbers (default 0.3, 0.5) |
+| | `film grain.enabled`, `.intensity`, `.size` | boolean; numbers (default 0.1, 1 pixel) |
+| | `fxaa.enabled` | boolean |
 
 An entity with a `Light` component is a light. Its transform places it: a point light
 shines from its position, a directional light along its local −Y axis (straight down
 with no rotation).
+
+An entity with a `Camera` component is a camera: it looks along its local −Z axis, +Y up,
+and the first enabled one renders the scene (Render Image, Camera View). Its `Post
+Process`, when it has one, holds the effects of its image; every effect is off by
+default. Properties in a group (shown under a heading in the Inspector) are saved as
+`"group.name"`.
 
 An entity with an `Environment` component lights the scene from every direction. Its
 rotation turns the environment; its position doesn't matter. Only the first enabled one
@@ -121,6 +137,7 @@ Written by the editor (`Editor::editorState()`):
 | `display.tonemapper` | `"none"`, `"reinhard"`, `"aces"` or `"agx"`; unknown values fall back to `"none"`. |
 | `shading.mode` | Viewport shading: `"wireframe"`, `"clay"`, `"unlit"`, `"preview"` or `"rendered"` (default, also for unknown values). |
 | `shading.skybox` | The environment as background in the viewport and in rendered images (default `true`). |
+| `shading.post` | The scene camera's Post Process in Rendered, in the viewport and in rendered images (default `true`). |
 | `render.viewportSize` | Render at the viewport's size (default `true`); otherwise `render.width` x `render.height` (16–16384, default 1920 x 1080). |
 | `render.folder` | Folder of the rendered images, absolute or relative to the scene's folder; missing: `renders` next to the scene. |
 | `render.passes` | Pass ids written by Render Passes (F6), e.g. `["rendered", "clay"]`; unknown ids are dropped. Missing: rendered, wireframe, clay, unlit, preview. |

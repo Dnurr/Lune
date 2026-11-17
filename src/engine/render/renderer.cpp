@@ -155,6 +155,7 @@ void Renderer::initialize(QRhi *rhi, QRhiRenderTarget *target)
         m_backgroundUbuf = ubuf(kBackgroundUbufSize);
 
         m_ibl.initialize(m_rhi);
+        m_post.initialize(m_rhi);
         m_shadows.initialize(m_rhi);
         m_textures.initialize(m_rhi);
 
@@ -204,19 +205,31 @@ void Renderer::createSizeDependentResources()
         t->create();
         return t;
     };
-    m_sceneTex = texture(m_pixelSize, m_rhi->isTextureFormatSupported(QRhiTexture::RGBA16F, QRhiTexture::RenderTarget) ? QRhiTexture::RGBA16F : QRhiTexture::RGBA8);
+    const QRhiTexture::Format hdrFormat =
+        m_rhi->isTextureFormatSupported(QRhiTexture::RGBA16F, QRhiTexture::RenderTarget) ? QRhiTexture::RGBA16F : QRhiTexture::RGBA8;
+    m_sceneTex = texture(m_pixelSize, hdrFormat);
     // After the display pass the values are already for the screen (0..1, sRGB): 8 bits are enough.
     m_displayTex = texture(m_pixelSize, QRhiTexture::RGBA8);
     m_blurA = texture(blurSize, QRhiTexture::RGBA8);
     m_blurB = texture(blurSize, QRhiTexture::RGBA8);
 
-    m_sceneDepth.reset(m_rhi->newRenderBuffer(QRhiRenderBuffer::DepthStencil, m_pixelSize));
-    m_sceneDepth->create();
+    // Depth: a texture the post effects can sample where the backend allows it (no stencil
+    // is used), a render buffer otherwise.
+    QRhiTextureRenderTargetDescription sceneDesc { QRhiColorAttachment(m_sceneTex.get()) };
+    m_sceneDepth.reset();
+    m_sceneDepthTex.reset();
+    if (m_rhi->isTextureFormatSupported(QRhiTexture::D32F)) {
+        m_sceneDepthTex.reset(m_rhi->newTexture(QRhiTexture::D32F, m_pixelSize, 1, QRhiTexture::RenderTarget));
+        m_sceneDepthTex->create();
+        sceneDesc.setDepthTexture(m_sceneDepthTex.get());
+    } else {
+        m_sceneDepth.reset(m_rhi->newRenderBuffer(QRhiRenderBuffer::DepthStencil, m_pixelSize));
+        m_sceneDepth->create();
+        sceneDesc.setDepthStencilBuffer(m_sceneDepth.get());
+    }
 
     // Render pass descriptors are created once and reused after a resize (same formats),
     // so they always match the pipelines built with them.
-    QRhiTextureRenderTargetDescription sceneDesc { QRhiColorAttachment(m_sceneTex.get()) };
-    sceneDesc.setDepthStencilBuffer(m_sceneDepth.get());
     m_sceneRt.reset(m_rhi->newTextureRenderTarget(sceneDesc));
     if (!m_sceneRp)
         m_sceneRp.reset(m_sceneRt->newCompatibleRenderPassDescriptor());
@@ -235,6 +248,7 @@ void Renderer::createSizeDependentResources()
     m_displayRt = ldrTarget(m_displayTex.get());
     m_blurARt = ldrTarget(m_blurA.get());
     m_blurBRt = ldrTarget(m_blurB.get());
+    m_post.resize(m_pixelSize, hdrFormat, m_sceneDepthTex.get(), m_ldrRp.get());
 
     using B = QRhiShaderResourceBinding;
     const auto stages = B::VertexStage | B::FragmentStage;
@@ -248,6 +262,9 @@ void Renderer::createSizeDependentResources()
     m_gridSrb = srb({ B::uniformBuffer(0, stages, m_gridUbuf.get()) });
     m_displaySrb = srb({ B::uniformBuffer(0, stages, m_displayUbuf.get()),
                          B::sampledTexture(1, B::FragmentStage, m_sceneTex.get(), m_sampler.get()) });
+    for (int i = 0; i < 2; ++i)
+        m_displayPostSrbs[size_t(i)] = srb({ B::uniformBuffer(0, stages, m_displayUbuf.get()),
+                                             B::sampledTexture(1, B::FragmentStage, m_post.hdrTexture(i), m_sampler.get()) });
     // The blur and the final image read the display image (gizmo included), not the HDR scene.
     m_downSrb = srb({ B::uniformBuffer(0, stages, m_downUbuf.get()),
                       B::sampledTexture(1, B::FragmentStage, m_displayTex.get(), m_sampler.get()) });
@@ -364,6 +381,7 @@ void Renderer::createPipelines(QRhiRenderTarget *target)
         m_wireOverPipe = wire(true);
     }
     m_displayPipe = pipeline(fullscreen, QStringLiteral("display.frag"), m_displaySrb.get(), m_ldrRp.get(), 1);
+    m_post.createPipelines(fullscreen);
     // The overlay is interface, not scene: drawn after the display conversion, in display colors,
     // so exposure/tonemapping never touch it. It's still before the blur, so panels blur it too.
     m_overlayPipe = pipeline(loadShader(QStringLiteral("overlay.vert")), QStringLiteral("overlay.frag"),
@@ -390,6 +408,8 @@ void Renderer::release()
     m_compositePipe.reset();
     m_gridSrb.reset();
     m_displaySrb.reset();
+    for (auto &s : m_displayPostSrbs)
+        s.reset();
     m_downSrb.reset();
     m_compositeSrb.reset();
     m_overlaySrb.reset();
@@ -406,6 +426,7 @@ void Renderer::release()
     m_sceneRp.reset();
     m_ldrRp.reset();
     m_sceneDepth.reset();
+    m_sceneDepthTex.reset();
     m_sceneTex.reset();
     m_displayTex.reset();
     m_blurA.reset();
@@ -424,6 +445,7 @@ void Renderer::release()
     m_backgroundUbuf.reset();
     m_shadows.release();
     m_ibl.release();
+    m_post.release();
     m_textures.release();
     m_sampler.reset();
     m_rhi = nullptr;
@@ -1071,6 +1093,22 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         rub->updateDynamicBuffer(m_overlayUbuf.get(), 0, 16, p);
     }
 
+    // --- Post-processing: the scene camera's effects, in Rendered shading ---
+    bool post = false;
+    if (scene && m_view.post && m_view.shading == Shading::Rendered && m_view.debug == DebugView::None) {
+        const Entity *cam = scene->sceneCamera();
+        if (cam && cam->postProcess && cam->postProcess->enabled) {
+            PostProcessor::Frame frame;
+            frame.settings = *cam->postProcess;
+            frame.nearPlane = camera.nearPlane;
+            frame.farPlane = camera.farPlane;
+            frame.fieldOfView = camera.fieldOfView;
+            m_post.prepare(rub, frame);
+            post = m_post.passCount() > 0;
+        }
+    }
+    const int ldrPasses = post ? m_post.ldrPassCount() : 0;
+
     // --- Display uniforms: x = exposure (EV), y = tonemapper index, zw free ---
     {
         const float p[4] = { dataView ? 0.0f : m_exposure, dataView ? 0.0f : float(m_tonemapper), 0.0f, 0.0f };
@@ -1131,8 +1169,8 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
     m_stats = {};
     m_stats.meshes = int(draws.size());
     m_stats.textures = boundTextures;
-    m_stats.renderPasses = 8 + m_shadows.passCount() + iblPasses;
-    m_stats.drawCalls = 8 + iblPasses + (overlayCount > 0 ? 1 : 0) + (showBackground ? 1 : 0);
+    m_stats.renderPasses = 8 + m_shadows.passCount() + iblPasses + (post ? m_post.passCount() : 0);
+    m_stats.drawCalls = 8 + iblPasses + (overlayCount > 0 ? 1 : 0) + (showBackground ? 1 : 0) + (post ? m_post.passCount() : 0);
     for (const SurfaceDraw &s : surfaces) {
         m_stats.drawCalls += 1;
         m_stats.triangles += s.indexCount / 3;
@@ -1177,18 +1215,46 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
     }
     cb->endPass();
 
-    // 2. Display (8 bit, sRGB): scene converted for the screen, then the overlay (gizmo) on top
-    cb->beginPass(m_displayRt.get(), black, { 1.0f, 0 });
-    fullscreen(m_displayPipe.get(), m_displaySrb.get(), m_pixelSize);
-    if (overlayCount > 0) {
+    //    Post: HDR effects (depth of field, bloom) on the scene
+    QRhiTexture *hdr = post ? m_post.renderHdr(cb, m_sceneTex.get()) : m_sceneTex.get();
+    QRhiShaderResourceBindings *displaySrb = hdr == m_sceneTex.get() ? m_displaySrb.get()
+        : hdr == m_post.hdrTexture(0)                                 ? m_displayPostSrbs[0].get()
+                                                                      : m_displayPostSrbs[1].get();
+
+    // 2. Display (8 bit, sRGB): scene converted for the screen, the display effects, then the
+    //    overlay (gizmo) on top. The display effects ping-pong with the post target so that
+    //    the last one (or the display pass itself) writes the display image.
+    auto drawOverlay = [&] {
+        if (overlayCount == 0)
+            return;
         cb->setGraphicsPipeline(m_overlayPipe.get());
         cb->setViewport(fullViewport);
         cb->setShaderResources(m_overlaySrb.get());
         const QRhiCommandBuffer::VertexInput vin(m_overlayVbuf.get(), 0);
         cb->setVertexInput(0, 1, &vin);
         cb->draw(overlayCount);
-    }
+    };
+    // Target of the step that has `remaining` display effects after it.
+    auto ldrStep = [&](int remaining) -> std::pair<QRhiTextureRenderTarget *, QRhiTexture *> {
+        if (remaining % 2 == 0)
+            return { m_displayRt.get(), m_displayTex.get() };
+        return { m_post.ldrTarget(), m_post.ldrTexture() };
+    };
+    auto [displayTarget, displayed] = ldrStep(ldrPasses);
+    cb->beginPass(displayTarget, black, { 1.0f, 0 });
+    fullscreen(m_displayPipe.get(), displaySrb, m_pixelSize);
+    if (ldrPasses == 0)
+        drawOverlay();
     cb->endPass();
+    for (int i = 0; i < ldrPasses; ++i) {
+        const auto [target, texture] = ldrStep(ldrPasses - 1 - i);
+        cb->beginPass(target, black, { 1.0f, 0 });
+        m_post.drawLdr(cb, i, displayed, m_pixelSize);
+        if (i == ldrPasses - 1)
+            drawOverlay();
+        cb->endPass();
+        displayed = texture;
+    }
 
     // 3. Blur of the display image: downsample into A, then H (A->B), V (B->A), twice
     cb->beginPass(m_blurARt.get(), black, { 1.0f, 0 });

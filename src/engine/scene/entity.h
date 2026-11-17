@@ -66,6 +66,55 @@ struct Environment
     bool operator==(const Environment &) const = default;
 };
 
+// A camera the scene is rendered from (Render Image, Render Passes, Camera View). It looks
+// along the entity's local -Z axis with local +Y up; position and rotation come from the
+// transform, scale is ignored. Only the first enabled camera in the scene is used.
+struct Camera
+{
+    float fieldOfView = 50.0f; // vertical, degrees
+    float nearPlane = 0.1f;
+    float farPlane = 1000.0f;
+    bool enabled = true;
+
+    bool operator==(const Camera &) const = default;
+};
+
+// Post-processing of the image a camera renders, in a fixed order:
+//   HDR, before tonemapping:  depth of field, bloom
+//   display, after it:        chromatic aberration, vignette, film grain, FXAA
+// Each effect has a switch; an effect that is off costs nothing. The values reach the
+// effect's shader as params0/params1 (see PostProcessor in engine/render/postprocess.h).
+// Used from the scene camera's entity (the first enabled Camera), when it has one.
+struct PostProcess
+{
+    bool enabled = true; // all effects
+
+    bool depthOfField = false;
+    float focusDistance = 5.0f; // world units from the camera
+    float fStop = 2.8f;         // smaller = shallower focus
+    float maxBlur = 8.0f;       // circle of confusion limit, pixels at 1080p
+
+    bool bloom = false;
+    float bloomIntensity = 0.05f;
+    float bloomThreshold = 1.0f; // linear radiance where the glow starts
+    float bloomRadius = 0.6f;    // 0..1, how far the glow spreads
+
+    bool chromaticAberration = false;
+    float chromaticIntensity = 0.5f;
+
+    bool vignette = false;
+    float vignetteIntensity = 0.3f;
+    float vignetteSmoothness = 0.5f;
+
+    bool filmGrain = false;
+    float grainIntensity = 0.1f;
+    float grainSize = 1.0f; // pixels
+
+    bool fxaa = false;
+
+    bool operator==(const PostProcess &) const = default;
+};
+
 struct Entity
 {
     EntityId id = InvalidEntity;
@@ -103,4 +152,6 @@ struct Entity
 
     std::optional<Light> light;             // set = this entity is a light
     std::optional<Environment> environment; // set = this entity is the scene's environment
+    std::optional<Camera> camera;           // set = this entity is a camera
+    std::optional<PostProcess> postProcess; // effects of the image rendered by this entity's camera
 };

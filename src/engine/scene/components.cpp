@@ -141,6 +141,8 @@ ComponentDesc lightComponent()
         if (!e.light)
             e.light = Light {};
     };
+    c.remove = [](Entity &e) { e.light.reset(); };
+    c.canAdd = [](const Entity &e) { return !e.light && !e.camera; };
     return c;
 }
 ComponentDesc environmentComponent()
@@ -194,6 +196,124 @@ ComponentDesc environmentComponent()
         if (!e.environment)
             e.environment = Environment {};
     };
+    c.remove = [](Entity &e) { e.environment.reset(); };
+    c.canAdd = [](const Entity &e) { return !e.environment && !e.camera; };
+    return c;
+}
+ComponentDesc cameraComponent()
+{
+    ComponentDesc c;
+    c.name = QStringLiteral("Camera");
+    PropertyDesc fov { QStringLiteral("field of view"), PropertyType::Float, 0.1, 1.0, 170.0 };
+    PropertyDesc nearPlane { QStringLiteral("near"), PropertyType::Float, 0.001, 0.001, 1e5 };
+    PropertyDesc farPlane { QStringLiteral("far"), PropertyType::Float, 1.0, 0.01, 1e6 };
+    c.properties = { fov, nearPlane, farPlane, { QStringLiteral("enabled"), PropertyType::Bool } };
+    c.present = [](const Entity &e) { return e.camera.has_value(); };
+    c.get = [](const Entity &e, int i) -> QVariant {
+        if (!e.camera)
+            return {};
+        switch (i) {
+        case 0: return double(e.camera->fieldOfView);
+        case 1: return double(e.camera->nearPlane);
+        case 2: return double(e.camera->farPlane);
+        case 3: return e.camera->enabled;
+        }
+        return {};
+    };
+    c.set = [](Entity &e, int i, const QVariant &v) {
+        if (!e.camera)
+            return;
+        Camera &cam = *e.camera;
+        switch (i) {
+        case 0: cam.fieldOfView = float(qBound(1.0, v.toDouble(), 170.0)); break;
+        case 1: cam.nearPlane = float(qBound(0.001, v.toDouble(), 1e5)); break;
+        case 2: cam.farPlane = float(qBound(0.01, v.toDouble(), 1e6)); break;
+        case 3: cam.enabled = v.toBool(); break;
+        }
+    };
+    c.add = [](Entity &e) {
+        if (!e.camera)
+            e.camera = Camera {};
+    };
+    c.remove = [](Entity &e) {
+        e.camera.reset();
+        e.postProcess.reset(); // only means something on a camera
+    };
+    c.canAdd = [](const Entity &e) { return !e.mesh && !e.light && !e.environment; };
+    return c;
+}
+
+ComponentDesc postProcessComponent()
+{
+    // One row per field: a switch or a number, under the effect's heading.
+    struct Field
+    {
+        PropertyDesc desc;
+        bool PostProcess::*flag = nullptr;
+        float PostProcess::*value = nullptr;
+    };
+    auto flag = [](const char *name, const char *group, bool PostProcess::*member) {
+        Field f;
+        f.desc = { QString::fromLatin1(name), PropertyType::Bool };
+        f.desc.group = QString::fromLatin1(group);
+        f.flag = member;
+        return f;
+    };
+    auto number = [](const char *name, const char *group, float PostProcess::*member, double step, double lo, double hi) {
+        Field f;
+        f.desc = { QString::fromLatin1(name), PropertyType::Float, step, lo, hi };
+        f.desc.group = QString::fromLatin1(group);
+        f.value = member;
+        return f;
+    };
+    using P = PostProcess;
+    static const std::vector<Field> fields = {
+        flag("enabled", "", &P::enabled),
+        flag("enabled", "depth of field", &P::depthOfField),
+        number("focus distance", "depth of field", &P::focusDistance, 0.02, 0.01, 1e5),
+        number("f-stop", "depth of field", &P::fStop, 0.02, 0.5, 64.0),
+        number("max blur", "depth of field", &P::maxBlur, 0.05, 0.0, 64.0),
+        flag("enabled", "bloom", &P::bloom),
+        number("intensity", "bloom", &P::bloomIntensity, 0.002, 0.0, 10.0),
+        number("threshold", "bloom", &P::bloomThreshold, 0.01, 0.0, 100.0),
+        number("radius", "bloom", &P::bloomRadius, 0.005, 0.0, 1.0),
+        flag("enabled", "chromatic aberration", &P::chromaticAberration),
+        number("intensity", "chromatic aberration", &P::chromaticIntensity, 0.005, 0.0, 10.0),
+        flag("enabled", "vignette", &P::vignette),
+        number("intensity", "vignette", &P::vignetteIntensity, 0.005, 0.0, 1.0),
+        number("smoothness", "vignette", &P::vignetteSmoothness, 0.005, 0.0, 1.0),
+        flag("enabled", "film grain", &P::filmGrain),
+        number("intensity", "film grain", &P::grainIntensity, 0.002, 0.0, 1.0),
+        number("size", "film grain", &P::grainSize, 0.01, 0.5, 8.0),
+        flag("enabled", "fxaa", &P::fxaa),
+    };
+
+    ComponentDesc c;
+    c.name = QStringLiteral("Post Process");
+    for (const Field &f : fields)
+        c.properties.push_back(f.desc);
+    c.present = [](const Entity &e) { return e.postProcess.has_value(); };
+    c.get = [](const Entity &e, int i) -> QVariant {
+        if (!e.postProcess || i < 0 || i >= int(fields.size()))
+            return {};
+        const Field &f = fields[size_t(i)];
+        return f.flag ? QVariant((*e.postProcess).*f.flag) : QVariant(double((*e.postProcess).*f.value));
+    };
+    c.set = [](Entity &e, int i, const QVariant &v) {
+        if (!e.postProcess || i < 0 || i >= int(fields.size()))
+            return;
+        const Field &f = fields[size_t(i)];
+        if (f.flag)
+            (*e.postProcess).*f.flag = v.toBool();
+        else
+            (*e.postProcess).*f.value = float(qBound(f.desc.minimum, v.toDouble(), f.desc.maximum));
+    };
+    c.add = [](Entity &e) {
+        if (!e.postProcess)
+            e.postProcess = PostProcess {};
+    };
+    c.remove = [](Entity &e) { e.postProcess.reset(); };
+    c.canAdd = [](const Entity &e) { return e.camera.has_value() && !e.postProcess; };
     return c;
 }
 } // namespace
@@ -201,6 +321,6 @@ ComponentDesc environmentComponent()
 const std::vector<ComponentDesc> &components()
 {
     static const std::vector<ComponentDesc> all = { transformComponent(), meshComponent(), materialComponent(), lightComponent(),
-                                                    environmentComponent() };
+                                                    environmentComponent(), cameraComponent(), postProcessComponent() };
     return all;
 }

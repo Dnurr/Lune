@@ -94,7 +94,14 @@ void CameraMenu::reposition()
             right = qMin(right, panel->geometry().left());
     }
     adjustSize();
-    move(left + (right - left - width()) / 2, kMargin);
+    int x = left + (right - left - width()) / 2;
+    // Never over the shading bar at the top left (wider than the gap when panels are open).
+    for (QObject *child : p->children()) {
+        auto *w = qobject_cast<QWidget *>(child);
+        if (w && w != this && w->isVisible() && w->inherits("ShadingMenu"))
+            x = qMax(x, w->geometry().right() + 1 + kMargin);
+    }
+    move(x, kMargin);
 }
 
 bool CameraMenu::eventFilter(QObject *watched, QEvent *event)
@@ -109,7 +116,7 @@ bool CameraMenu::eventFilter(QObject *watched, QEvent *event)
     case QEvent::Move:
     case QEvent::Show:
     case QEvent::Hide:
-        if (watched == parentWidget() || qobject_cast<::Panel *>(watched))
+        if (watched == parentWidget() || qobject_cast<::Panel *>(watched) || watched->inherits("ShadingMenu"))
             reposition();
         break;
     default:

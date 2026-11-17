@@ -166,7 +166,7 @@ bool save(const Scene &scene, const QString &path, const QJsonObject &editorStat
             for (int i = 0; i < int(c.properties.size()); ++i) {
                 const PropertyDesc &p = c.properties[size_t(i)];
                 if (!p.readOnly) // read-only values are derived (e.g. triangle count)
-                    props[p.name] = propertyToJson(p, c.get(e, i), sceneDir);
+                    props[p.key()] = propertyToJson(p, c.get(e, i), sceneDir);
             }
             jc[c.name] = props;
         }
@@ -297,16 +297,16 @@ bool load(Scene &scene, const QString &path, QJsonObject *editorState, QStringLi
             const QJsonObject props = jc[c.name].toObject();
             for (int i = 0; i < int(c.properties.size()); ++i) {
                 const PropertyDesc &p = c.properties[size_t(i)];
-                if (p.readOnly || !props.contains(p.name))
+                if (p.readOnly || !props.contains(p.key()))
                     continue;
-                const QVariant value = propertyFromJson(p, props[p.name], sceneDir);
+                const QVariant value = propertyFromJson(p, props[p.key()], sceneDir);
                 if (value.isValid()) {
                     c.set(e, i, value);
                     // Kept anyway: the file may come back, and saving must not lose the reference.
                     if (p.type == PropertyType::File && !value.toString().isEmpty() && !QFileInfo::exists(value.toString()))
                         warn(QStringLiteral("%1: file not found: %2").arg(e.name, QDir::toNativeSeparators(value.toString())));
                 } else
-                    warn(QStringLiteral("%1: invalid value for %2.%3").arg(e.name, c.name, p.name));
+                    warn(QStringLiteral("%1: invalid value for %2.%3").arg(e.name, c.name, p.key()));
             }
         }
         entities.push_back(std::move(e));

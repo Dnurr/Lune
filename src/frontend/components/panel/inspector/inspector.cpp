@@ -8,8 +8,11 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QLabel>
+#include <QMenu>
 #include <QPushButton>
+#include <QToolButton>
 #include <QUndoStack>
+#include <memory>
 
 #include "engine/scene/components.h"
 #include "engine/scene/scene.h"
@@ -73,6 +76,11 @@ void InspectorPanel::rebuild()
     }
     m_sections.clear();
     m_rows.clear();
+    if (m_addButton) {
+        m_addButton->hide();
+        m_addButton->deleteLater();
+        m_addButton = nullptr;
+    }
 
     const Entity *e = m_scene->entity(m_selection->current());
     m_shown = e ? e->id : InvalidEntity;
@@ -100,9 +108,70 @@ void InspectorPanel::rebuild()
             labelSetters.push_back([label](int w) { label->setFixedWidth(w); });
         };
 
+        // Groups (e.g. the effects of Post Process): a heading that opens and closes the
+        // group's rows, with the group's "enabled" switch in it when it has one.
+        QString group;
+        QBoxLayout *rows = section->contentLayout(); // where the rows go: the section, or the open group
+        auto groupToggles = std::make_shared<QList<QToolButton *>>(); // one group open at a time (panels don't scroll)
         for (int pi = 0; pi < int(comp.properties.size()); ++pi) {
             const PropertyDesc &prop = comp.properties[size_t(pi)];
             Row row { ci, pi, {} };
+            if (prop.group != group) {
+                group = prop.group;
+                rows = section->contentLayout();
+                if (!group.isEmpty()) {
+                    auto *heading = new QWidget(section);
+                    auto *hl = new QHBoxLayout(heading);
+                    hl->setContentsMargins(0, 6, 3, 0);
+                    auto *toggle = new QToolButton(heading);
+                    toggle->setObjectName("PropertyGroup");
+                    toggle->setText(group.toUpper());
+                    toggle->setCheckable(true);
+                    toggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+                    toggle->setCursor(Qt::PointingHandCursor);
+                    toggle->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed); // the switch goes to the right
+                    hl->addWidget(toggle, 1);
+                    section->contentLayout()->addWidget(heading);
+
+                    auto *body = new QWidget(section);
+                    auto *bl = new QVBoxLayout(body);
+                    bl->setContentsMargins(0, 0, 0, 0);
+                    bl->setSpacing(section->contentLayout()->spacing());
+                    section->contentLayout()->addWidget(body);
+                    rows = bl;
+
+                    const QString key = comp.name + QLatin1Char('/') + group;
+                    const bool open = m_openGroups.contains(key);
+                    toggle->setChecked(open);
+                    toggle->setArrowType(open ? Qt::DownArrow : Qt::RightArrow);
+                    body->setVisible(open);
+                    groupToggles->append(toggle);
+                    connect(toggle, &QToolButton::toggled, this, [this, toggle, body, key, groupToggles](bool on) {
+                        toggle->setArrowType(on ? Qt::DownArrow : Qt::RightArrow);
+                        body->setVisible(on);
+                        if (on) {
+                            m_openGroups.insert(key);
+                            for (QToolButton *other : *groupToggles)
+                                if (other != toggle)
+                                    other->setChecked(false);
+                        } else {
+                            m_openGroups.remove(key);
+                        }
+                    });
+
+                    // The group's switch goes in the heading.
+                    if (prop.type == PropertyType::Bool && prop.name == QLatin1String("enabled")) {
+                        auto *check = new QCheckBox(heading);
+                        check->setToolTip(QStringLiteral("On / off"));
+                        check->setEnabled(!prop.readOnly);
+                        hl->addWidget(check);
+                        connect(check, &QCheckBox::toggled, this, [this, ci, pi](bool on) { edit(ci, pi, on); });
+                        row.show = [check](const QVariant &x) { check->setChecked(x.toBool()); };
+                        m_rows.push_back(std::move(row));
+                        continue;
+                    }
+                }
+            }
 
             switch (prop.type) {
             case PropertyType::Vector3: {
@@ -114,7 +183,7 @@ void InspectorPanel::rebuild()
                 row.show = [v](const QVariant &x) { v->setValue(x.value<QVector3D>()); };
                 labelHints.push_back([v] { return v->labelWidthHint(); });
                 labelSetters.push_back([v](int w) { v->setLabelWidth(w); });
-                section->contentLayout()->addWidget(v);
+                rows->addWidget(v);
                 break;
             }
             case PropertyType::Float: {
@@ -136,7 +205,7 @@ void InspectorPanel::rebuild()
                 connect(spin, &QDoubleSpinBox::valueChanged, this, [this, ci, pi](double x) { edit(ci, pi, x); });
                 row.show = [spin](const QVariant &x) { spin->setValue(x.toDouble()); };
                 alignLabel(label);
-                section->contentLayout()->addWidget(w);
+                rows->addWidget(w);
                 break;
             }
             case PropertyType::Color: {
@@ -162,7 +231,7 @@ void InspectorPanel::rebuild()
                     swatch->setToolTip(c.name().toUpper());
                 };
                 alignLabel(label);
-                section->contentLayout()->addWidget(w);
+                rows->addWidget(w);
                 break;
             }
             case PropertyType::Bool: {
@@ -176,7 +245,7 @@ void InspectorPanel::rebuild()
                 connect(check, &QCheckBox::toggled, this, [this, ci, pi](bool on) { edit(ci, pi, on); });
                 row.show = [check](const QVariant &x) { check->setChecked(x.toBool()); };
                 alignLabel(label);
-                section->contentLayout()->addWidget(w);
+                rows->addWidget(w);
                 break;
             }
             case PropertyType::Enum: {
@@ -195,7 +264,7 @@ void InspectorPanel::rebuild()
                 });
                 row.show = [combo](const QVariant &x) { combo->setCurrentIndex(x.toInt()); };
                 alignLabel(label);
-                section->contentLayout()->addWidget(w);
+                rows->addWidget(w);
                 break;
             }
             case PropertyType::File: {
@@ -236,7 +305,7 @@ void InspectorPanel::rebuild()
                     clear->setVisible(!path.isEmpty());
                 };
                 alignLabel(label);
-                section->contentLayout()->addWidget(w);
+                rows->addWidget(w);
                 break;
             }
             case PropertyType::Text: {
@@ -250,11 +319,22 @@ void InspectorPanel::rebuild()
                 l->addWidget(value, 1);
                 row.show = [value](const QVariant &x) { value->setText(x.toString()); };
                 alignLabel(label);
-                section->contentLayout()->addWidget(w);
+                rows->addWidget(w);
                 break;
             }
             }
             m_rows.push_back(std::move(row));
+        }
+
+        if (comp.remove) { // optional component: can be taken away again
+            auto *remove = new QPushButton(QStringLiteral("Remove ") + comp.name, section);
+            remove->setObjectName("RemoveComponentButton");
+            remove->setCursor(Qt::PointingHandCursor);
+            const EntityId id = e->id;
+            connect(remove, &QPushButton::clicked, this, [this, id, ci] {
+                m_undo->push(new SetComponentCommand(m_scene, id, ci, false));
+            });
+            section->contentLayout()->addWidget(remove);
         }
 
         int width = 0;
@@ -262,6 +342,27 @@ void InspectorPanel::rebuild()
             width = qMax(width, hint());
         for (const auto &set : labelSetters)
             set(width);
+    }
+
+    // Optional components this entity can take (e.g. Post Process on a camera).
+    auto *menu = new QMenu(this);
+    for (int ci = 0; ci < int(all.size()); ++ci) {
+        if (!all[size_t(ci)].addable(*e))
+            continue;
+        const EntityId id = e->id;
+        menu->addAction(all[size_t(ci)].name, this, [this, id, ci] {
+            m_undo->push(new SetComponentCommand(m_scene, id, ci, true));
+        });
+    }
+    if (!menu->isEmpty()) {
+        m_addButton = new QPushButton(QStringLiteral("Add Component"), this);
+        m_addButton->setObjectName("AddComponentButton");
+        m_addButton->setCursor(Qt::PointingHandCursor);
+        m_addButton->setMenu(menu);
+        menu->setParent(m_addButton, menu->windowFlags()); // goes away with the button
+        contentLayout()->addWidget(m_addButton);
+    } else {
+        delete menu;
     }
 
     refresh();

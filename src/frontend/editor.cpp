@@ -24,6 +24,7 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTextEdit>
+#include <QToolTip>
 #include <QUndoStack>
 
 #include "components/palette/commandpalette.h"
@@ -186,8 +187,27 @@ void Editor::createMenus()
     overlays->setChecked(true);
     connect(overlays, &QAction::toggled, m_viewport, &Viewport::setOverlaysVisible);
 
+    // Scene camera: look through it (Numpad 0, as in Blender), or move it to the view.
+    auto *cameraView = new QAction("Camera View", this);
+    cameraView->setShortcut(QKeySequence(Qt::KeypadModifier | Qt::Key_0));
+    cameraView->setCheckable(true);
+    connect(cameraView, &QAction::triggered, this, [this, cameraView](bool on) {
+        m_viewport->setCameraView(on);
+        if (on && !m_viewport->cameraView()) {
+            cameraView->setChecked(false);
+            QToolTip::showText(m_viewport->mapToGlobal(m_viewport->rect().center()),
+                               QStringLiteral("The scene has no camera: Add > Camera"), m_viewport);
+        }
+    });
+    connect(m_viewport, &Viewport::cameraViewChanged, cameraView, &QAction::setChecked);
+    auto *alignCamera = new QAction("Align Camera to View", this);
+    alignCamera->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::KeypadModifier | Qt::Key_0));
+    connect(alignCamera, &QAction::triggered, this, &Editor::alignCameraToView);
+
     QMenu *view = menuBar()->addMenu("View");
     view->addAction(m_collapsePanels);
+    view->addAction(cameraView);
+    view->addAction(alignCamera);
     view->addAction(freeCamera);
     view->addAction(overlays);
     view->addAction(stats);
@@ -223,6 +243,16 @@ void Editor::createMenus()
     auto syncSky = [this, sky] { sky->setChecked(m_viewport->viewSettings().skybox); };
     connect(m_viewport, &Viewport::viewSettingsChanged, sky, syncSky);
     syncSky();
+    auto *post = shading->addAction("Post Processing");
+    post->setCheckable(true);
+    connect(post, &QAction::triggered, this, [this](bool on) {
+        ViewSettings v = m_viewport->viewSettings();
+        v.post = on;
+        m_viewport->setViewSettings(v);
+    });
+    auto syncPost = [this, post] { post->setChecked(m_viewport->viewSettings().post); };
+    connect(m_viewport, &Viewport::viewSettingsChanged, post, syncPost);
+    syncPost();
     view->addSeparator();
 
     // Display: tonemapping operator (one checked at a time) and exposure reset.
@@ -269,6 +299,7 @@ void Editor::createMenus()
         e.environment = Environment {};
         m_undo->push(new AddEntityCommand(m_scene, m_selection, e));
     });
+    m_addMenu->addAction("Camera", this, &Editor::addCamera);
     m_addMenu->addSeparator();
     m_addMenu->addAction(importAction);
 
@@ -385,6 +416,40 @@ void Editor::addLight(Light::Type type)
     m_undo->push(new AddEntityCommand(m_scene, m_selection, e));
 }
 
+void Editor::addCamera()
+{
+    const OrbitCamera view = m_viewport->camera();
+    Entity e;
+    e.name = m_scene->uniqueName(QStringLiteral("Camera"));
+    e.transform.position = view.eye();
+    e.transform.rotation = view.sceneCameraRotation();
+    e.camera = Camera {};
+    e.postProcess = PostProcess {};
+    m_undo->push(new AddEntityCommand(m_scene, m_selection, e));
+}
+
+void Editor::alignCameraToView()
+{
+    const Entity *cam = m_scene->sceneCamera();
+    if (!cam) {
+        addCamera();
+        return;
+    }
+    if (m_viewport->cameraView())
+        return; // already looking through it
+    const OrbitCamera view = m_viewport->camera();
+    Transform t = cam->transform;
+    t.position = view.eye();
+    t.rotation = view.sceneCameraRotation(cam->transform.rotation);
+    m_undo->push(new SetTransformCommand(m_scene, cam->id, cam->transform, t, TransformField::Rotation));
+}
+
+void Editor::updateRenderAspect()
+{
+    const float aspect = m_renderSettings.viewportSize ? 0.0f : float(m_renderSettings.width) / float(m_renderSettings.height);
+    m_viewport->setRenderAspect(aspect);
+}
+
 void Editor::importMeshFile()
 {
     const QString path = QFileDialog::getOpenFileName(this, "Import Mesh", lastDirectory(), meshFileFilter());
@@ -431,6 +496,7 @@ void Editor::newScene()
     m_display->reset();
     m_viewport->setViewSettings(ViewSettings {});
     m_renderSettings = RenderSettings();
+    updateRenderAspect();
     resetDocument(QString());
 }
 
@@ -540,6 +606,7 @@ QJsonObject Editor::editorState() const
     static const char *shadingIds[] = { "wireframe", "clay", "unlit", "preview", "rendered" };
     shading["mode"] = QString::fromLatin1(shadingIds[int(v.shading)]);
     shading["skybox"] = v.skybox;
+    shading["post"] = v.post;
     QJsonObject state;
     state["camera"] = camera;
     state["display"] = display;
@@ -574,8 +641,10 @@ void Editor::applyEditorState(const QJsonObject &state)
     const int mode = shadingIds.indexOf(shading["mode"].toString());
     v.shading = mode >= 0 ? Shading(mode) : Shading::Rendered;
     v.skybox = shading["skybox"].toBool(true);
+    v.post = shading["post"].toBool(true);
     m_viewport->setViewSettings(v);
     m_renderSettings = RenderSettings::fromJson(state["render"].toObject());
+    updateRenderAspect();
 }
 
 void Editor::editRenderSettings()
@@ -584,6 +653,7 @@ void Editor::editRenderSettings()
     RenderSettingsDialog dialog(m_renderSettings, viewportPixels, m_scenePath, this);
     if (dialog.exec() == QDialog::Accepted)
         m_renderSettings = dialog.settings();
+    updateRenderAspect();
 }
 
 void Editor::renderImages(bool allPasses)
@@ -606,13 +676,18 @@ void Editor::renderImages(bool allPasses)
     request.exposure = float(m_display->exposure());
     request.tonemapper = m_display->tonemapper();
     request.skybox = m_viewport->viewSettings().skybox; // what the viewport shows
+    request.post = m_viewport->viewSettings().post;
     for (const ImagePass *p : passes)
         request.views.push_back(p->view);
 
     QString error;
     QApplication::setOverrideCursor(Qt::WaitCursor);
+    // From the scene camera; without one, from where the viewport looks.
+    OrbitCamera camera = m_viewport->camera();
+    if (const Entity *cam = m_scene->sceneCamera())
+        camera = OrbitCamera::fromSceneCamera(cam->transform, *cam->camera);
     const std::vector<QImage> images = ::renderImages(m_viewport->rhiBackend(), window()->windowHandle(), *m_scene,
-                                                      m_viewport->camera(), request, &error);
+                                                      camera, request, &error);
     QApplication::restoreOverrideCursor();
     if (images.size() != passes.size()) {
         QMessageBox::warning(this, "Render", error.isEmpty() ? QStringLiteral("Rendering failed.") : error);

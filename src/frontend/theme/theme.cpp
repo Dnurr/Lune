@@ -173,6 +173,20 @@ QPushButton#FileButton, QPushButton#FileClearButton {
 }
 QPushButton#FileClearButton { padding: 4px 0; text-align: center; color: @onSurfaceVariant; }
 QPushButton#FileButton:hover, QPushButton#FileClearButton:hover { border-color: @primary; background-color: @surfaceContainerLow; }
+/* Heading over a group of Inspector rows (e.g. one effect of Post Process) */
+QToolButton#PropertyGroup {
+    color: @onSurfaceVariant; font-size: 10px; font-weight: 600; padding: 2px 0; border: none;
+    background: transparent; text-align: left;
+}
+QToolButton#PropertyGroup:hover { color: @onSurface; }
+/* Add / remove optional components */
+QPushButton#AddComponentButton, QPushButton#RemoveComponentButton {
+    background-color: transparent; color: @onSurfaceVariant; border: 1px dashed @outline;
+    border-radius: 8px; padding: 4px 8px; min-height: 18px; font-weight: normal;
+}
+QPushButton#RemoveComponentButton { border-style: none; color: @onSurfaceVariant; margin-top: 4px; }
+QPushButton#AddComponentButton:hover, QPushButton#RemoveComponentButton:hover { color: @onSurface; border-color: @primary; }
+QPushButton#AddComponentButton::menu-indicator { image: none; width: 0; }
 
 /* Command palette (components/palette): glass, a bit more opaque than panels */
 QFrame#CommandPalette {

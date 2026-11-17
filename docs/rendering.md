@@ -26,8 +26,11 @@ flowchart LR
     subgraph P1["1 &middot; Scene (HDR, linear, color + depth)"]
         bg[Environment background] --> grid[World grid] --> meshes[Opaque meshes] --> blend[See-through meshes, far to near] --> outline[Selection outline]
     end
+    subgraph PP["Post, HDR (scene camera's Post Process)"]
+        dof[Depth of field] --> bloom[Bloom: down / up pyramid, composite]
+    end
     subgraph P2["2 &middot; Display (8 bit, sRGB)"]
-        disp[Linear to sRGB<br/>future tonemapping] --> overlay[2D overlay: gizmo]
+        disp[Exposure, tonemapping, sRGB] --> lpost[Chromatic aberration, vignette,<br/>film grain, FXAA] --> overlay[2D overlay: gizmo]
     end
     subgraph P3["3 &middot; Blur (reduced res)"]
         down[Downsample] --> h1[Blur H] --> v1[Blur V] --> h2[Blur H] --> v2[Blur V]
@@ -35,7 +38,7 @@ flowchart LR
     subgraph P4["4 &middot; Final (widget target)"]
         comp[Composite: display image, blurred copy inside glass rects]
     end
-    P0 --> PS --> P1 --> P2 --> P3 --> P4
+    P0 --> PS --> P1 --> PP --> P2 --> P3 --> P4
     P2 --> P4
 ```
 
@@ -48,7 +51,9 @@ flowchart LR
 | Grid | scene | `fullscreen.vert` + `grid.frag` | Fullscreen triangle; each pixel intersects its view ray with y = 0. No depth write: it's the background. Premultiplied alpha: opaque with its own sky, or only the lines over an environment background. Colors converted to linear on the CPU. |
 | Meshes | scene | `mesh.vert` + `mesh.frag` | Depth tested, two-sided, Cook-Torrance (GGX) shading with the scene lights and the environment maps. One draw per submesh, each with its material slot's pipeline (node material or default) and binding set. Writes linear values (can exceed 1). Blend materials last, sorted far to near by entity, with premultiplied-alpha blending and no depth writes; closed meshes in two draws, back faces then front faces, so a glass cube's far side never blends over its near side. |
 | Outline | scene | `outline.vert` + `outline.frag` | Selected entity only. "Inverted hull": back faces pushed outwards in screen space, front faces culled. Its own binding set per entity (entity uniforms only): on Direct3D 11 a binding set's registers follow the first pipeline that used it, and `mesh.frag` puts the entity block in another register. |
+| Post (HDR) | two HDR targets, bloom pyramid | `fullscreen.vert` + `post_dof.frag`, `post_bloom_down/up/composite.frag` | Only the effects that are on; see [Post-processing](#post-processing). |
 | Display | display (RGBA8) | `fullscreen.vert` + `display.frag` | Converts the linear HDR scene to sRGB for the screen. Exposure and tonemapping go here: `params.x` = exposure (EV), `params.y` = operator index (0 none, 1 Reinhard, 2 ACES, 3 AgX), set with `Renderer::setDisplayParams()` from the editor's `DisplaySettings`. |
+| Post (display) | display, post LDR target | `post_chromatic.frag`, `post_vignette.frag`, `post_grain.frag`, `post_fxaa.frag` | Ping-pong; the last one writes the display image. |
 | Overlay | display | `overlay.vert` + `overlay.frag` | Triangles in widget pixels with premultiplied alpha (the gizmo), in display colors: interface, so exposure/tonemapping never touch it; still blurred behind panels. |
 | Downsample | blur A | `downsample.frag` | Average of 4 bilinear taps (16 texels) of the display image. |
 | Blur ×4 | B, A, B, A | `blur.frag` | Separable 9-tap Gaussian with 5 bilinear fetches; two H+V iterations; `params.z` scales the sample spacing. |
@@ -247,11 +252,59 @@ normal). They are drawn on black: no environment background, no sky (an HDR sky 
 tonemapping would just clip). View 4 is an image and keeps the Display settings. Blend materials keep their
 alpha in every view.
 
+## Post-processing
+
+The effects of the scene camera's **Post Process** component (`PostProcess` in
+`entity.h`), run by `PostProcessor` (`engine/render/postprocess.h`) in Rendered shading
+when the shading bar's **Post** is on (`ViewSettings::post`). The order is fixed:
+
+| Stage | Effect | Shader | Reads |
+|---|---|---|---|
+| HDR, before tonemapping | depth of field | `post_dof.frag` | the scene, its depth |
+| | bloom | `post_bloom_down.frag` ×6, `post_bloom_up.frag` ×5, `post_bloom_composite.frag` | the scene; the pyramid |
+| display, after tonemapping | chromatic aberration | `post_chromatic.frag` | the image |
+| | vignette | `post_vignette.frag` | the image |
+| | film grain | `post_grain.frag` | the image |
+| | FXAA | `post_fxaa.frag` | the image |
+
+- An effect that is off has no pass. HDR effects ping-pong between two full-size HDR
+  targets, and the display pass reads whichever holds the result. Display effects
+  ping-pong between the display image and one more RGBA8 target, arranged so that the
+  last one writes the display image (the overlay is drawn in that pass).
+- Bloom's pyramid: `down[0]` is half the image, each next level half again (6 levels);
+  then `up[i]` is made from the level below (`texA`) and `down[i]` (`texB`), and the
+  composite adds `up[0]` (`texB`) to the scene (`texA`).
+- Every post shader has the same bindings: the `PostBuf` block at 0 (`inputSize`,
+  `outputSize`, `camera` = near, far, depth convention, seconds, then `params0`,
+  `params1`), `texA` at 1, `texB` at 2 (linear, clamped) and the scene's depth at 3
+  (nearest). Each shader's header lists what its `params0` holds. Pixel sizes in the
+  settings are for a 1080-pixel-tall image and arrive scaled, so the look doesn't depend
+  on the resolution.
+- The depth is the scene pass's depth buffer, a `D32F` texture where the backend can
+  sample it (`camera.z` tells the convention: 1 = 0..1, 0 = −1..1 on OpenGL); otherwise a
+  render buffer, and `camera.z = -1` with a white stand-in.
+- The shaders start as plain copies (bloom's composite returns the scene): the effects
+  themselves are the author's to write.
+
+## Scene cameras
+
+An entity with a **Camera** component (field of view, near, far) looks along its local
+−Z axis with +Y up; the first enabled one is the scene camera (`Scene::sceneCamera()`).
+`OrbitCamera::fromSceneCamera()` turns it into a view (with `roll`, the turn around the
+view direction; the pitch is limited to ±89° like every OrbitCamera), and
+`sceneCameraRotation()` goes back (Align Camera to View, Add > Camera).
+
+**Camera View** (Numpad 0): the viewport follows the scene camera every frame, without
+the panels' lens shift. When the render size isn't the viewport's, the parts outside the
+image are darkened (passepartout) and the vertical field of view is widened so the
+frame shows exactly the camera's. Orbiting, panning, zooming or flying leaves it. Cameras
+are drawn as frustums in the overlay and selected by clicking their lines.
+
 ## Image renders
 
-Render > Render Image (F4) and Render Passes (F6) draw the scene with the viewport's
-camera (its lens shift dropped, so the image is centered) through `renderImages()`
-(`imagerender.h`):
+Render > Render Image (F4) and Render Passes (F6) draw the scene from the scene camera
+(or, when the scene has none, from the viewport's camera with its lens shift dropped) through
+`renderImages()` (`imagerender.h`):
 
 1. A new QRhi of the viewport's backend, its own `Renderer`, and an RGBA8 texture target
    of the requested size. Nothing is shared with the viewport, so its size, overlays and
@@ -265,7 +318,9 @@ camera (its lens shift dropped, so the image is centered) through `renderImages(
 Passes (`imagePasses()`): rendered, wireframe, clay, unlit, preview, rendered + wireframe,
 normals, depth, direct light only, shadows only. Files:
 `<folder>/<scene>_frame0001.png` (F4), `<scene>_frame0001_<pass>.png` (F6). The settings
-(size, folder, background, passes) are saved in the scene's editor state.
+(size, folder, passes) are saved in the scene's editor state; the background and the
+post-processing follow the viewport's Sky and Post toggles. The rendered pass gets the
+camera's Post Process.
 
 ## Glass panels
 

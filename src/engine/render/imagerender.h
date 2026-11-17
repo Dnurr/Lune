@@ -39,6 +39,7 @@ struct ImageRenderRequest
     float exposure = 0.0f;   // EV
     int tonemapper = 0;      // DisplaySettings
     bool skybox = true;      // applied to every view
+    bool post = true;        // applied to every view (only Rendered ones have effects)
     std::vector<ViewSettings> views; // one image each
 };
 

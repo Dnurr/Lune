@@ -217,6 +217,15 @@ void Scene::modifyEntity(EntityId id, const std::function<void(Entity &)> &chang
     emit entityChanged(id);
 }
 
+const Entity *Scene::sceneCamera() const
+{
+    for (const Entity &e : m_entities) {
+        if (e.camera && e.camera->enabled)
+            return &e;
+    }
+    return nullptr;
+}
+
 QString Scene::uniqueName(const QString &base) const
 {
     auto taken = [this](const QString &n) {

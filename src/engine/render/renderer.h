@@ -13,6 +13,7 @@
 #include "engine/material/materialcompiler.h"
 #include "engine/scene/entity.h"
 #include "iblmaps.h"
+#include "postprocess.h"
 #include "shadowmaps.h"
 #include "texturecache.h"
 
@@ -77,6 +78,7 @@ struct ViewSettings
     Shading shading = Shading::Rendered;
     bool skybox = true;         // an environment with `background` on shows it; off: the plain sky
     bool wireOverlay = false;   // edges drawn over the shaded meshes
+    bool post = true;           // Rendered: the scene camera's Post Process effects (PostProcessor)
     DebugView debug = DebugView::None; // Shading::Unlit always uses DebugView::Unlit
 
     bool operator==(const ViewSettings &) const = default;
@@ -90,8 +92,11 @@ struct ViewSettings
 //      shadow  -> depth of every mesh seen from each shadowed light (ShadowMaps)
 //   1. scene   -> environment background (optional), world grid, meshes (depth tested),
 //                 selection outline                                         [HDR, linear]
-//   2. display -> scene converted for the screen (future tonemapping), then
-//                 the 2D overlay (gizmo) on top, in display colors            [8 bit, sRGB]
+//      post    -> HDR effects of the scene camera's Post Process: depth of field, bloom
+//                 (PostProcessor; Rendered shading with ViewSettings::post only)
+//   2. display -> scene converted for the screen (exposure, tonemapping), then the display
+//                 effects (chromatic aberration, vignette, film grain, FXAA), then the
+//                 2D overlay (gizmo) on top, in display colors                [8 bit, sRGB]
 //   3. blur    -> display image downsampled and blurred (Gaussian, 2 iterations)
 //   4. final   -> display image, with the blurred copy inside the "glass" rectangles
 //
@@ -267,17 +272,22 @@ private:
 
     IblMaps m_ibl; // environment cubemaps and BRDF LUT, bindings 3..5 of every mesh SRB
 
+    PostProcessor m_post; // post-processing targets and passes
+
     // Offscreen targets:
     //   scene   full size, HDR (RGBA16F) + depth, linear values
     //   display full size, RGBA8, display (sRGB) values: what ends up on screen
     //   blur    two reduced-size RGBA8 ping-pong textures
     std::unique_ptr<QRhiTexture> m_sceneTex, m_displayTex, m_blurA, m_blurB;
-    std::unique_ptr<QRhiRenderBuffer> m_sceneDepth;
+    std::unique_ptr<QRhiRenderBuffer> m_sceneDepth;   // where depth can't be sampled
+    std::unique_ptr<QRhiTexture> m_sceneDepthTex;     // otherwise: post effects read it (depth of field)
     std::unique_ptr<QRhiTextureRenderTarget> m_sceneRt, m_displayRt, m_blurARt, m_blurBRt;
     std::unique_ptr<QRhiRenderPassDescriptor> m_sceneRp; // color + depth
     std::unique_ptr<QRhiRenderPassDescriptor> m_ldrRp;   // RGBA8 color only: display and blur targets
 
     std::unique_ptr<QRhiShaderResourceBindings> m_gridSrb, m_displaySrb, m_downSrb, m_compositeSrb, m_overlaySrb;
+    // The display pass reading the HDR post targets (PostProcessor::hdrTexture(0/1)) instead of the scene.
+    std::array<std::unique_ptr<QRhiShaderResourceBindings>, 2> m_displayPostSrbs;
     std::unique_ptr<QRhiShaderResourceBindings> m_backgroundSrb;
     std::unique_ptr<QRhiShaderResourceBindings> m_meshLayoutSrb;    // layout of the per-entity SRBs
     std::unique_ptr<QRhiShaderResourceBindings> m_outlineLayoutSrb; // layout of the per-entity outline SRBs

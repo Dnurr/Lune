@@ -15,6 +15,43 @@ class TestCamera : public QObject
     Q_OBJECT
 
 private slots:
+    void sceneCameraLooksAlongMinusZ()
+    {
+        Transform t;
+        t.position = QVector3D(1, 2, 3);
+        t.rotation = QVector3D(-20, 35, 10); // tilted down, turned, rolled
+        Camera lens;
+        lens.fieldOfView = 35.0f;
+        const OrbitCamera c = OrbitCamera::fromSceneCamera(t, lens);
+        QVERIFY(near(c.eye(), t.position));
+        QVERIFY(near(c.forward(), -t.axis(2)));
+        QVERIFY(near(c.up(), t.axis(1)));
+        QCOMPARE(c.fieldOfView, 35.0f);
+        // The view matrix agrees: the camera's local axes map to view space axes.
+        const QMatrix4x4 v = c.view();
+        QVERIFY(near(v.mapVector(t.axis(2)), QVector3D(0, 0, 1)));
+        QVERIFY(near(v.mapVector(t.axis(1)), QVector3D(0, 1, 0)));
+
+        // And back: the rotation that gives this view is the one we started from.
+        Transform back;
+        back.rotation = c.sceneCameraRotation(t.rotation);
+        QVERIFY(near(back.axis(0), t.axis(0)));
+        QVERIFY(near(back.axis(1), t.axis(1)));
+        QVERIFY(near(back.rotation, t.rotation, 1e-2f));
+    }
+
+    void editorViewBecomesASceneCamera()
+    {
+        OrbitCamera view; // yaw 45, pitch 30, no roll
+        Transform t;
+        t.position = view.eye();
+        t.rotation = view.sceneCameraRotation();
+        const OrbitCamera c = OrbitCamera::fromSceneCamera(t, Camera {});
+        QVERIFY(near(c.eye(), view.eye()));
+        QVERIFY(near(c.forward(), view.forward()));
+        QVERIFY(qAbs(c.roll) < 1e-3f);
+    }
+
     void lookKeepsTheEye()
     {
         OrbitCamera c;

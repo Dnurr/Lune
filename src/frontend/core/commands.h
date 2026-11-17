@@ -62,6 +62,24 @@ private:
     QString m_before, m_after;
 };
 
+// Adds or removes an optional component (engine/scene/components.h), e.g. Post Process on
+// a camera. Removing keeps the values, so undo brings them back as they were.
+class SetComponentCommand : public QUndoCommand
+{
+public:
+    SetComponentCommand(Scene *scene, EntityId id, int component, bool present);
+
+    void redo() override;
+    void undo() override;
+
+private:
+    Scene *m_scene;
+    EntityId m_entity;
+    Entity m_before; // the whole entity: components are small
+    int m_component;
+    bool m_present;
+};
+
 // Edit of any reflected property (see engine/scene/components.h), used by the Inspector.
 // Consecutive edits of the same property of the same entity that arrive close together
 // (e.g. the many small steps of a drag on a label) merge into one undo step.

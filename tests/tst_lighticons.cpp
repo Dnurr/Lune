@@ -1,4 +1,4 @@
-// Light icons in the viewport: hit testing, and the direction of a directional light.
+// Light and camera icons in the viewport: hit testing, and the direction of a directional light.
 #include <QTest>
 
 #include "engine/scene/scene.h"
@@ -26,9 +26,9 @@ private slots:
         scene.createEntity(QStringLiteral("Not a light"));
 
         const QPointF icon = camera.project(light.transform.position, kView);
-        QCOMPARE(LightIcons::hitTest(scene, camera, kView, icon), id);
-        QCOMPARE(LightIcons::hitTest(scene, camera, kView, icon + QPointF(5, 5)), id);
-        QCOMPARE(LightIcons::hitTest(scene, camera, kView, icon + QPointF(40, 0)), InvalidEntity);
+        QCOMPARE(LightIcons::hitTest(scene, camera, kView, icon, 1.5f, InvalidEntity), id);
+        QCOMPARE(LightIcons::hitTest(scene, camera, kView, icon + QPointF(5, 5), 1.5f, InvalidEntity), id);
+        QCOMPARE(LightIcons::hitTest(scene, camera, kView, icon + QPointF(40, 0), 1.5f, InvalidEntity), InvalidEntity);
     }
 
     void closestIconWins()
@@ -41,7 +41,7 @@ private slots:
         b.transform.position = QVector3D(0.05f, 0, 0); // a few pixels apart
         scene.createEntity(a);
         const EntityId idB = scene.createEntity(b);
-        QCOMPARE(LightIcons::hitTest(scene, camera, kView, camera.project(b.transform.position, kView)), idB);
+        QCOMPARE(LightIcons::hitTest(scene, camera, kView, camera.project(b.transform.position, kView), 1.5f, InvalidEntity), idB);
     }
 
     void iconsAreDrawnOnlyForLights()
@@ -49,15 +49,38 @@ private slots:
         Scene scene;
         scene.createEntity(QStringLiteral("Empty"));
         std::vector<OverlayVertex> out;
-        LightIcons::append(scene, camera, kView, InvalidEntity, out);
+        LightIcons::append(scene, camera, kView, InvalidEntity, 1.5f, InvalidEntity, out);
         QVERIFY(out.empty());
 
         Entity light;
         light.light = Light {};
         scene.createEntity(light);
-        LightIcons::append(scene, camera, kView, InvalidEntity, out);
+        LightIcons::append(scene, camera, kView, InvalidEntity, 1.5f, InvalidEntity, out);
         QVERIFY(!out.empty());
         QCOMPARE(out.size() % 3, size_t(0)); // whole triangles
+    }
+
+    void camerasAreDrawnAndClickable()
+    {
+        Scene scene;
+        Entity cam;
+        cam.camera = Camera {};
+        cam.transform.position = QVector3D(0, 0, 0);
+        const EntityId id = scene.createEntity(cam);
+
+        std::vector<OverlayVertex> out;
+        LightIcons::append(scene, camera, kView, InvalidEntity, 1.5f, InvalidEntity, out);
+        QVERIFY(!out.empty());
+        // On the eye (where the frustum's lines meet): selects the camera.
+        const QPointF eye = camera.project(cam.transform.position, kView);
+        QCOMPARE(LightIcons::hitTest(scene, camera, kView, eye, 1.5f, InvalidEntity), id);
+        QCOMPARE(LightIcons::hitTest(scene, camera, kView, eye + QPointF(200, 200), 1.5f, InvalidEntity), InvalidEntity);
+
+        // The camera the viewport looks through: not drawn, not clickable.
+        out.clear();
+        LightIcons::append(scene, camera, kView, InvalidEntity, 1.5f, id, out);
+        QVERIFY(out.empty());
+        QCOMPARE(LightIcons::hitTest(scene, camera, kView, eye, 1.5f, id), InvalidEntity);
     }
 
     void directionalLightPointsDownWithoutRotation()

@@ -134,6 +134,41 @@ private slots:
         QVERIFY(!loaded.entities()[2].light); // no Light component: not a light
     }
 
+    void cameraAndPostProcessRoundTrip()
+    {
+        QTemporaryDir dir;
+        const QString path = dir.filePath("camera.lune");
+
+        Scene scene;
+        Entity cam;
+        cam.name = QStringLiteral("Camera");
+        cam.camera = Camera {};
+        cam.camera->fieldOfView = 28.0f;
+        cam.camera->farPlane = 250.0f;
+        cam.postProcess = PostProcess {};
+        cam.postProcess->bloom = true;
+        cam.postProcess->bloomIntensity = 0.2f;
+        cam.postProcess->vignette = true;
+        cam.postProcess->vignetteIntensity = 0.6f;
+        cam.postProcess->focusDistance = 3.5f;
+        scene.createEntity(cam);
+
+        QString error;
+        QVERIFY2(SceneIO::save(scene, path, {}, &error), qPrintable(error));
+        // Grouped properties are saved as "group.name".
+        const QJsonObject post = readJson(path)["entities"].toArray()[0].toObject()["components"].toObject()["Post Process"].toObject();
+        QCOMPARE(post["bloom.enabled"].toBool(), true);
+        QCOMPARE(post["vignette.intensity"].toDouble(), 0.6);
+
+        Scene loaded;
+        QStringList warnings;
+        QVERIFY2(SceneIO::load(loaded, path, nullptr, &warnings, &error), qPrintable(error));
+        QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join('\n')));
+        QCOMPARE(loaded.entities()[0].camera, cam.camera);
+        QCOMPARE(loaded.entities()[0].postProcess, cam.postProcess);
+        QCOMPARE(loaded.sceneCamera(), &loaded.entities()[0]);
+    }
+
     void environmentRoundTripWithRelativeImage()
     {
         QTemporaryDir dir;

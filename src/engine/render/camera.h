@@ -5,6 +5,8 @@
 #include <QSizeF>
 #include <QVector3D>
 
+#include "engine/scene/entity.h"
+
 // How the editor moves the camera. Both drive the same OrbitCamera, so switching keeps
 // the view exactly where it is.
 enum class CameraMode
@@ -33,10 +35,22 @@ public:
     // without turning the camera, e.g. to center the scene in the part of the viewport
     // that panels don't cover. Not saved with the scene.
     float shiftX = 0.0f;
+    // Turn around the view direction, degrees (positive: the image turns clockwise). Only
+    // scene cameras have it (fromSceneCamera()); the editor's own camera keeps 0.
+    float roll = 0.0f;
+
+    // The view of a scene camera: its entity's transform (looking along local -Z, +Y up) and
+    // lens. `distance`: how far ahead the orbit target goes. The pitch is limited to ±89°
+    // like any OrbitCamera, so a camera looking straight up or down is off by up to 1°.
+    static OrbitCamera fromSceneCamera(const Transform &transform, const Camera &camera, float distance = 5.0f);
+    // The rotation (Euler degrees, as in Transform::rotation) that makes a scene camera look
+    // like this view; among the equivalent sets, the one closest to `closeTo`.
+    QVector3D sceneCameraRotation(const QVector3D &closeTo = {}) const;
 
     QVector3D eye() const;
     QVector3D forward() const; // unit, from the eye towards the target
     QVector3D right() const;   // unit, horizontal
+    QVector3D up() const;      // unit, the image's up (turned by `roll`)
     QMatrix4x4 view() const;
     QMatrix4x4 projection(float aspect) const;
 

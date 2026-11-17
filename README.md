@@ -63,6 +63,11 @@ in [docs/rendering.md](docs/rendering.md).
 - **Viewport shading** (Wireframe, Clay, Unlit, Preview, Rendered) and **image renders**:
   the final image (F4) or a set of passes (F6) as PNG files, at any size, without the
   editor's overlays.
+- **Scene cameras**: render from a Camera entity, look through it (Numpad 0) with a
+  passepartout for the render's aspect, or move it to the current view.
+- **Post-processing chain**: a Post Process component on the camera (depth of field,
+  bloom with a mip pyramid, chromatic aberration, vignette, film grain, FXAA), as
+  fullscreen passes around tonemapping; effects that are off cost nothing.
 - **Scene files** (`.lune`, JSON, paths relative to the scene), a **stats overlay** (F12)
   and **automated tests** for the scene model, undo, file formats, importers, picking,
   gizmo and material compiler.
@@ -159,7 +164,7 @@ Third-party libraries are downloaded on the first configure into `build/_deps`
 |---|---|
 | Ctrl+K | Command palette |
 | Tab | Hide / show the panels and the viewport's bars (mouse over the viewport) |
-| Shift+A | Add menu at the cursor (empty, cube, sphere, plane, lights, environment, import) |
+| Shift+A | Add menu at the cursor (empty, cube, sphere, plane, lights, environment, camera, import) |
 | W / E / R | Move / rotate / scale gizmo |
 | T | Gizmo axes: global / local (scale always uses the entity's axes) |
 | Delete | Delete the selection |
@@ -168,7 +173,9 @@ Third-party libraries are downloaded on the first configure into `build/_deps`
 | Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S | New / open / save / save as |
 | Ctrl+I | Import mesh (OBJ, glTF, GLB) |
 | Shift+Alt+Z | Editor overlays on / off: grid lines, light icons, gizmo, selection outline (View > Overlays), for clean screenshots |
-| F4 | Render the image (PNG in `renders/` next to the scene) |
+| Numpad 0 | Camera View: look through the scene camera (orbiting, panning or zooming leaves it) |
+| Ctrl+Alt+Numpad 0 | Align Camera to View: move the scene camera to the current view (adds one if there's none) |
+| F4 | Render the image from the scene camera (PNG in `renders/` next to the scene) |
 | F6 | Render the passes chosen in Render > Render Settings, one PNG each |
 | F12 | Stats overlay |
 

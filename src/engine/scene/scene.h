@@ -40,6 +40,9 @@ public:
     // Name not used by any entity: "Entity", "Entity 2", "Entity 3"...
     QString uniqueName(const QString &base) const;
 
+    // The camera the scene is rendered from: the first entity with an enabled Camera, or null.
+    const Entity *sceneCamera() const;
+
     // Materials. Removing one doesn't touch the entities using it: they fall back to their
     // own surface values until it comes back (undo) or they're given another one.
     MaterialId addMaterial(Material prototype); // fresh id; returns it
