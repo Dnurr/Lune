@@ -76,7 +76,7 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 - [x] Translucent shadows in `Shadow()` from `shadowTranslucency`, colored (Author)
 - [x] Material Output `subsurface`, `subsurfaceColor`, `subsurfaceRadius` (Claude)
 - [x] Front depth in the translucency map, for thickness (Claude)
-- [ ] Subsurface scattering in the light loop: wrap lighting, back light, thickness from the front depth (Author)
+- [x] Subsurface scattering in the light loop: wrap lighting, back light, thickness from the front depth (Author)
 - [ ] OBJ materials (.mtl) to node graphs (Claude)
 
 ### Viewport shading and image renders

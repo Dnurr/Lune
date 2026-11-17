@@ -177,6 +177,8 @@ without shadows; a scene without lights gets the default sun, which casts them).
 
 ### Translucent shadows
 
+![A stained-glass pane's colored shadow, and subsurface scattering on the sphere](images/translucency.jpg)
+
 Blend materials (glass, smoke) don't write the depth atlases. Their shadows go into the
 **translucency map**: one RGBA16F texture at half the atlases' resolution
 (`TranslucencyScale`): the directional atlas's region at the bottom (in QRhi's viewport

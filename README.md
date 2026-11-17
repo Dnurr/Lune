@@ -13,8 +13,8 @@ are written by hand, and an **editor** around it that keeps the interface out of
 The viewport fills the window; the few panels float over it as translucent glass, and most
 actions are one keystroke or one search in the command palette away.
 
-> **Status:** active development. Rendering: PBR, image-based lighting, shadows and
-> textured node materials are done; the post-processing effects are being written now,
+> **Status:** active development. Rendering: PBR, image-based lighting, soft and
+> translucent shadows, subsurface scattering and textured node materials are done; the post-processing effects are being written now,
 > then a timeline and GPU particles (see the [roadmap](docs/roadmap.md)).
 
 ## Try it
@@ -53,11 +53,21 @@ in [docs/rendering.md](docs/rendering.md).
     then a rotated Poisson-disk PCF filters it;
   - cascaded shadow maps for directional lights, with dithered blending across cascades;
   - point lights through cube faces in a shared atlas, with guard borders between faces;
-  - normal-offset and slope-scaled bias against acne.
+  - normal-offset and slope-scaled bias against acne;
+  - **colored translucent shadows**: glass and other blended materials tint the light
+    they let through, from a translucency map drawn alongside the shadow atlases.
+- **Subsurface scattering**: wrap lighting tinted per channel and light passing through
+  the back of thin or soft objects, attenuated by the thickness the light crosses
+  (measured from a front-depth map of every caster).
 - **HDR pipeline**: linear lighting in a 16-bit float target, exposure, tonemapping with
   Reinhard, ACES (Hill fit) or AgX.
 - **Surface model** for node materials: base color, roughness, metallic, normal (from
-  normal maps), ambient occlusion and emission.
+  normal maps), ambient occlusion, emission, alpha, subsurface.
+
+![Colored shadows through a stained-glass pane, and subsurface scattering on a sphere](docs/images/translucency.jpg)
+
+<sub>A stained-glass pane casts a colored shadow, softer the farther it falls (PCSS), and
+the sphere's subsurface scattering lets light bleed around its terminator.</sub>
 
 ## Editor and engine
 
@@ -103,6 +113,7 @@ Lune is a personal project, developed with the help of
 |---|---|
 | Shading, lighting, BRDF, image-based lighting shaders | Author |
 | Shadow filtering: PCF, PCSS, cascade selection and blending | Author |
+| Translucent colored shadows, subsurface scattering | Author |
 | HDR display pass and tonemapping | Author |
 | Material nodes for shading (normal map, noise, ...) | Author |
 | GPU resource plumbing (render targets, atlases, cascades fitting, bindings) | Claude, with the author's review |
