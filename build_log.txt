@@ -1,0 +1,126 @@
+[INFO] Carico l'ambiente MSVC da "C:\Program Files\Microsoft Visual Studio\2022\Community"
+
+=== Configure ===
+-- Could NOT find WrapVulkanHeaders (missing: Vulkan_INCLUDE_DIR) 
+src/engine/render/shaders/fullscreen.vert -> fullscreen.vert.qsb exposed as :/shaders/fullscreen.vert.qsb
+src/engine/render/shaders/fullscreen_flipped.vert -> fullscreen_flipped.vert.qsb exposed as :/shaders/fullscreen_flipped.vert.qsb
+src/engine/render/shaders/grid.frag -> grid.frag.qsb exposed as :/shaders/grid.frag.qsb
+src/engine/render/shaders/display.frag -> display.frag.qsb exposed as :/shaders/display.frag.qsb
+src/engine/render/shaders/downsample.frag -> downsample.frag.qsb exposed as :/shaders/downsample.frag.qsb
+src/engine/render/shaders/blur.frag -> blur.frag.qsb exposed as :/shaders/blur.frag.qsb
+src/engine/render/shaders/composite.frag -> composite.frag.qsb exposed as :/shaders/composite.frag.qsb
+src/engine/render/shaders/mesh.vert -> mesh.vert.qsb exposed as :/shaders/mesh.vert.qsb
+src/engine/render/shaders/mesh.frag -> mesh.frag.qsb exposed as :/shaders/mesh.frag.qsb
+src/engine/render/shaders/outline.vert -> outline.vert.qsb exposed as :/shaders/outline.vert.qsb
+src/engine/render/shaders/outline.frag -> outline.frag.qsb exposed as :/shaders/outline.frag.qsb
+src/engine/render/shaders/overlay.vert -> overlay.vert.qsb exposed as :/shaders/overlay.vert.qsb
+src/engine/render/shaders/overlay.frag -> overlay.frag.qsb exposed as :/shaders/overlay.frag.qsb
+src/engine/render/shaders/cube.vert -> cube.vert.qsb exposed as :/shaders/cube.vert.qsb
+src/engine/render/shaders/equirect_to_cube.frag -> equirect_to_cube.frag.qsb exposed as :/shaders/equirect_to_cube.frag.qsb
+src/engine/render/shaders/irradiance.frag -> irradiance.frag.qsb exposed as :/shaders/irradiance.frag.qsb
+src/engine/render/shaders/prefilter.frag -> prefilter.frag.qsb exposed as :/shaders/prefilter.frag.qsb
+src/engine/render/shaders/brdf_lut.frag -> brdf_lut.frag.qsb exposed as :/shaders/brdf_lut.frag.qsb
+src/engine/render/shaders/background.vert -> background.vert.qsb exposed as :/shaders/background.vert.qsb
+src/engine/render/shaders/background.frag -> background.frag.qsb exposed as :/shaders/background.frag.qsb
+src/engine/render/shaders/shadow.vert -> shadow.vert.qsb exposed as :/shaders/shadow.vert.qsb
+src/engine/render/shaders/shadow.frag -> shadow.frag.qsb exposed as :/shaders/shadow.frag.qsb
+src/engine/render/shaders/shadow_material.vert -> shadow_material.vert.qsb exposed as :/shaders/shadow_material.vert.qsb
+src/engine/render/shaders/shadow_front.vert -> shadow_front.vert.qsb exposed as :/shaders/shadow_front.vert.qsb
+src/engine/render/shaders/shadow_front.frag -> shadow_front.frag.qsb exposed as :/shaders/shadow_front.frag.qsb
+src/engine/render/shaders/wireframe.vert -> wireframe.vert.qsb exposed as :/shaders/wireframe.vert.qsb
+src/engine/render/shaders/wireframe.frag -> wireframe.frag.qsb exposed as :/shaders/wireframe.frag.qsb
+src/engine/render/shaders/post_dof.frag -> post_dof.frag.qsb exposed as :/shaders/post_dof.frag.qsb
+src/engine/render/shaders/post_bloom_down.frag -> post_bloom_down.frag.qsb exposed as :/shaders/post_bloom_down.frag.qsb
+src/engine/render/shaders/post_bloom_up.frag -> post_bloom_up.frag.qsb exposed as :/shaders/post_bloom_up.frag.qsb
+src/engine/render/shaders/post_bloom_composite.frag -> post_bloom_composite.frag.qsb exposed as :/shaders/post_bloom_composite.frag.qsb
+src/engine/render/shaders/post_chromatic.frag -> post_chromatic.frag.qsb exposed as :/shaders/post_chromatic.frag.qsb
+src/engine/render/shaders/post_vignette.frag -> post_vignette.frag.qsb exposed as :/shaders/post_vignette.frag.qsb
+src/engine/render/shaders/post_grain.frag -> post_grain.frag.qsb exposed as :/shaders/post_grain.frag.qsb
+src/engine/render/shaders/post_fxaa.frag -> post_fxaa.frag.qsb exposed as :/shaders/post_fxaa.frag.qsb
+-- Configuring done (2.1s)
+-- Generating done (0.7s)
+-- Build files have been written to: C:/Users/steru/Desktop/Projects/Dev/Engine/Lune/build
+
+=== Build ===
+[0/2] Re-checking globbed directories...
+[1/50] Generating .qsb/post_bloom_composite.frag.qsb
+[2/50] Generating .qsb/post_bloom_down.frag.qsb
+[3/50] Generating .qsb/post_bloom_up.frag.qsb
+[4/50] Automatic MOC for target lune_engine
+[5/49] Generating .qsb/post_chromatic.frag.qsb
+[6/49] Generating .qsb/post_dof.frag.qsb
+[7/49] Generating .qsb/post_fxaa.frag.qsb
+[8/49] Generating .qsb/post_grain.frag.qsb
+[9/49] Generating .qsb/post_vignette.frag.qsb
+[10/49] Building CXX object CMakeFiles\lune_engine.dir\src\engine\render\postprocess.cpp.obj
+[11/49] Building CXX object CMakeFiles\lune_engine.dir\src\engine\render\imagerender.cpp.obj
+[12/49] Building CXX object CMakeFiles\lune_engine.dir\src\engine\render\renderer.cpp.obj
+[13/49] Linking CXX static library lune_engine.lib
+[14/49] Building CXX object CMakeFiles\lune_editor_core.dir\src\frontend\components\viewport\overlaydraw.cpp.obj
+[15/49] Building CXX object CMakeFiles\lune_editor_core.dir\src\frontend\components\viewport\lighticons.cpp.obj
+[16/49] Building CXX object CMakeFiles\lune_editor_core.dir\src\frontend\components\viewport\gizmo.cpp.obj
+[17/49] Building CXX object CMakeFiles\lune_editor_core.dir\src\frontend\core\rendersettings.cpp.obj
+[18/49] Linking CXX static library lune_editor_core.lib
+[19/49] Linking CXX executable tests\tst_commands.exe
+[20/49] Linking CXX executable tests\tst_scene.exe
+[21/49] Linking CXX executable tests\tst_displaysettings.exe
+[22/49] Linking CXX executable tests\tst_meshimport.exe
+[23/49] Linking CXX executable tests\tst_sceneio.exe
+[24/49] Linking CXX executable tests\tst_picking.exe
+[25/49] Linking CXX executable tests\tst_hdrimage.exe
+[26/49] Linking CXX executable tests\tst_displayhistory.exe
+[27/49] Linking CXX executable tests\tst_camera.exe
+[28/49] Linking CXX executable tests\tst_material.exe
+[29/49] Automatic MOC for target tst_lighticons
+[30/48] Automatic MOC for target Lune
+[31/48] Running rcc for resource shaders
+[32/48] Building CXX object CMakeFiles\Lune.dir\build\.qt\rcc\qrc_shaders.cpp.obj
+[33/48] Building CXX object tests\CMakeFiles\tst_rendersettings.dir\tst_rendersettings.cpp.obj
+[34/48] Building CXX object tests\CMakeFiles\tst_gizmo.dir\tst_gizmo.cpp.obj
+[35/48] Linking CXX executable tests\tst_gizmo.exe
+[36/48] Linking CXX executable tests\tst_rendersettings.exe
+[37/48] Building CXX object CMakeFiles\Lune.dir\src\frontend\components\viewport\statsoverlay.cpp.obj
+[38/48] Building CXX object CMakeFiles\Lune.dir\src\frontend\components\viewport\cameramenu.cpp.obj
+[39/48] Building CXX object CMakeFiles\Lune.dir\src\frontend\components\viewport\shadingmenu.cpp.obj
+[40/48] Building CXX object tests\CMakeFiles\tst_lighticons.dir\tst_lighticons.cpp.obj
+[41/48] Building CXX object CMakeFiles\Lune.dir\src\frontend\components\viewport\viewport.cpp.obj
+[42/48] Linking CXX executable tests\tst_lighticons.exe
+[43/48] Building CXX object CMakeFiles\Lune.dir\src\frontend\components\render\rendersettingsdialog.cpp.obj
+[44/48] Building CXX object CMakeFiles\Lune.dir\Lune_autogen\mocs_compilation.cpp.obj
+[45/48] Building CXX object CMakeFiles\Lune.dir\src\frontend\components\panel\nodes\nodespanel.cpp.obj
+[46/48] Building CXX object CMakeFiles\Lune.dir\src\frontend\editor.cpp.obj
+[47/48] Linking CXX executable Lune.exe
+C:\Users\steru\Desktop\Projects\Dev\Engine\Lune\build\Lune.exe 64 bit, release executable
+Adding in plugin type generic for module: Qt6Gui
+Adding Qt6Network for qtuiotouchplugin.dll from plugin type: generic
+Adding in plugin type iconengines for module: Qt6Gui
+Adding Qt6Svg for qsvgicon.dll from plugin type: iconengines
+Adding in plugin type imageformats for module: Qt6Gui
+Adding in plugin type networkinformation for module: Qt6Network
+Adding in plugin type platforms for module: Qt6Gui
+Adding in plugin type styles for module: Qt6Widgets
+Adding in plugin type tls for module: Qt6Network
+Skipping plugin qopensslbackend.dll. Use -force-openssl or specify -openssl-root if you want to use it.
+Direct dependencies: Qt6Core Qt6Gui Qt6ShaderTools Qt6Widgets
+All dependencies   : Qt6Core Qt6Gui Qt6ShaderTools Qt6Widgets
+To be deployed     : Qt6Core Qt6Gui Qt6Network Qt6ShaderTools Qt6Svg Qt6Widgets
+Qt6Core.dll is up to date.
+Qt6Gui.dll is up to date.
+Qt6Network.dll is up to date.
+Qt6ShaderTools.dll is up to date.
+Qt6Svg.dll is up to date.
+Qt6Widgets.dll is up to date.
+dxcompiler.dll is up to date.
+dxil.dll is up to date.
+vc_redist.x64.exe is up to date.
+qtuiotouchplugin.dll is up to date.
+qsvgicon.dll is up to date.
+qgif.dll is up to date.
+qico.dll is up to date.
+qjpeg.dll is up to date.
+qsvg.dll is up to date.
+qnetworklistmanager.dll is up to date.
+qwindows.dll is up to date.
+qmodernwindowsstyle.dll is up to date.
+qcertonlybackend.dll is up to date.
+qschannelbackend.dll is up to date.

@@ -29,5 +29,8 @@ layout(binding = 3) uniform sampler2D depthTex; // the scene's depth buffer, nea
 
 void main()
 {
-    fragColor = texture(texA, v_uv);
+    float vignette = 1.0 - length(v_uv - 0.5) * sqrt(2);
+    vignette = smoothstep(0.0, max(params0.y, 0.0001), vignette);
+    vec3 final = mix(texture(texA, v_uv).rgb, texture(texA, v_uv).rgb * vignette, params0.x);
+    fragColor = vec4(final, 1.0);
 }
