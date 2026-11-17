@@ -512,7 +512,7 @@
      "enabled": true,
      "ground": "#2e2b28",
      "sky": "#b8c8e0",
-     "image": "",
+     "image": "sky.hdr",
      "intensity": 1
     }
    }

@@ -21,9 +21,9 @@ actions are one keystroke or one search in the command palette away.
 
 A prebuilt Windows build (64-bit, Windows 10 / 11, Direct3D 11) is on the
 [Releases](https://github.com/Dnurr/Lune/releases) page: unzip it, run `Lune.exe` and
-open `demos/materials.lune`, a roughness / metallic chart lit by a sun and a point light
-with soft shadows. Drop any `.hdr` image on the viewport to light it with an environment,
-or a `.glb` model to place it. To build from source, see [Building](#building).
+open `demos/materials.lune`, a roughness / metallic chart lit by an HDR environment, a
+sun and a point light with soft shadows. Drop another `.hdr` image on the viewport to
+change the environment, or a `.glb` model to place it. To build from source, see [Building](#building).
 
 **Reading the code:** the hand-written rendering lives in
 [`src/engine/render/shaders`](src/engine/render/shaders). Good places to start:
@@ -243,7 +243,8 @@ docs/                  documentation
 - [cgltf](https://github.com/jkuhlmann/cgltf) (MIT): glTF 2.0 parsing.
 
 The screenshots show Intel's [Sponza](https://www.intel.com/content/www/us/en/developer/topic-technology/graphics-research/samples.html)
-sample scene (CC BY 4.0), which is not part of this repository.
+sample scene (CC BY 4.0), which is not part of this repository. The demo's environment,
+`demos/sky.hdr`, is an AI-generated image (Qwen).
 
 Techniques adapted in the shaders (`src/engine/render/shaders/display.frag`):
 
