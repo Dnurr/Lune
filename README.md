@@ -14,8 +14,28 @@ The viewport fills the window; the few panels float over it as translucent glass
 actions are one keystroke or one search in the command palette away.
 
 > **Status:** active development. Rendering: PBR, image-based lighting, shadows and
-> textured node materials are done; post-processing, a timeline and GPU particles are next
-> (see the [roadmap](docs/roadmap.md)).
+> textured node materials are done; the post-processing effects are being written now,
+> then a timeline and GPU particles (see the [roadmap](docs/roadmap.md)).
+
+## Try it
+
+A prebuilt Windows build (64-bit, Windows 10 / 11, Direct3D 11) is on the
+[Releases](https://github.com/Dnurr/Lune/releases) page: unzip it, run `Lune.exe` and
+open `demos/materials.lune`, a roughness / metallic chart lit by a sun and a point light
+with soft shadows. Drop any `.hdr` image on the viewport to light it with an environment,
+or a `.glb` model to place it. To build from source, see [Building](#building).
+
+**Reading the code:** the hand-written rendering lives in
+[`src/engine/render/shaders`](src/engine/render/shaders). Good places to start:
+
+- [`mesh.frag`](src/engine/render/shaders/mesh.frag): the BRDF (`DistGGX`, `GeomSmith`,
+  `Fresnel`), the light loop, PCSS shadows and cascade blending (`Shadow`), split-sum
+  ambient lighting;
+- [`prefilter.frag`](src/engine/render/shaders/prefilter.frag),
+  [`irradiance.frag`](src/engine/render/shaders/irradiance.frag),
+  [`brdf_lut.frag`](src/engine/render/shaders/brdf_lut.frag): the image-based lighting
+  precomputation;
+- [`display.frag`](src/engine/render/shaders/display.frag): exposure and tonemapping.
 
 ## Rendering
 
@@ -136,6 +156,14 @@ ctest --test-dir build --output-on-failure
 Third-party libraries are downloaded on the first configure into `build/_deps`
 (see [`cmake/dependencies.cmake`](cmake/dependencies.cmake)).
 
+### Packaging
+
+```bat
+package.bat             :: build, then out\Lune-windows-x64.zip: Lune, Qt, the MSVC runtime, demos
+```
+
+The zip runs on a machine without Qt or Visual Studio; it's what goes on the Releases page.
+
 ## Using the editor
 
 ### Mouse
@@ -192,6 +220,7 @@ src/
     components/        viewport + gizmo, panels (inspector, outliner, assets), palette, widgets
     theme/             palette, stylesheet, icons (tinted with the theme's colors)
 assets/icons/          interface icons: white SVGs, embedded at :/icons/<name>.svg
+demos/                 example scenes, shipped in the release zip
 tests/                 Qt Test suites, one executable per tst_*.cpp
 cmake/                 third-party dependencies
 scripts/               build helpers used by run.bat and test.bat

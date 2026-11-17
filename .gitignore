@@ -11,3 +11,6 @@ CMakeUserPresets.json
 
 # Logs
 *.log
+
+# Images rendered from the demo scenes (F4 / F6)
+renders/

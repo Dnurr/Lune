@@ -1,0 +1,586 @@
+{
+ "format": "lune-scene",
+ "version": 1,
+ "entities": [
+  {
+   "id": 1,
+   "name": "Floor",
+   "mesh": "primitive:plane",
+   "components": {
+    "Transform": {
+     "position": [
+      0,
+      0,
+      0
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": [
+      400,
+      400,
+      400
+     ]
+    },
+    "Mesh": {
+     "color": "#8a8580",
+     "visible": true
+    },
+    "Material": {
+     "roughness": 0.8,
+     "metallic": 0
+    }
+   }
+  },
+  {
+   "id": 2,
+   "name": "Dielectric 0",
+   "mesh": "primitive:sphere",
+   "components": {
+    "Transform": {
+     "position": [
+      -3.125,
+      0.5,
+      0.75
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": [
+      1,
+      1,
+      1
+     ]
+    },
+    "Mesh": {
+     "color": "#c23b2a",
+     "visible": true
+    },
+    "Material": {
+     "roughness": 0.0,
+     "metallic": 0
+    }
+   }
+  },
+  {
+   "id": 3,
+   "name": "Dielectric 0.2",
+   "mesh": "primitive:sphere",
+   "components": {
+    "Transform": {
+     "position": [
+      -1.875,
+      0.5,
+      0.75
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": [
+      1,
+      1,
+      1
+     ]
+    },
+    "Mesh": {
+     "color": "#c23b2a",
+     "visible": true
+    },
+    "Material": {
+     "roughness": 0.2,
+     "metallic": 0
+    }
+   }
+  },
+  {
+   "id": 4,
+   "name": "Dielectric 0.4",
+   "mesh": "primitive:sphere",
+   "components": {
+    "Transform": {
+     "position": [
+      -0.625,
+      0.5,
+      0.75
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": [
+      1,
+      1,
+      1
+     ]
+    },
+    "Mesh": {
+     "color": "#c23b2a",
+     "visible": true
+    },
+    "Material": {
+     "roughness": 0.4,
+     "metallic": 0
+    }
+   }
+  },
+  {
+   "id": 5,
+   "name": "Dielectric 0.6",
+   "mesh": "primitive:sphere",
+   "components": {
+    "Transform": {
+     "position": [
+      0.625,
+      0.5,
+      0.75
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": [
+      1,
+      1,
+      1
+     ]
+    },
+    "Mesh": {
+     "color": "#c23b2a",
+     "visible": true
+    },
+    "Material": {
+     "roughness": 0.6,
+     "metallic": 0
+    }
+   }
+  },
+  {
+   "id": 6,
+   "name": "Dielectric 0.8",
+   "mesh": "primitive:sphere",
+   "components": {
+    "Transform": {
+     "position": [
+      1.875,
+      0.5,
+      0.75
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": [
+      1,
+      1,
+      1
+     ]
+    },
+    "Mesh": {
+     "color": "#c23b2a",
+     "visible": true
+    },
+    "Material": {
+     "roughness": 0.8,
+     "metallic": 0
+    }
+   }
+  },
+  {
+   "id": 7,
+   "name": "Dielectric 1",
+   "mesh": "primitive:sphere",
+   "components": {
+    "Transform": {
+     "position": [
+      3.125,
+      0.5,
+      0.75
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": [
+      1,
+      1,
+      1
+     ]
+    },
+    "Mesh": {
+     "color": "#c23b2a",
+     "visible": true
+    },
+    "Material": {
+     "roughness": 1.0,
+     "metallic": 0
+    }
+   }
+  },
+  {
+   "id": 8,
+   "name": "Metal 0",
+   "mesh": "primitive:sphere",
+   "components": {
+    "Transform": {
+     "position": [
+      -3.125,
+      0.5,
+      -0.75
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": [
+      1,
+      1,
+      1
+     ]
+    },
+    "Mesh": {
+     "color": "#f0d090",
+     "visible": true
+    },
+    "Material": {
+     "roughness": 0.0,
+     "metallic": 1
+    }
+   }
+  },
+  {
+   "id": 9,
+   "name": "Metal 0.2",
+   "mesh": "primitive:sphere",
+   "components": {
+    "Transform": {
+     "position": [
+      -1.875,
+      0.5,
+      -0.75
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": [
+      1,
+      1,
+      1
+     ]
+    },
+    "Mesh": {
+     "color": "#f0d090",
+     "visible": true
+    },
+    "Material": {
+     "roughness": 0.2,
+     "metallic": 1
+    }
+   }
+  },
+  {
+   "id": 10,
+   "name": "Metal 0.4",
+   "mesh": "primitive:sphere",
+   "components": {
+    "Transform": {
+     "position": [
+      -0.625,
+      0.5,
+      -0.75
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": [
+      1,
+      1,
+      1
+     ]
+    },
+    "Mesh": {
+     "color": "#f0d090",
+     "visible": true
+    },
+    "Material": {
+     "roughness": 0.4,
+     "metallic": 1
+    }
+   }
+  },
+  {
+   "id": 11,
+   "name": "Metal 0.6",
+   "mesh": "primitive:sphere",
+   "components": {
+    "Transform": {
+     "position": [
+      0.625,
+      0.5,
+      -0.75
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": [
+      1,
+      1,
+      1
+     ]
+    },
+    "Mesh": {
+     "color": "#f0d090",
+     "visible": true
+    },
+    "Material": {
+     "roughness": 0.6,
+     "metallic": 1
+    }
+   }
+  },
+  {
+   "id": 12,
+   "name": "Metal 0.8",
+   "mesh": "primitive:sphere",
+   "components": {
+    "Transform": {
+     "position": [
+      1.875,
+      0.5,
+      -0.75
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": [
+      1,
+      1,
+      1
+     ]
+    },
+    "Mesh": {
+     "color": "#f0d090",
+     "visible": true
+    },
+    "Material": {
+     "roughness": 0.8,
+     "metallic": 1
+    }
+   }
+  },
+  {
+   "id": 13,
+   "name": "Metal 1",
+   "mesh": "primitive:sphere",
+   "components": {
+    "Transform": {
+     "position": [
+      3.125,
+      0.5,
+      -0.75
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": [
+      1,
+      1,
+      1
+     ]
+    },
+    "Mesh": {
+     "color": "#f0d090",
+     "visible": true
+    },
+    "Material": {
+     "roughness": 1.0,
+     "metallic": 1
+    }
+   }
+  },
+  {
+   "id": 14,
+   "name": "Sun",
+   "mesh": null,
+   "components": {
+    "Transform": {
+     "position": [
+      0,
+      4,
+      0
+     ],
+     "rotation": [
+      -50,
+      35,
+      0
+     ],
+     "scale": [
+      1,
+      1,
+      1
+     ]
+    },
+    "Light": {
+     "type": "directional",
+     "color": "#fff2e0",
+     "intensity": 3,
+     "shadows": true,
+     "size": 1,
+     "softness": 0,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": 15,
+   "name": "Fill",
+   "mesh": null,
+   "components": {
+    "Transform": {
+     "position": [
+      -3.5,
+      1.2,
+      2.5
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": [
+      1,
+      1,
+      1
+     ]
+    },
+    "Light": {
+     "type": "point",
+     "color": "#7fa8ff",
+     "intensity": 20,
+     "shadows": true,
+     "size": 0.1,
+     "softness": 0,
+     "enabled": true
+    }
+   }
+  },
+  {
+   "id": 16,
+   "name": "Environment",
+   "mesh": null,
+   "components": {
+    "Transform": {
+     "position": [
+      0,
+      0,
+      0
+     ],
+     "rotation": [
+      0,
+      0,
+      0
+     ],
+     "scale": [
+      1,
+      1,
+      1
+     ]
+    },
+    "Environment": {
+     "background": true,
+     "blur": 0,
+     "enabled": true,
+     "ground": "#2e2b28",
+     "sky": "#b8c8e0",
+     "image": "",
+     "intensity": 1
+    }
+   }
+  },
+  {
+   "id": 17,
+   "name": "Camera",
+   "mesh": null,
+   "components": {
+    "Transform": {
+     "position": [
+      0,
+      3.2,
+      11
+     ],
+     "rotation": [
+      -14,
+      0,
+      0
+     ],
+     "scale": [
+      1,
+      1,
+      1
+     ]
+    },
+    "Camera": {
+     "field of view": 35,
+     "near": 0.1,
+     "far": 1000,
+     "enabled": true
+    },
+    "Post Process": {
+     "enabled": true,
+     "vignette.enabled": true,
+     "vignette.intensity": 0.35,
+     "vignette.smoothness": 0.6
+    }
+   }
+  }
+ ],
+ "editor": {
+  "camera": {
+   "target": [
+    0,
+    0.5,
+    0
+   ],
+   "yaw": 0,
+   "pitch": 14,
+   "distance": 8.5
+  },
+  "display": {
+   "exposure": 0,
+   "tonemapper": "agx"
+  },
+  "render": {
+   "viewportSize": false,
+   "width": 1920,
+   "height": 1080,
+   "passes": [
+    "rendered"
+   ]
+  },
+  "shading": {
+   "mode": "rendered",
+   "skybox": true,
+   "post": true
+  }
+ }
+}
