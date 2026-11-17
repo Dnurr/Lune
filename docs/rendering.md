@@ -230,9 +230,21 @@ Shading, and every pass of an image render):
 with a negative depth bias so they don't fight their own triangles).
 
 **Debug views**: `lightCount.y` in the lights block tells `mesh.frag`'s `main()` what to
-write instead of the shaded color (`DebugView` in `renderer.h`): 1 base color, 2 normal,
-3 linear depth, 4 direct light only, 5 shadow factors. Until `main()` handles them, those
-views look like Rendered.
+write instead of the shaded color (`DebugView` in `renderer.h`):
+
+| View | `main()` writes |
+|---|---|
+| 1 Unlit | the base color, right after the surface (no lighting) |
+| 2 Normals | the shading normal (normal maps, two-sided flip included) as 0.5 + 0.5 * N |
+| 3 Depth | distance along the camera's view, 0 at the camera, 1 at the farthest mesh (`lightCount.z`, float bits, computed by the Renderer from the meshes' bounds) |
+| 4 Direct | the light loop only: no environment, no emission |
+| 5 Shadows | the lights' shadow factors averaged (translucent shadows keep their color), white = lit |
+
+Views 1, 2, 3 and 5 are data: the Renderer sets exposure 0 and no tonemapping for them,
+and `main()` writes each value through `debugValue()` (the inverse of the display's sRGB
+encoding), so the 8-bit image holds the value itself (a normal pass reads back as the
+normal). View 4 is an image and keeps the Display settings. Blend materials keep their
+alpha in every view.
 
 ## Image renders
 

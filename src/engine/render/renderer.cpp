@@ -734,6 +734,23 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         rub->updateDynamicBuffer(m_gridUbuf.get(), 0, kGridUbufSize, data);
     }
 
+    // --- Depth view (DebugView::Depth): 0 at the camera, 1 at the farthest mesh along the view ---
+    float depthFar = 1.0f;
+    if (debugView == DebugView::Depth && scene) {
+        const QVector3D forward = (camera.target - eye).normalized();
+        for (const Entity &e : scene->entities()) {
+            if (!e.mesh || e.mesh->indices.empty() || !e.visible)
+                continue;
+            const QMatrix4x4 model = e.transform.matrix();
+            const QVector3D &lo = e.mesh->boundsMin, &hi = e.mesh->boundsMax;
+            for (int c = 0; c < 8; ++c) {
+                const QVector3D corner = model.map(QVector3D(c & 1 ? hi.x() : lo.x(), c & 2 ? hi.y() : lo.y(),
+                                                             c & 4 ? hi.z() : lo.z()));
+                depthFar = qMax(depthFar, QVector3D::dotProduct(corner - eye, forward));
+            }
+        }
+    }
+
     // --- Lights: one buffer for the frame, shared by every mesh ---
     std::vector<ShadowMaps::Light> shadowLights; // every light of the buffer, in order
     {
@@ -766,8 +783,11 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
             shadowLights.push_back({ 0, false, QVector3D(), direction, true, sun.size, sun.softness });
             put(Light::Directional, QVector3D(), direction, Qt::white, 3.0f);
         }
-        // y: what mesh.frag writes (DebugView), 0 = the shaded color.
-        const qint32 header[4] = { count, qint32(debugView), 0, 0 };
+        // y: what mesh.frag writes (DebugView), 0 = the shaded color; z: the depth view's
+        // far distance (float bits).
+        qint32 farBits = 0;
+        std::memcpy(&farBits, &depthFar, sizeof(farBits));
+        const qint32 header[4] = { count, qint32(debugView), farBits, 0 };
         std::memcpy(data, header, sizeof(header));
         rub->updateDynamicBuffer(m_lightsUbuf.get(), 0, kLightsUbufSize, data);
     }
@@ -1049,7 +1069,9 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
 
     // --- Display uniforms: x = exposure (EV), y = tonemapper index, zw free ---
     {
-        const float p[4] = { m_exposure, float(m_tonemapper), 0.0f, 0.0f };
+        // Data views (base color, normals, depth, shadows): shown as they are.
+        const bool data = debugView != DebugView::None && debugView != DebugView::DirectOnly;
+        const float p[4] = { data ? 0.0f : m_exposure, data ? 0.0f : float(m_tonemapper), 0.0f, 0.0f };
         rub->updateDynamicBuffer(m_displayUbuf.get(), 0, 16, p);
     }
 

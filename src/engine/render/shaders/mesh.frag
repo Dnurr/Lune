@@ -35,9 +35,14 @@ layout(std140, binding = 1) uniform lightsBuf {
                       // y: debug view (DebugView in renderer.h): what main() should write
                       //    instead of the shaded color (the viewport's Unlit shading and the
                       //    debug passes of Render Passes):
-                      //      0 the shaded color          3 linear distance from the camera
+                      //      0 the shaded color          3 depth along the view, 0..1 (z below)
                       //      1 base color, no lighting   4 the scene lights only (no ambient)
                       //      2 normal, 0.5 + 0.5 * N     5 the shadow factors (white = lit)
+                      //    1, 2, 3, 5 are data, not images: the Renderer turns exposure and
+                      //    tonemapping off for them, and main() writes them so the 8-bit
+                      //    display image holds the value itself (see debugValue()).
+                      // z: depth view's far distance (float bits: intBitsToFloat): the
+                      //    farthest mesh along the camera's view
     Light lights[MAX_LIGHTS];
 };
 
@@ -412,6 +417,14 @@ vec3 Shadow(int i, int type, vec3 N, out float thickness)
     return lit / 16.0 * Translucency(type, p, tile, texel, radius, rot, dReceiver, depthScale, bias);
 }
 
+// A debug view's value (0..1) as the linear color whose display encoding (sRGB, no
+// exposure or tonemapping: see lightCount.y) is that value again.
+vec3 debugValue(vec3 value)
+{
+    value = clamp(value, 0.0, 1.0);
+    return mix(value / 12.92, pow((value + 0.055) / 1.055, vec3(2.4)), step(0.04045, value));
+}
+
 // Cook-Torrance PBR Model
 void main()
 {
@@ -424,6 +437,22 @@ void main()
     vec3 V = normalize(cameraPos.xyz - v_world);
     
     if (dot(Ng, V) < 0.0) { Ng = -Ng; N = -N; }
+
+    // Debug views without lighting (lightCount.y): written and done.
+    int debugView = lightCount.y;
+    if (debugView >= 1 && debugView <= 3)
+    {
+        float viewAlpha = material.w > 1.5 ? surf.alpha : 1.0;
+        vec3 value;
+        if (debugView == 1)
+            value = surf.baseColor; // linear: the display's sRGB encoding gives the color back
+        else if (debugView == 2)
+            value = debugValue(0.5 + 0.5 * N);
+        else
+            value = debugValue(vec3(dot(v_world - cameraPos.xyz, cameraForward.xyz) / intBitsToFloat(lightCount.z)));
+        fragColor = vec4(value * viewAlpha, viewAlpha);
+        return;
+    }
 
     vec3 albedo = surf.baseColor;
     float roughness = max(surf.roughness, 0.045);
@@ -443,6 +472,7 @@ void main()
     vec3 ambientSpec = prefiltered * (kS * lut.r + lut.g) * envParams.x * surf.occlusion;
 
     vec3 final = vec3(0.0);
+    vec3 shadowSum = vec3(0.0); // debug view 5: the lights' shadow factors, averaged
 
     for (int i = 0; i < lightCount.x; i++)
     {
@@ -476,6 +506,7 @@ void main()
         if (slot >= 0)
             shadow = Shadow(i, int(lights[i].position.w), Ng, thickness);
         else thickness = surf.subsurfaceRadius;
+        shadowSum += shadow;
 
         vec3 Lt = L + N * 0.2;
         float back = pow(max(dot(V, -Lt), 0.0), 4.0);
@@ -494,7 +525,14 @@ void main()
     vec3 irradiance = texture(irradianceMap, toEnvironment(N)).rgb;
     vec3 ambient = kD * albedo * irradiance * envParams.x * surf.occlusion;
 
-    final += (ambient + ambientSpec) * alpha + surf.emission;
+    if (debugView == 5)
+    {
+        vec3 value = debugValue(lightCount.x > 0 ? shadowSum / float(lightCount.x) : vec3(1.0));
+        fragColor = vec4(value * alpha, alpha);
+        return;
+    }
+    if (debugView != 4) // 4: the scene lights only
+        final += (ambient + ambientSpec) * alpha + surf.emission;
 
     fragColor = vec4(final, surf.alpha);
 }

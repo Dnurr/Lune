@@ -75,7 +75,9 @@ RenderSettingsDialog::RenderSettingsDialog(const RenderSettings &settings, const
         auto *box = new QCheckBox(p.title, passes);
         box->setChecked(settings.passes.contains(p.id));
         if (p.view.debug != DebugView::None)
-            box->setToolTip("Written by mesh.frag's debug views (lightCount.y): looks like Rendered until they're there");
+            box->setToolTip(p.view.debug == DebugView::DirectOnly
+                                ? "The scene lights only: no environment light, no emission"
+                                : "Data, not an image: written without exposure or tonemapping");
         grid->addWidget(box, i / 2, i % 2);
         m_passes.insert(p.id, box);
         ++i;
