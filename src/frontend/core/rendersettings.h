@@ -23,7 +23,6 @@ struct RenderSettings
     int height = 1080;
     QString folder;           // empty: the default folder
     QStringList passes = defaultPasses();
-    int frame = 1;            // the current frame (no animation yet)
 
     static constexpr int MinSize = 16;
     static constexpr int MaxSize = 16384;

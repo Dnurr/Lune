@@ -100,6 +100,9 @@ private:
     // Render menu: the final image (F4), or every pass of the render settings (F6), saved
     // as PNG files and shown in a result window.
     void renderImages(bool allPasses);
+    // Render Video (F5): every frame of the timeline from the scene camera, as PNG files in
+    // "<scene>_video" in the render folder, then an MP4 next to them when ffmpeg is installed.
+    void renderVideo();
     void editRenderSettings();
 
     // Scene files

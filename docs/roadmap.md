@@ -84,7 +84,7 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 - [x] Shading menu: Wireframe, Clay, Unlit, Preview (environment only), Rendered; environment background toggle (Claude)
 - [x] Render Image (F4) and Render Passes (F6) to PNG on their own QRhi, Render Settings, result window (Claude)
 - [x] Debug views in `main()` from `lightCount.y`: unlit, normals, depth, direct light only, shadows only (Claude, on the Author's request)
-- [ ] Render Video (F5), once there's a timeline (Claude)
+- [x] Render Video (F5): the timeline's frames as PNG files, an MP4 through ffmpeg when installed (Claude)
 
 ### Color management
 
@@ -127,9 +127,10 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 ## 6. Output
 
 - [x] Render settings: resolution, output folder, passes (Claude)
-- [ ] Render settings: frame range, samples (Claude)
+- [x] Render settings: frame range (the timeline's) (Claude)
+- [ ] Render settings: samples (Claude)
 - [x] Offline render off the viewport (its own QRhi) (Claude)
-- [ ] Progress and cancel for long renders (Claude)
+- [x] Progress and cancel for long renders (Render Video) (Claude)
 - [ ] EXR writer for image sequences, 16 or 32-bit float, linear (Claude)
 - [x] PNG output with the display transform applied (Claude)
 - [ ] JPEG output (Claude)

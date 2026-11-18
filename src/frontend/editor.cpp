@@ -20,7 +20,14 @@
 #include <QKeyEvent>
 #include <QLineEdit>
 #include <QMenuBar>
+#include <QDesktopServices>
+#include <QElapsedTimer>
 #include <QPlainTextEdit>
+#include <QProcess>
+#include <QProgressDialog>
+#include <QPushButton>
+#include <QUrl>
+#include <cmath>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTextEdit>
@@ -307,9 +314,8 @@ void Editor::createMenus()
     QMenu *render = menuBar()->addMenu("Render");
     auto *renderImage = render->addAction("Render Image", this, [this] { renderImages(false); });
     renderImage->setShortcut(QKeySequence(Qt::Key_F4));
-    auto *renderVideo = render->addAction("Render Video (not yet)");
+    auto *renderVideo = render->addAction("Render Video", this, &Editor::renderVideo);
     renderVideo->setShortcut(QKeySequence(Qt::Key_F5));
-    renderVideo->setEnabled(false); // needs animation first
     auto *renderPasses = render->addAction("Render Passes", this, [this] { renderImages(true); });
     renderPasses->setShortcut(QKeySequence(Qt::Key_F6));
     render->addSeparator();
@@ -697,6 +703,122 @@ void Editor::applyEditorState(const QJsonObject &state)
     Animation::apply(*m_scene); // also when the frame didn't change
 }
 
+void Editor::renderVideo()
+{
+    const Timeline timeline = m_scene->timeline();
+    const QSize size = m_renderSettings.imageSize(m_viewport->size() * m_viewport->devicePixelRatio());
+    const QString base = m_scenePath.isEmpty() ? QStringLiteral("untitled") : QFileInfo(m_scenePath).completeBaseName();
+    const QString folder = QDir(m_renderSettings.outputFolder(m_scenePath)).filePath(base + QStringLiteral("_video"));
+    if (!QDir().mkpath(folder)) {
+        QMessageBox::warning(this, "Render Video", QStringLiteral("Can't create the folder %1.").arg(QDir::toNativeSeparators(folder)));
+        return;
+    }
+    m_playback->pause();
+
+    // A copy of the scene goes from frame to frame, so the editor's stays where it is.
+    Scene scene;
+    for (const Material &m : m_scene->materials())
+        scene.insertMaterial(m);
+    for (const Entity &e : m_scene->entities())
+        scene.insertEntity(e);
+    scene.setTimeline(timeline);
+
+    QString error;
+    ImageRenderSession session;
+    if (!session.begin(m_viewport->rhiBackend(), window()->windowHandle(), size, float(m_display->exposure()),
+                       m_display->tonemapper(), &error)) {
+        QMessageBox::warning(this, "Render Video", error);
+        return;
+    }
+    ViewSettings view = imagePasses().front().view; // the final image
+    view.skybox = m_viewport->viewSettings().skybox;
+    view.post = m_viewport->viewSettings().post;
+
+    const int count = timeline.frameCount();
+    QProgressDialog progress(QStringLiteral("Rendering frame 1 of %1...").arg(count), QStringLiteral("Cancel"), 0, count, this);
+    progress.setWindowTitle("Render Video");
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setMinimumDuration(0);
+    progress.setValue(0);
+    QElapsedTimer clock;
+    clock.start();
+    int done = 0;
+    for (int f = timeline.start; f <= timeline.end; ++f) {
+        if (progress.wasCanceled())
+            break;
+        scene.setFrame(f);
+        Animation::apply(scene);
+        // From the scene camera at this frame (it may be animated); without one, the viewport's.
+        OrbitCamera camera = m_viewport->camera();
+        if (const Entity *cam = scene.sceneCamera())
+            camera = OrbitCamera::fromSceneCamera(cam->transform, *cam->camera);
+        const QImage image = session.render(scene, camera, view, float(timeline.seconds(f)), &error);
+        const QString path = QDir(folder).filePath(RenderSettings::fileName(base, f));
+        if (image.isNull() || !image.save(path)) {
+            progress.cancel();
+            QMessageBox::warning(this, "Render Video",
+                                 image.isNull() ? error : QStringLiteral("Can't write %1.").arg(QDir::toNativeSeparators(path)));
+            return;
+        }
+        ++done;
+        const double perFrame = clock.elapsed() / 1000.0 / done;
+        const int left = int(std::lround(perFrame * (count - done)));
+        progress.setLabelText(QStringLiteral("Rendering frame %1 of %2 (%3 s per frame, about %4:%5 left)...")
+                                  .arg(qMin(done + 1, count))
+                                  .arg(count)
+                                  .arg(perFrame, 0, 'f', 2)
+                                  .arg(left / 60)
+                                  .arg(left % 60, 2, 10, QLatin1Char('0')));
+        progress.setValue(done);
+        QCoreApplication::processEvents();
+    }
+    session.end();
+    progress.reset();
+
+    // The MP4, when ffmpeg is installed (H.264, even sizes for yuv420p).
+    QString video;
+    QString encodeNote;
+    const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    if (done == count && !ffmpeg.isEmpty()) {
+        video = QDir(folder).filePath(base + QStringLiteral(".mp4"));
+        QProcess process;
+        process.setProcessChannelMode(QProcess::MergedChannels);
+        const QString pattern = QDir(folder).filePath(base + QStringLiteral("_frame%04d.png"));
+        process.start(ffmpeg, { "-y", "-loglevel", "error", "-framerate", QString::number(timeline.fps), "-start_number",
+                                QString::number(timeline.start), "-i", pattern, "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", video });
+        QProgressDialog encoding(QStringLiteral("Encoding %1...").arg(QFileInfo(video).fileName()), QString(), 0, 0, this);
+        encoding.setWindowTitle("Render Video");
+        encoding.setWindowModality(Qt::WindowModal);
+        encoding.setMinimumDuration(0);
+        encoding.show();
+        while (!process.waitForFinished(50))
+            QCoreApplication::processEvents();
+        if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+            encodeNote = QStringLiteral("\n\nffmpeg couldn't make the video:\n") + QString::fromLocal8Bit(process.readAll()).trimmed();
+            video.clear();
+        }
+    } else if (done == count) {
+        encodeNote = QStringLiteral("\n\nInstall ffmpeg (for example: winget install ffmpeg) to get an MP4 as well.");
+    }
+
+    QMessageBox box(this);
+    box.setWindowTitle("Render Video");
+    box.setIcon(done == count ? QMessageBox::Information : QMessageBox::Warning);
+    QString text = done == count ? QStringLiteral("Rendered %1 frames in %2 s.").arg(count).arg(clock.elapsed() / 1000.0, 0, 'f', 1)
+                                 : QStringLiteral("Stopped after %1 of %2 frames.").arg(done).arg(count);
+    text += QStringLiteral("\n\nFrames: %1").arg(QDir::toNativeSeparators(folder));
+    if (!video.isEmpty())
+        text += QStringLiteral("\nVideo: %1").arg(QDir::toNativeSeparators(video));
+    box.setText(text + encodeNote);
+    QPushButton *open = box.addButton(video.isEmpty() ? QStringLiteral("Open Folder") : QStringLiteral("Play Video"),
+                                      QMessageBox::ActionRole);
+    box.addButton(QMessageBox::Close);
+    box.exec();
+    if (box.clickedButton() == open)
+        QDesktopServices::openUrl(QUrl::fromLocalFile(video.isEmpty() ? folder : video));
+}
+
 void Editor::editRenderSettings()
 {
     const QSize viewportPixels = m_viewport->size() * m_viewport->devicePixelRatio();
@@ -754,7 +876,7 @@ void Editor::renderImages(bool allPasses)
     QStringList titles, paths;
     for (size_t i = 0; i < passes.size(); ++i) {
         const QString path = QDir(folder).filePath(
-            RenderSettings::fileName(base, m_renderSettings.frame, allPasses ? passes[i]->id : QString()));
+            RenderSettings::fileName(base, int(std::lround(m_playback->frame())), allPasses ? passes[i]->id : QString()));
         if (!images[i].save(path)) {
             QMessageBox::warning(this, "Render", QStringLiteral("Can't write %1.").arg(QDir::toNativeSeparators(path)));
             return;

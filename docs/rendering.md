@@ -324,10 +324,19 @@ Render > Render Image (F4) and Render Passes (F6) draw the scene from the scene 
 
 Passes (`imagePasses()`): rendered, wireframe, clay, unlit, preview, rendered + wireframe,
 normals, depth, direct light only, shadows only. Files:
-`<folder>/<scene>_frame0001.png` (F4), `<scene>_frame0001_<pass>.png` (F6). The settings
+`<folder>/<scene>_frame0001.png` (F4), `<scene>_frame0001_<pass>.png` (F6), numbered with
+the frame shown in the Timeline. The settings
 (size, folder, passes) are saved in the scene's editor state; the background and the
 post-processing follow the viewport's Sky and Post toggles. The rendered pass gets the
 camera's Post Process.
+
+**Render Video** (F5) keeps one `ImageRenderSession` (device, target, Renderer) for every
+frame of the timeline, so textures, environment maps and pipelines are made once. A copy of
+the scene goes through the frames (`Scene::setFrame()`, `Animation::apply()`): the editor's
+scene doesn't move, and the scene camera is read at each frame, so it can be animated.
+Frames go to `<folder>/<scene>_video/<scene>_frame0001.png` and so on, with progress and
+Cancel; when `ffmpeg` is on the PATH they're then encoded into `<scene>.mp4` next to them
+(H.264, yuv420p, CRF 18, sizes rounded down to even).
 
 ## Glass panels
 

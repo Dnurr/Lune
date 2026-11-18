@@ -106,89 +106,138 @@ const ImagePass *imagePass(const QString &id)
     return nullptr;
 }
 
+struct ImageRenderSession::Impl
+{
+    std::unique_ptr<QOffscreenSurface> surface; // OpenGL only; outlives the QRhi
+    std::unique_ptr<QRhi> rhi;
+    std::unique_ptr<QRhiTexture> texture;
+    std::unique_ptr<QRhiTextureRenderTarget> target;
+    std::unique_ptr<QRhiRenderPassDescriptor> rp;
+    Renderer renderer;
+    bool rendererReady = false;
+
+    // One offscreen frame; with `out`, the image is read back into it.
+    bool frame(const Scene &scene, const OrbitCamera &camera, QImage *out)
+    {
+        QRhiCommandBuffer *cb = nullptr;
+        if (rhi->beginOffscreenFrame(&cb) != QRhi::FrameOpSuccess)
+            return false;
+        renderer.render(cb, target.get(), camera, &scene, InvalidEntity);
+        QRhiReadbackResult result;
+        if (out) {
+            QRhiResourceUpdateBatch *rub = rhi->nextResourceUpdateBatch();
+            rub->readBackTexture({ texture.get() }, &result);
+            cb->resourceUpdate(rub);
+        }
+        if (rhi->endOffscreenFrame() != QRhi::FrameOpSuccess) // waits for the GPU
+            return false;
+        if (out) {
+            QImage image(reinterpret_cast<const uchar *>(result.data.constData()), result.pixelSize.width(),
+                         result.pixelSize.height(), QImage::Format_RGBA8888);
+            // Rows come bottom-up where framebuffers are y-up (OpenGL). Opaque: the
+            // composite pass's alpha means nothing.
+            image = rhi->isYUpInFramebuffer() ? image.mirrored() : image.copy();
+            *out = image.convertToFormat(QImage::Format_RGB32);
+        }
+        return true;
+    }
+};
+
+ImageRenderSession::ImageRenderSession() = default;
+
+ImageRenderSession::~ImageRenderSession()
+{
+    end();
+}
+
+bool ImageRenderSession::begin(QRhi::Implementation backend, QWindow *window, const QSize &size, float exposure,
+                               int tonemapper, QString *error)
+{
+    end();
+    auto fail = [&](const QString &message) {
+        if (error)
+            *error = message;
+        end();
+        return false;
+    };
+    if (size.isEmpty())
+        return fail(QStringLiteral("The image size is empty."));
+    d = std::make_unique<Impl>();
+    d->rhi = createRhi(backend, window, d->surface);
+    if (!d->rhi)
+        return fail(QStringLiteral("Couldn't create a %1 device for rendering.").arg(QString::fromLatin1(QRhi::backendName(backend))));
+    const int maxSize = d->rhi->resourceLimit(QRhi::TextureSizeMax);
+    if (size.width() > maxSize || size.height() > maxSize)
+        return fail(QStringLiteral("The image is larger than the GPU allows (%1 pixels).").arg(maxSize));
+    d->texture.reset(d->rhi->newTexture(QRhiTexture::RGBA8, size, 1, QRhiTexture::RenderTarget | QRhiTexture::UsedAsTransferSource));
+    if (!d->texture->create())
+        return fail(QStringLiteral("Couldn't create a %1 x %2 image (out of video memory?).").arg(size.width()).arg(size.height()));
+    d->target.reset(d->rhi->newTextureRenderTarget({ QRhiColorAttachment(d->texture.get()) }));
+    d->rp.reset(d->target->newCompatibleRenderPassDescriptor());
+    d->target->setRenderPassDescriptor(d->rp.get());
+    d->target->create();
+    d->renderer.initialize(d->rhi.get(), d->target.get());
+    d->rendererReady = true;
+    d->renderer.setGridLinesVisible(false);
+    d->renderer.setDisplayParams(exposure, tonemapper);
+    return true;
+}
+
+QImage ImageRenderSession::render(const Scene &scene, OrbitCamera camera, const ViewSettings &view, float seconds,
+                                  QString *error)
+{
+    if (!d || !d->rendererReady) {
+        if (error)
+            *error = QStringLiteral("The render device isn't ready.");
+        return {};
+    }
+    camera.shiftX = 0.0f; // centered: the panels' lens shift is for the viewport only
+    d->renderer.setViewSettings(view);
+    d->renderer.setTime(seconds);
+    QElapsedTimer waiting;
+    waiting.start();
+    bool ok = d->frame(scene, camera, nullptr);
+    while (ok && d->renderer.needsAnotherFrame() && waiting.elapsed() < kTextureWaitMs) {
+        QThread::msleep(5);
+        ok = d->frame(scene, camera, nullptr);
+    }
+    QImage image;
+    if (!ok || !d->frame(scene, camera, &image) || image.isNull()) {
+        if (error)
+            *error = QStringLiteral("Rendering failed (the GPU device was lost?).");
+        return {};
+    }
+    return image;
+}
+
+void ImageRenderSession::end()
+{
+    if (!d)
+        return;
+    if (d->rendererReady)
+        d->renderer.release();
+    d->target.reset();
+    d->rp.reset();
+    d->texture.reset();
+    d->rhi.reset();
+    d->surface.reset();
+    d.reset();
+}
+
 std::vector<QImage> renderImages(QRhi::Implementation backend, QWindow *window, const Scene &scene, OrbitCamera camera,
                                  const ImageRenderRequest &request, QString *error)
 {
-    auto fail = [error](const QString &message) {
-        if (error)
-            *error = message;
-        return std::vector<QImage>();
-    };
-    if (request.size.isEmpty())
-        return fail(QStringLiteral("The image size is empty."));
-
-    std::unique_ptr<QOffscreenSurface> surface; // OpenGL only; outlives the QRhi
-    std::unique_ptr<QRhi> rhi = createRhi(backend, window, surface);
-    if (!rhi)
-        return fail(QStringLiteral("Couldn't create a %1 device for rendering.").arg(QString::fromLatin1(QRhi::backendName(backend))));
-    if (request.size.width() > rhi->resourceLimit(QRhi::TextureSizeMax)
-        || request.size.height() > rhi->resourceLimit(QRhi::TextureSizeMax))
-        return fail(QStringLiteral("The image is larger than the GPU allows (%1 pixels).").arg(rhi->resourceLimit(QRhi::TextureSizeMax)));
-
+    ImageRenderSession session;
+    if (!session.begin(backend, window, request.size, request.exposure, request.tonemapper, error))
+        return {};
     std::vector<QImage> images;
-    {
-        std::unique_ptr<QRhiTexture> texture(
-            rhi->newTexture(QRhiTexture::RGBA8, request.size, 1, QRhiTexture::RenderTarget | QRhiTexture::UsedAsTransferSource));
-        if (!texture->create())
-            return fail(QStringLiteral("Couldn't create a %1 x %2 image (out of video memory?).")
-                            .arg(request.size.width())
-                            .arg(request.size.height()));
-        std::unique_ptr<QRhiTextureRenderTarget> target(rhi->newTextureRenderTarget({ QRhiColorAttachment(texture.get()) }));
-        std::unique_ptr<QRhiRenderPassDescriptor> rp(target->newCompatibleRenderPassDescriptor());
-        target->setRenderPassDescriptor(rp.get());
-        target->create();
-
-        camera.shiftX = 0.0f; // centered: the panels' lens shift is for the viewport only
-        Renderer renderer;
-        renderer.initialize(rhi.get(), target.get());
-        renderer.setGridLinesVisible(false);
-        renderer.setDisplayParams(request.exposure, request.tonemapper);
-        renderer.setTime(request.seconds);
-
-        // One offscreen frame; with `readback`, the image is copied into `out`.
-        auto frame = [&](bool readback, QImage *out) {
-            QRhiCommandBuffer *cb = nullptr;
-            if (rhi->beginOffscreenFrame(&cb) != QRhi::FrameOpSuccess)
-                return false;
-            renderer.render(cb, target.get(), camera, &scene, InvalidEntity);
-            QRhiReadbackResult result;
-            if (readback) {
-                QRhiResourceUpdateBatch *rub = rhi->nextResourceUpdateBatch();
-                rub->readBackTexture({ texture.get() }, &result);
-                cb->resourceUpdate(rub);
-            }
-            if (rhi->endOffscreenFrame() != QRhi::FrameOpSuccess) // waits for the GPU
-                return false;
-            if (readback) {
-                QImage image(reinterpret_cast<const uchar *>(result.data.constData()), result.pixelSize.width(),
-                             result.pixelSize.height(), QImage::Format_RGBA8888);
-                // Rows come bottom-up where framebuffers are y-up (OpenGL). Opaque: the
-                // composite pass's alpha means nothing.
-                image = rhi->isYUpInFramebuffer() ? image.mirrored() : image.copy();
-                *out = image.convertToFormat(QImage::Format_RGB32);
-            }
-            return true;
-        };
-
-        for (ViewSettings v : request.views) {
-            v.skybox = request.skybox;
-            v.post = request.post;
-            renderer.setViewSettings(v);
-            QElapsedTimer waiting;
-            waiting.start();
-            bool ok = frame(false, nullptr);
-            while (ok && renderer.needsAnotherFrame() && waiting.elapsed() < kTextureWaitMs) {
-                QThread::msleep(5);
-                ok = frame(false, nullptr);
-            }
-            QImage image;
-            if (!ok || !frame(true, &image) || image.isNull()) {
-                renderer.release();
-                return fail(QStringLiteral("Rendering failed (the GPU device was lost?)."));
-            }
-            images.push_back(image);
-        }
-        renderer.release();
+    for (ViewSettings v : request.views) {
+        v.skybox = request.skybox;
+        v.post = request.post;
+        const QImage image = session.render(scene, camera, v, request.seconds, error);
+        if (image.isNull())
+            return {};
+        images.push_back(image);
     }
     return images;
 }

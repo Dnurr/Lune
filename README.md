@@ -92,7 +92,8 @@ the sphere's subsurface scattering lets light bleed around its terminator.</sub>
 - **Assets browser**, drag and drop of meshes, images and HDR environments.
 - **Viewport shading** (Wireframe, Clay, Unlit, Preview, Rendered) and **image renders**:
   the final image (F4) or a set of passes (F6) as PNG files, at any size, without the
-  editor's overlays.
+  editor's overlays; **video renders** (F5) of the timeline's frames, encoded to MP4 with
+  ffmpeg when it's installed.
 - **Scene cameras**: render from a Camera entity, look through it (Numpad 0) with a
   passepartout for the render's aspect, or move it to the current view.
 - **Timeline**: a bar under everything with playback in real time at the scene's frame
@@ -231,6 +232,7 @@ The zip runs on a machine without Qt or Visual Studio; it's what goes on the Rel
 | Space | Play / pause the timeline |
 | Left / Right | Previous / next frame (Shift: go to the start / end) |
 | F4 | Render the image from the scene camera (PNG in `renders/` next to the scene) |
+| F5 | Render the timeline's frames (PNG files, and an MP4 when ffmpeg is installed) |
 | F6 | Render the passes chosen in Render > Render Settings, one PNG each |
 | F12 | Stats overlay |
 

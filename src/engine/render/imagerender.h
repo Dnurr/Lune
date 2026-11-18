@@ -3,6 +3,7 @@
 #include <QImage>
 #include <QSize>
 #include <QString>
+#include <memory>
 #include <rhi/qrhi.h>
 #include <vector>
 
@@ -50,3 +51,26 @@ struct ImageRenderRequest
 // image per view, or none and `error` set.
 std::vector<QImage> renderImages(QRhi::Implementation backend, QWindow *window, const Scene &scene, OrbitCamera camera,
                                  const ImageRenderRequest &request, QString *error);
+
+// The device, target and Renderer of an image render, kept for many images of one size: a
+// video renders every frame on the same session, so textures, environment maps and pipelines
+// are made once. renderImages() is one session with a few images.
+class ImageRenderSession
+{
+public:
+    ImageRenderSession();
+    ~ImageRenderSession();
+
+    // Creates the device and an image target of `size`. False (and `error`) if it can't.
+    bool begin(QRhi::Implementation backend, QWindow *window, const QSize &size, float exposure, int tonemapper,
+               QString *error);
+    // One image of `scene` from `camera` (lens shift ignored) at scene time `seconds`; a null
+    // image (and `error`) on failure. Waits for textures still loading (up to 30 seconds).
+    QImage render(const Scene &scene, OrbitCamera camera, const ViewSettings &view, float seconds, QString *error);
+    // Releases everything (also done by the destructor).
+    void end();
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> d;
+};
