@@ -1,6 +1,6 @@
 #version 440
 
-// Film grain (display colors, after tonemapping). Author: to be written.
+// Film grain (display colors, after tonemapping)
 //
 // texA      the image
 // params0   x = intensity (0..1), y = grain size in pixels (scaled to this image's height),
