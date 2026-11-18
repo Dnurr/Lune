@@ -184,8 +184,15 @@ bool save(const Scene &scene, const QString &path, const QJsonObject &editorStat
                 QJsonObject jk;
                 jk["frame"] = tidy(k.frame);
                 jk["value"] = propertyToJson(p, k.value, sceneDir);
-                if (Animation::interpolates(p.type))
+                if (Animation::interpolates(p.type)) {
                     jk["interpolation"] = Animation::interpolationName(k.interpolation);
+                    if (!k.autoTangent) {
+                        QJsonArray slope;
+                        for (int c = 0; c < Animation::channelCount(p.type); ++c)
+                            slope.append(tidy(k.slope[size_t(c)]));
+                        jk["slope"] = slope;
+                    }
+                }
                 keys.append(jk);
             }
             animation.append(QJsonObject { { "component", t.component }, { "property", t.property }, { "keys", keys } });
@@ -350,6 +357,12 @@ bool load(Scene &scene, const QString &path, QJsonObject *editorState, QStringLi
                 k.frame = jk["frame"].toDouble();
                 k.value = propertyFromJson(p, jk["value"], sceneDir);
                 k.interpolation = Animation::interpolationFromName(jk["interpolation"].toString()).value_or(Interpolation::Bezier);
+                if (jk["slope"].isArray()) { // tangents set by hand
+                    const QJsonArray slope = jk["slope"].toArray();
+                    k.autoTangent = false;
+                    for (int c = 0; c < int(slope.size()) && c < 4; ++c)
+                        k.slope[size_t(c)] = slope[c].toDouble();
+                }
                 if (!k.value.isValid() || !jk["frame"].isDouble()) {
                     warn(QStringLiteral("%1: invalid key of %2.%3").arg(e.name, t.component, t.property));
                     continue;

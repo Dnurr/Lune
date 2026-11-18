@@ -47,6 +47,15 @@ std::vector<AnimationTrack> withoutTrack(std::vector<AnimationTrack> animation, 
 std::vector<AnimationTrack> withInterpolation(std::vector<AnimationTrack> animation, int component, int property,
                                               double frame, Interpolation interpolation);
 
+// The numbers a property's value is animated as (curve editor channels): a vector's x, y, z,
+// a color's r, g, b, a (0..1), a boolean as 0 / 1, an enum's index.
+int channelCount(PropertyType type);
+double channel(PropertyType type, const QVariant &value, int index);
+QVariant withChannel(PropertyType type, const QVariant &value, int index, double number);
+// The tangent (value change per frame) of channel `index` through key `key`: its own slope,
+// or the automatic one.
+double tangent(const AnimationTrack &track, PropertyType type, int key, int index);
+
 // Writes every animated property of `entity` at `frame`. Returns true if a value changed.
 bool applyTo(Entity &entity, double frame);
 // The same for every entity of the scene, at its frame (entityChanged only where needed).

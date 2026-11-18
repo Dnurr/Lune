@@ -16,6 +16,7 @@ class NodesPanel;
 class Panel;
 class Playback;
 class TimelinePanel;
+class CurvesPanel;
 class QToolButton;
 class OutlinerPanel;
 class QAction;
@@ -132,6 +133,7 @@ private:
     NodesPanel *m_nodes = nullptr;
     Playback *m_playback = nullptr;      // the frame shown, playing
     TimelinePanel *m_timeline = nullptr; // footer: playback and frame range
+    CurvesPanel *m_curves = nullptr;     // bottom, a tab with Assets: the curve editor
     QString m_workspace = QStringLiteral("layout");
     QHash<QString, QJsonObject> m_workspaces; // saved state of the workspaces not shown
     QHash<QString, QToolButton *> m_workspaceTabs;

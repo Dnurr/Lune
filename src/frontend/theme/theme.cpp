@@ -227,6 +227,10 @@ QFrame#DisplayMenu QComboBox { padding-right: 30px; }
 /* Animated properties in the Inspector: green border, amber on a key (KeyButton's colors) */
 QAbstractSpinBox[anim="animated"], QComboBox[anim="animated"] { border-color: #63B57E; }
 QAbstractSpinBox[anim="key"], QComboBox[anim="key"] { border-color: #E3B341; }
+/* Curve editor: the channel list sits on the panel's glass */
+QListWidget#CurveChannels { background: transparent; border: none; }
+QListWidget#CurveChannels::item { padding: 3px 2px; border-radius: 6px; }
+QListWidget#CurveChannels::item:hover { background-color: @hover; }
 /* Timeline (footer): compact fields on one row */
 Panel#TimelinePanel QAbstractSpinBox { padding: 3px 4px; min-height: 18px; }
 Panel#TimelinePanel QAbstractSpinBox:focus { padding: 2px 3px; }

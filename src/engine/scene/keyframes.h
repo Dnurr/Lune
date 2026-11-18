@@ -2,6 +2,7 @@
 
 #include <QString>
 #include <QVariant>
+#include <array>
 #include <vector>
 
 // Keyframe animation of an entity's properties (the reflected ones: engine/scene/components.h).
@@ -20,6 +21,11 @@ struct Keyframe
     double frame = 0.0;
     QVariant value; // same type as the property's value (PropertyType)
     Interpolation interpolation = Interpolation::Bezier; // towards the next key
+    // Bezier tangents through the key, the same on both sides (aligned handles): automatic
+    // (smooth, never overshooting), or set by hand in the curve editor as the value change per
+    // frame of each number (x, y, z of a vector; r, g, b, a of a color).
+    bool autoTangent = true;
+    std::array<double, 4> slope {};
 
     bool operator==(const Keyframe &) const = default;
 };

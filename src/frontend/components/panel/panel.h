@@ -36,6 +36,11 @@ class QScrollArea;
 //
 // Collapsing (setCollapsed on the parent): every top-level panel slides out and hides;
 // expanding brings back the ones that want to be visible (setPanelVisible).
+//
+// Strips: a click on a top-level panel's title (without dragging it) folds it into a strip
+// with just the title, and another click unfolds it. Strips take only the room of their
+// title; the other panels on the same side share the rest. Panels in the same strip group
+// work like tabs: unfolding one folds the others (e.g. Assets and Curves at the bottom).
 class Panel : public QFrame
 {
     Q_OBJECT
@@ -67,6 +72,12 @@ public:
     // length along the panel's main axis (packed at the top / left).
     void setContentFills(bool fills);
 
+    // Folded into a strip with only the title (see the class comment).
+    void setStrip(bool strip);
+    bool isStrip() const { return m_strip; }
+    // Panels with the same non-empty group: unfolding one folds the others.
+    void setStripGroup(const QString &group) { m_stripGroup = group; }
+
     // Shows / hides the title row (e.g. a footer bar that needs every pixel of height).
     // Without a title the panel can't be dragged.
     void setTitleVisible(bool visible);
@@ -92,6 +103,7 @@ public:
 
 signals:
     void sideChanged(Panel::Side side);
+    void stripChanged(bool strip);
     void resized(); // by the user, from the inner edge
 
 protected:
@@ -138,6 +150,10 @@ private:
 
     bool m_dragging = false;
     QPoint m_dragOffset; // cursor position inside the panel when the drag started
+    QPoint m_pressPos;   // in parent coordinates: a release close to it is a click (strip toggle)
+    bool m_strip = false;
+    QString m_stripGroup;
+    QSize stripSize() const; // the title alone
     bool m_resizing = false;
     QPoint m_resizeStart; // cursor in parent coordinates when the resize started
     int m_resizeStartSize = 0;

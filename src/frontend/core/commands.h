@@ -150,6 +150,9 @@ class SetAnimationCommand : public QUndoCommand
 {
 public:
     SetAnimationCommand(Scene *scene, EntityId id, std::vector<AnimationTrack> after, const QString &text);
+    // After a drag previewed on the scene (curve editor): `before` is the entity as it was.
+    SetAnimationCommand(Scene *scene, EntityId id, const Entity &before, std::vector<AnimationTrack> after,
+                        const QString &text);
 
     void redo() override;
     void undo() override;

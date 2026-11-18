@@ -489,6 +489,17 @@ SetAnimationCommand::SetAnimationCommand(Scene *scene, EntityId id, std::vector<
     setText(text);
 }
 
+SetAnimationCommand::SetAnimationCommand(Scene *scene, EntityId id, const Entity &before, std::vector<AnimationTrack> after,
+                                         const QString &text)
+    : m_scene(scene)
+    , m_entity(id)
+    , m_before(before.animation)
+    , m_after(std::move(after))
+    , m_entityBefore(before)
+{
+    setText(text);
+}
+
 void SetAnimationCommand::redo()
 {
     const double frame = m_scene->frame();

@@ -60,8 +60,10 @@ QVariant fromNumbers(PropertyType type, const Numbers &n)
 // Auto-clamped tangent (value change per frame) of one number at key i: the slope between
 // its neighbors, flat at the ends and where the key is a peak or a valley, so the curve never
 // overshoots a key.
-double tangent(const std::vector<Keyframe> &keys, const std::vector<Numbers> &values, size_t i, int c)
+double autoTangent(const std::vector<Keyframe> &keys, const std::vector<Numbers> &values, size_t i, int c)
 {
+    if (!keys[i].autoTangent)
+        return keys[i].slope[size_t(c)];
     if (i == 0 || i + 1 >= keys.size())
         return 0.0;
     const double prev = values[i - 1][size_t(c)], cur = values[i][size_t(c)], next = values[i + 1][size_t(c)];
@@ -183,7 +185,7 @@ QVariant evaluate(const AnimationTrack &track, PropertyType type, double frame)
     const double t2 = t * t, t3 = t2 * t;
     const double h00 = 2 * t3 - 3 * t2 + 1, h10 = t3 - 2 * t2 + t, h01 = -2 * t3 + 3 * t2, h11 = t3 - t2;
     for (int c = 0; c < count; ++c) {
-        const double m0 = tangent(keys, values, k, c), m1 = tangent(keys, values, k + 1, c);
+        const double m0 = autoTangent(keys, values, k, c), m1 = autoTangent(keys, values, k + 1, c);
         out[size_t(c)] = h00 * va[size_t(c)] + h10 * h * m0 + h01 * vb[size_t(c)] + h11 * h * m1;
     }
     return fromNumbers(type, out);
@@ -249,6 +251,43 @@ std::vector<AnimationTrack> withInterpolation(std::vector<AnimationTrack> animat
     }
     t->keys[size_t(i)].interpolation = interpolation;
     return animation;
+}
+
+int channelCount(PropertyType type)
+{
+    const int n = numberCount(type);
+    return n > 0 ? n : (type == PropertyType::Bool || type == PropertyType::Enum ? 1 : 0);
+}
+
+double channel(PropertyType type, const QVariant &value, int index)
+{
+    if (type == PropertyType::Bool)
+        return value.toBool() ? 1.0 : 0.0;
+    if (type == PropertyType::Enum)
+        return value.toInt();
+    return toNumbers(type, value)[size_t(qBound(0, index, 3))];
+}
+
+QVariant withChannel(PropertyType type, const QVariant &value, int index, double number)
+{
+    if (type == PropertyType::Bool)
+        return number >= 0.5;
+    if (type == PropertyType::Enum)
+        return int(std::lround(number));
+    Numbers n = toNumbers(type, value);
+    n[size_t(qBound(0, index, 3))] = number;
+    return fromNumbers(type, n);
+}
+
+double tangent(const AnimationTrack &track, PropertyType type, int key, int index)
+{
+    if (key < 0 || key >= int(track.keys.size()) || !interpolates(type))
+        return 0.0;
+    std::vector<Numbers> values;
+    values.reserve(track.keys.size());
+    for (const Keyframe &k : track.keys)
+        values.push_back(toNumbers(type, k.value));
+    return autoTangent(track.keys, values, size_t(key), index);
 }
 
 bool applyTo(Entity &entity, double frame)

@@ -83,8 +83,8 @@ the sphere's subsurface scattering lets light bleed around its terminator.</sub>
   emissive) become node graphs, embedded images included.
 - **Backend-agnostic rendering** through QRhi; shaders written once in GLSL, compiled for
   every backend at build time (and at runtime for materials).
-- **Glass panels** that blur the scene behind them, snap to the window's edges and hide
-  with Tab; **workspaces** (Layout, Shading) that remember their panels.
+- **Glass panels** that blur the scene behind them, snap to the window's edges, fold into
+  a strip with their title (a click on it) and hide with Tab; **workspaces** (Layout, Shading) that remember their panels.
 - **Scene editing**: picking, move / rotate / scale gizmo with local and global axes,
   outliner, automatic Inspector built from component descriptors, orbit and free camera.
 - **Undo / redo** for every edit, drags merged into one step; **command palette**
@@ -102,6 +102,9 @@ the sphere's subsurface scattering lets light bleed around its terminator.</sub>
   be animated from the diamond at the end of its row (constant, linear or eased bezier
   keys); editing an animated value, with the Inspector or the gizmo, keys it on the current
   frame. Keys are undoable, saved in the scene and shown on the timeline.
+- **Curve editor**: the selected entity's curves (one per number: X / Y / Z, R / G / B / A),
+  keys moved in time and value, tangent handles, box selection, interpolation per key. It
+  shares the bottom with the Assets browser like a tab.
 - **Post-processing chain**: a Post Process component on the camera (depth of field,
   bloom with a mip pyramid, chromatic aberration, vignette, film grain, FXAA), as
   fullscreen passes around tonemapping; effects that are off cost nothing.
@@ -201,6 +204,8 @@ The zip runs on a machine without Qt or Visual Studio; it's what goes on the Rel
 | Insert / delete a key | Click the diamond at the end of a property's row; right click for interpolation and Clear Animation |
 | Scrub a value | Drag a property's label (Shift = fine, Ctrl = coarse) |
 | Move a panel | Drag its title; it snaps to the nearest edge |
+| Fold / unfold a panel | Click its title (Assets and Curves: opening one folds the other) |
+| Curve editor | Click / Shift+click / box-drag to select keys, drag them or their handles; middle drag pans, wheel zooms (Ctrl: time, Shift: values); Delete, Home to frame all, right click for interpolation |
 | Resize a panel | Drag its inner edge (the one facing the viewport) |
 | Add a mesh / open a scene | Double-click it in the Assets panel |
 | Place a mesh / set the environment | Drag a mesh or an `.hdr` from the Assets panel (or the file manager) onto the viewport |

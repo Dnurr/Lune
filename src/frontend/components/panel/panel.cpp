@@ -173,7 +173,7 @@ bool Panel::isOnTitle(const QPoint &pos) const
 
 bool Panel::isOnResizeEdge(const QPoint &pos) const
 {
-    if (isNested() || !parentWidget())
+    if (isNested() || !parentWidget() || m_strip)
         return false;
     switch (m_side) {
     case Side::Left:
@@ -193,6 +193,35 @@ void Panel::updateDockSideProperty()
         return;
     static const char *const sides[] = { "left", "right", "bottom", "footer" };
     setProperty("dockSide", QString::fromLatin1(sides[int(m_side)]));
+}
+
+void Panel::setStrip(bool strip)
+{
+    if (m_strip == strip || isNested())
+        return;
+    m_strip = strip;
+    if (m_scroll)
+        m_scroll->setVisible(!strip);
+    if (!strip && !m_stripGroup.isEmpty() && parentWidget()) {
+        // Tabs: the others of the group fold.
+        for (Panel *p : parentWidget()->findChildren<Panel *>(Qt::FindDirectChildrenOnly))
+            if (p != this && p->m_stripGroup == m_stripGroup && !p->m_strip) {
+                p->m_strip = true;
+                if (p->m_scroll)
+                    p->m_scroll->setVisible(false);
+                emit p->stripChanged(true);
+            }
+    }
+    m_title->setToolTip(strip ? tr("Click to open") : tr("Click to fold, drag to move"));
+    relayoutAll(true);
+    emit stripChanged(strip);
+}
+
+QSize Panel::stripSize() const
+{
+    const QMargins mg = layout()->contentsMargins();
+    const QSize t = m_title->sizeHint();
+    return { t.width() + mg.left() + mg.right() + 8, t.height() + mg.top() + mg.bottom() };
 }
 
 void Panel::setTitleVisible(bool visible)
@@ -305,6 +334,7 @@ QJsonObject Panel::layoutState() const
     state["width"] = m_width;
     state["height"] = m_height;
     state["enabled"] = m_enabled;
+    state["strip"] = m_strip;
     return state;
 }
 
@@ -323,6 +353,13 @@ void Panel::restoreLayoutState(const QJsonObject &state)
     m_height = qMax(kMinPanelSize, state["height"].toInt(m_height));
     if (state.contains("enabled"))
         setPanelEnabled(state["enabled"].toBool());
+    const bool strip = state["strip"].toBool(false);
+    if (strip != m_strip) {
+        m_strip = strip; // directly: restoring must not fold the other panels of the group
+        if (m_scroll)
+            m_scroll->setVisible(!strip);
+        emit stripChanged(strip);
+    }
     relayoutAll(false);
 }
 
@@ -345,6 +382,7 @@ void Panel::mousePressEvent(QMouseEvent *event)
         m_snap->stop();
         m_dragging = true;
         m_dragOffset = event->position().toPoint();
+        m_pressPos = mapToParent(pos);
         m_title->setCursor(Qt::ClosedHandCursor);
         raise();
         event->accept();
@@ -443,9 +481,17 @@ void Panel::mouseReleaseEvent(QMouseEvent *event)
         return;
     }
 
+    // A click (no real drag): fold into a strip, or unfold.
+    const QPoint c = mapToParent(event->position().toPoint());
+    if ((c - m_pressPos).manhattanLength() < 4) {
+        setStrip(!m_strip);
+        relayoutAll(true); // back to its place even when nothing changed
+        event->accept();
+        return;
+    }
+
     // Top-level: snap to the edge closest to the cursor.
     const QWidget *p = parentWidget();
-    const QPoint c = mapToParent(event->position().toPoint());
     const int dLeft = c.x();
     const int dRight = p->width() - c.x();
     const int dBottom = p->height() - c.y();
@@ -590,7 +636,6 @@ QRect Panel::targetGeometry() const
 
     const QList<Panel *> same = siblings(m_side);
     const int n = qMax(1, int(same.size()));
-    const int idx = qMax(0, int(same.indexOf(const_cast<Panel *>(this))));
 
     // Footer panels: full width at the bottom, the first one lowest. The others end above
     // them (H shrinks by the height they take).
@@ -611,23 +656,47 @@ QRect Panel::targetGeometry() const
         footerSpace += footerHeight(fp) + m;
     const int H = qMax(0, fullH - footerSpace);
 
+    // Strips take the size of their title; the unfolded panels share what's left.
+    int stripSpace = 0, unfolded = 0;
+    for (const Panel *sp : same) {
+        if (sp->m_strip)
+            stripSpace += m_side == Side::Bottom ? sp->stripSize().width() : sp->stripSize().height();
+        else
+            ++unfolded;
+    }
+
     if (m_side == Side::Bottom) {
         const int leftW = columnWidth(Side::Left);
         const int rightW = columnWidth(Side::Right);
         const int x0 = m + (leftW > 0 ? leftW + m : 0);
         const int x1 = W - m - (rightW > 0 ? rightW + m : 0);
         const int avail = qMax(0, x1 - x0);
-        const int w = qMax(0, (avail - (n - 1) * m) / n);
-        const int h = qMin(m_height, qMax(0, H - 2 * m));
-        return QRect(x0 + idx * (w + m), H - m - h, w, h);
+        const int share = unfolded > 0 ? qMax(0, (avail - (n - 1) * m - stripSpace) / unfolded) : 0;
+        int x = x0;
+        for (const Panel *sp : same) {
+            const int w = sp->m_strip ? sp->stripSize().width() : share;
+            if (sp == this) {
+                const int h = m_strip ? stripSize().height() : qMin(m_height, qMax(0, H - 2 * m));
+                return QRect(x, H - m - h, w, h);
+            }
+            x += w + m;
+        }
+        return QRect(x0, H - m, 0, 0);
     }
 
     // Left / right: full height, stacked vertically when several share the side.
     const int avail = qMax(0, H - 2 * m);
-    const int h = qMax(0, (avail - (n - 1) * m) / n);
+    const int share = unfolded > 0 ? qMax(0, (avail - (n - 1) * m - stripSpace) / unfolded) : 0;
     const int w = qMin(m_width, qMax(0, W - 2 * m));
     const int x = (m_side == Side::Left) ? m : W - w - m;
-    return QRect(x, m + idx * (h + m), w, h);
+    int y = m;
+    for (const Panel *sp : same) {
+        const int h = sp->m_strip ? sp->stripSize().height() : share;
+        if (sp == this)
+            return QRect(x, y, w, h);
+        y += h + m;
+    }
+    return QRect(x, m, w, 0);
 }
 
 void Panel::applyGeometry(bool animate)

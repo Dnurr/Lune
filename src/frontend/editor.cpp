@@ -40,6 +40,7 @@
 #include "components/viewport/cameramenu.h"
 #include "components/viewport/displaymenu.h"
 #include "components/viewport/viewport.h"
+#include "components/panel/curves/curves.h"
 #include "components/panel/timeline/timeline.h"
 #include "core/commands.h"
 #include "core/playback.h"
@@ -359,7 +360,15 @@ void Editor::createPanels()
     m_assets = new AssetsPanel(m_viewport, Panel::Side::Bottom);
     m_assets->setMargin(12);
     m_assets->setPanelHeight(220);
+    m_assets->setStripGroup(QStringLiteral("bottom"));
     connect(m_assets, &AssetsPanel::fileActivated, this, &Editor::openAsset);
+
+    // Curves (bottom, next to Assets): the two work like tabs, the one not in use is a strip.
+    m_curves = new CurvesPanel(m_scene, m_selection, m_undo, m_viewport);
+    m_curves->setMargin(12);
+    m_curves->setPanelHeight(220);
+    m_curves->setStripGroup(QStringLiteral("bottom"));
+    m_curves->setStrip(true);
 
     // Nodes (right, Shading workspace): materials as node graphs.
     m_nodes = new NodesPanel(m_scene, m_selection, m_undo, m_viewport, Panel::Side::Right);
@@ -783,7 +792,8 @@ QHash<QString, Panel *> Editor::workspacePanels() const
              { QStringLiteral("inspector"), m_inspector },
              { QStringLiteral("assets"), m_assets },
              { QStringLiteral("nodes"), m_nodes },
-             { QStringLiteral("timeline"), m_timeline } };
+             { QStringLiteral("timeline"), m_timeline },
+             { QStringLiteral("curves"), m_curves } };
 }
 
 QJsonObject Editor::captureWorkspace() const
@@ -805,12 +815,13 @@ void Editor::applyWorkspace(const QJsonObject &state)
 
 QJsonObject Editor::defaultWorkspace(const QString &name)
 {
-    auto panel = [](const char *side, int width, int height, bool enabled) {
+    auto panel = [](const char *side, int width, int height, bool enabled, bool strip = false) {
         QJsonObject p;
         p["side"] = QString::fromLatin1(side);
         p["width"] = width;
         p["height"] = height;
         p["enabled"] = enabled;
+        p["strip"] = strip;
         return p;
     };
     const bool shading = name == QLatin1String("shading");
@@ -820,6 +831,7 @@ QJsonObject Editor::defaultWorkspace(const QString &name)
     panels["assets"] = panel("bottom", 220, 220, true);
     panels["nodes"] = panel("right", 620, 220, shading);
     panels["timeline"] = panel("footer", 0, 56, true);
+    panels["curves"] = panel("bottom", 220, 220, true, true);
     return panels;
 }
 

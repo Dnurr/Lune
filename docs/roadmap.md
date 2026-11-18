@@ -108,7 +108,8 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 - [x] Keyframes on any animatable property, from the Inspector; edits of animated properties set keys (Claude)
 - [x] Interpolation per key: constant, linear, bezier with auto tangents that don't overshoot (Claude)
 - [x] Keyframes in the scene file, undo for every edit, keys of the selection on the timeline (Claude)
-- [ ] Curve editor: tangent handles, moving and scaling keys in time (Claude)
+- [x] Curve editor: curves of the selection, moving keys in time and value, tangent handles, box select (Claude)
+- [x] Panels fold into a strip with their title; Assets and Curves share the bottom like tabs (Claude)
 - [x] Time uniform available to every shader: `viewport.w` (meshes), `camera.w` (post) (Claude)
 
 ## 5. GPU particles

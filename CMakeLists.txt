@@ -81,6 +81,7 @@ add_executable(Lune
     src/frontend/components/panel/nodes/nodespanel.cpp
     src/frontend/components/panel/outliner/outliner.cpp
     src/frontend/components/panel/timeline/timeline.cpp
+    src/frontend/components/panel/curves/curves.cpp
     src/frontend/components/palette/commandpalette.cpp
     src/frontend/editor.cpp
     src/frontend/frameanimationdriver.cpp

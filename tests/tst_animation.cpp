@@ -1,3 +1,4 @@
+#include <QColor>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -78,6 +79,38 @@ private slots:
             const double v = Animation::evaluate(t, PropertyType::Float, f).toDouble();
             QVERIFY2(v >= -1e-9 && v <= 1.0 + 1e-9, qPrintable(QStringLiteral("frame %1: %2").arg(f).arg(v)));
         }
+    }
+
+    void handTangents()
+    {
+        // A flat key turned into a slope: the curve leaves it rising, and the file keeps it.
+        auto t = roughnessTrack({ { 0, 0.0 }, { 10, 0.0 } }, Interpolation::Bezier);
+        QCOMPARE(Animation::evaluate(t, PropertyType::Float, 5).toDouble(), 0.0);
+        t.keys[0].autoTangent = false;
+        t.keys[0].slope[0] = 0.1;
+        QVERIFY(Animation::evaluate(t, PropertyType::Float, 1).toDouble() > 0.0);
+        QCOMPARE(Animation::tangent(t, PropertyType::Float, 0, 0), 0.1);
+        QCOMPARE(Animation::tangent(t, PropertyType::Float, 1, 0), 0.0); // the auto end
+
+        QTemporaryDir dir;
+        const QString path = dir.filePath("tangent.lune");
+        Scene scene;
+        const EntityId id = addSphere(scene);
+        scene.modifyEntity(id, [&](Entity &e) { e.animation = { t }; });
+        QVERIFY(SceneIO::save(scene, path, {}));
+        Scene loaded;
+        QVERIFY(SceneIO::load(loaded, path));
+        QCOMPARE(loaded.entities().front().animation[0], t);
+    }
+
+    void channels()
+    {
+        const QVariant color = QColor::fromRgbF(0.2f, 0.4f, 0.6f);
+        QCOMPARE(Animation::channelCount(PropertyType::Color), 4);
+        QVERIFY(qAbs(Animation::channel(PropertyType::Color, color, 1) - 0.4) < 1e-6);
+        const QVariant brighter = Animation::withChannel(PropertyType::Color, color, 0, 1.0);
+        QCOMPARE(brighter.value<QColor>().redF(), 1.0f);
+        QCOMPARE(Animation::withChannel(PropertyType::Bool, false, 0, 0.7).toBool(), true);
     }
 
     void vectorsAndBooleans()
