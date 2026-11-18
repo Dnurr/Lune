@@ -131,6 +131,11 @@ public:
     // params.y = tonemapping operator index.
     void setDisplayParams(float exposureEv, int tonemapper);
 
+    // Scene time in seconds (Timeline::seconds() of the frame shown): `viewport.w` in the
+    // mesh shaders' uniforms, `camera.w` in the post-processing shaders.
+    void setTime(float seconds) { m_seconds = seconds; }
+    float time() const { return m_seconds; }
+
     // The world grid's lines (on by default). Off: the grid pass still draws its sky (when
     // there's no environment background), without lines.
     void setGridLinesVisible(bool visible) { m_gridLines = visible; }
@@ -248,6 +253,7 @@ private:
     float m_glassRadius = 0.0f;
     FrameStats m_stats;
     float m_exposure = 0.0f;
+    float m_seconds = 0.0f;
     int m_tonemapper = 0;
     bool m_gridLines = true;
     ViewSettings m_view;

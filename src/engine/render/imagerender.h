@@ -40,6 +40,7 @@ struct ImageRenderRequest
     int tonemapper = 0;      // DisplaySettings
     bool skybox = true;      // applied to every view
     bool post = true;        // applied to every view (only Rendered ones have effects)
+    float seconds = 0.0f;    // scene time (Renderer::setTime)
     std::vector<ViewSettings> views; // one image each
 };
 

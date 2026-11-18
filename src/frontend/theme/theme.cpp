@@ -224,6 +224,10 @@ QFrame#DisplayMenu QAbstractSpinBox, QFrame#DisplayMenu QComboBox { padding: 4px
 QFrame#DisplayMenu QAbstractSpinBox:focus, QFrame#DisplayMenu QComboBox:focus,
 QFrame#DisplayMenu QComboBox:on { padding: 3px 7px; }
 QFrame#DisplayMenu QComboBox { padding-right: 30px; }
+/* Timeline (footer): compact fields on one row */
+Panel#TimelinePanel QAbstractSpinBox { padding: 3px 4px; min-height: 18px; }
+Panel#TimelinePanel QAbstractSpinBox:focus { padding: 2px 3px; }
+Panel#TimelinePanel QToolButton { padding: 5px; }
 /* MSVC limits one string literal to ~16 KB: the style sheet is split in pieces. */
 )QSS" R"QSS(
 /* Camera mode bar, top center of the viewport */

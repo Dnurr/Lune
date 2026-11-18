@@ -95,6 +95,9 @@ the sphere's subsurface scattering lets light bleed around its terminator.</sub>
   editor's overlays.
 - **Scene cameras**: render from a Camera entity, look through it (Numpad 0) with a
   passepartout for the render's aspect, or move it to the current view.
+- **Timeline**: a bar under everything with playback in real time at the scene's frame
+  rate (looping, frames dropped rather than slowed down), a ruler to scrub, and the
+  frame range and rate saved in the scene; the scene time reaches every shader.
 - **Post-processing chain**: a Post Process component on the camera (depth of field,
   bloom with a mip pyramid, chromatic aberration, vignette, film grain, FXAA), as
   fullscreen passes around tonemapping; effects that are off cost nothing.
@@ -190,6 +193,7 @@ The zip runs on a machine without Qt or Visual Studio; it's what goes on the Rel
 | Orbit / free camera | Bar at the top of the viewport, or View > Free Camera |
 | Free camera: look / fly | Hold right button + move the mouse; W A S D, Q / E down / up, Shift faster |
 | Free camera: speed / move | Wheel while holding the right button / wheel alone moves forward and back |
+| Scrub the timeline | Press or drag on its ruler |
 | Scrub a value | Drag a property's label (Shift = fine, Ctrl = coarse) |
 | Move a panel | Drag its title; it snaps to the nearest edge |
 | Resize a panel | Drag its inner edge (the one facing the viewport) |
@@ -214,6 +218,8 @@ The zip runs on a machine without Qt or Visual Studio; it's what goes on the Rel
 | Shift+Alt+Z | Editor overlays on / off: grid lines, light icons, gizmo, selection outline (View > Overlays), for clean screenshots |
 | Numpad 0 | Camera View: look through the scene camera (orbiting, panning or zooming leaves it) |
 | Ctrl+Alt+Numpad 0 | Align Camera to View: move the scene camera to the current view (adds one if there's none) |
+| Space | Play / pause the timeline |
+| Left / Right | Previous / next frame (Shift: go to the start / end) |
 | F4 | Render the image from the scene camera (PNG in `renders/` next to the scene) |
 | F6 | Render the passes chosen in Render > Render Settings, one PNG each |
 | F12 | Stats overlay |
@@ -228,7 +234,7 @@ src/
     render/            Renderer, camera, shaders/
   frontend/            the editor (Qt Widgets)
     core/              selection and undo commands
-    components/        viewport + gizmo, panels (inspector, outliner, assets), palette, widgets
+    components/        viewport + gizmo, panels (inspector, outliner, assets, timeline), palette, widgets
     theme/             palette, stylesheet, icons (tinted with the theme's colors)
 assets/icons/          interface icons: white SVGs, embedded at :/icons/<name>.svg
 demos/                 example scenes, shipped in the release zip

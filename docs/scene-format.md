@@ -48,6 +48,7 @@ under version control. Reading and writing are in `engine/io/sceneio.cpp`.
 | `format` | string | yes | Always `"lune-scene"`. |
 | `version` | integer | yes | Format version, currently `1`. |
 | `entities` | array | no | The entities, in outliner order. |
+| `timeline` | object | no | `start`, `end` (integer frames, default 1 and 250; `end` is raised to `start` if lower) and `fps` (1–240, default 24): the range the Timeline plays. Time 0 is the start frame. |
 | `editor` | object | no | Editor state. The engine stores and returns it without reading it. |
 
 ### Entity
@@ -138,6 +139,7 @@ Written by the editor (`Editor::editorState()`):
 | `shading.mode` | Viewport shading: `"wireframe"`, `"clay"`, `"unlit"`, `"preview"` or `"rendered"` (default, also for unknown values). |
 | `shading.skybox` | The environment as background in the viewport and in rendered images (default `true`). |
 | `shading.post` | The scene camera's Post Process in Rendered, in the viewport and in rendered images (default `true`). |
+| `timeline.frame` | The frame shown in the Timeline (default: the range's start; limited to the range). |
 | `render.viewportSize` | Render at the viewport's size (default `true`); otherwise `render.width` x `render.height` (16–16384, default 1920 x 1080). |
 | `render.folder` | Folder of the rendered images, absolute or relative to the scene's folder; missing: `renders` next to the scene. |
 | `render.passes` | Pass ids written by Render Passes (F6), e.g. `["rendered", "clay"]`; unknown ids are dropped. Missing: rendered, wireframe, clay, unlit, preview. |

@@ -18,6 +18,9 @@ class QScrollArea;
 //   Sibling panels share the space without overlapping:
 //     - left/right panels take the full height (stacked if more than one per side)
 //     - bottom panels sit between the left and right columns (side by side)
+//     - footer panels take the full width under everything (stacked if more than one):
+//       the others end above them. They stay where they are (no dragging) and are
+//       resized from their top edge, like bottom panels.
 //
 // Nested panel (parent IS a Panel, added to the parent's contentLayout()):
 //   laid out by the parent. Its orientation follows the parent's side:
@@ -43,6 +46,7 @@ public:
         Left,
         Right,
         Bottom,
+        Footer,
     };
 
     explicit Panel(const QString &title, QWidget *parent = nullptr, Side side = Side::Right);
@@ -62,6 +66,10 @@ public:
     // The content fills the whole area below the title, instead of keeping its natural
     // length along the panel's main axis (packed at the top / left).
     void setContentFills(bool fills);
+
+    // Shows / hides the title row (e.g. a footer bar that needs every pixel of height).
+    // Without a title the panel can't be dragged.
+    void setTitleVisible(bool visible);
 
     // Visibility the panel wants (e.g. the inspector only while something is selected).
     // Applied right away, or when the panels are expanded again if they're collapsed.
@@ -100,7 +108,8 @@ protected:
 private:
     Panel *hostPanel() const; // parent Panel when nested (also through its scroll area), otherwise nullptr
     QWidget *contentWidget() const; // the widget contentLayout() lays out: the scroll area's content, or this
-    bool isVertical() const { return m_side != Side::Bottom; }
+    bool isVertical() const { return m_side == Side::Left || m_side == Side::Right; }
+    bool isHorizontalBar() const { return m_side == Side::Bottom || m_side == Side::Footer; }
     bool isOnTitle(const QPoint &pos) const;
     bool isOnResizeEdge(const QPoint &pos) const; // inner edge of a top-level panel
     void slide(bool in);                          // collapse animation
@@ -136,5 +145,5 @@ private:
     bool m_wantsVisible = true;
     bool m_enabled = true;
     void applyVisibility();
-    void updateDockSideProperty(); // "dockSide" = left/right/bottom, read by the viewport
+    void updateDockSideProperty(); // "dockSide" = left/right/bottom/footer, read by the viewport
 };

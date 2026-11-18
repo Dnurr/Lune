@@ -17,7 +17,7 @@ layout(std140, binding = 0) uniform PostBuf {
     vec4 outputSize; // this pass's target: xy = size in pixels, zw = 1 / size
     vec4 camera;     // x = near plane, y = far plane,
                      // z = 1 with a depth texture, -1 without (depthTex is a white 1x1 stand-in)
-                     // w = seconds (0 for now: the timeline will drive it)
+                     // w = scene time in seconds (the Timeline's frame)
     vec4 params0;    // the effect's settings: see below
     vec4 params1;
 };

@@ -214,6 +214,20 @@ private slots:
         stack->undo();
         QCOMPARE(scene->entity(id)->transform.position, QVector3D(0, 0, 0));
     }
+
+    void timelineEditsUndoAndMerge()
+    {
+        Scene scene;
+        QUndoStack undo;
+        undo.push(new SetTimelineCommand(&scene, { 1, 100, 24.0 }));
+        undo.push(new SetTimelineCommand(&scene, { 1, 120, 24.0 })); // right after: merged
+        QCOMPARE(undo.count(), 1);
+        QCOMPARE(scene.timeline().end, 120);
+        undo.undo();
+        QCOMPARE(scene.timeline(), Timeline {});
+        undo.redo();
+        QCOMPARE(scene.timeline().end, 120);
+    }
 };
 
 QTEST_GUILESS_MAIN(TestCommands)

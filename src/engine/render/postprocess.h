@@ -46,7 +46,7 @@ public:
         float nearPlane = 0.1f;
         float farPlane = 1000.0f;
         float fieldOfView = 50.0f; // vertical, degrees (depth of field's focal length)
-        float seconds = 0.0f;      // animated effects (film grain); 0 in image renders
+        float seconds = 0.0f;      // scene time (Renderer::setTime), for animated effects (film grain)
     };
 
     void initialize(QRhi *rhi);

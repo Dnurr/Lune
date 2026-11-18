@@ -6,6 +6,7 @@
 
 #include "engine/scene/entity.h"
 #include "engine/scene/material.h"
+#include "engine/scene/timeline.h"
 
 class Scene;
 class Selection;
@@ -212,6 +213,23 @@ private:
     AlphaMode m_beforeMode = AlphaMode::Opaque, m_afterMode;
     float m_beforeCutoff = 0.5f, m_afterCutoff;
     QElapsedTimer m_lastEdit;
+};
+
+// Frame range / frame rate. Consecutive edits within a short time merge (scrubbing a field).
+class SetTimelineCommand : public QUndoCommand
+{
+public:
+    SetTimelineCommand(Scene *scene, const Timeline &timeline);
+
+    void redo() override;
+    void undo() override;
+    int id() const override { return 6; }
+    bool mergeWith(const QUndoCommand *other) override;
+
+private:
+    Scene *m_scene;
+    Timeline m_before, m_after;
+    qint64 m_time; // ms since epoch, for merging
 };
 
 class RenameMaterialCommand : public QUndoCommand

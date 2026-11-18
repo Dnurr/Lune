@@ -49,6 +49,7 @@ target_link_libraries(lune_engine PUBLIC Qt6::Gui Qt6::GuiPrivate PRIVATE cgltf 
 add_library(lune_editor_core STATIC
     src/frontend/core/selection.cpp
     src/frontend/core/commands.cpp
+    src/frontend/core/playback.cpp
     src/frontend/core/displaysettings.cpp
     src/frontend/core/displayhistory.cpp
     src/frontend/core/rendersettings.cpp
@@ -77,6 +78,7 @@ add_executable(Lune
     src/frontend/components/panel/nodes/nodeeditor.cpp
     src/frontend/components/panel/nodes/nodespanel.cpp
     src/frontend/components/panel/outliner/outliner.cpp
+    src/frontend/components/panel/timeline/timeline.cpp
     src/frontend/components/palette/commandpalette.cpp
     src/frontend/editor.cpp
     src/frontend/frameanimationdriver.cpp

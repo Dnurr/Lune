@@ -103,6 +103,9 @@ public:
     CameraMode cameraMode() const { return m_cameraMode; }
     // Free camera speed, world units per second.
     void setFlySpeed(float speed);
+
+    // Scene time in seconds (the Timeline's frame), passed to the renderer.
+    void setTime(float seconds);
     float flySpeed() const { return m_flySpeed; }
     static constexpr float MinFlySpeed = 0.1f;
     static constexpr float MaxFlySpeed = 200.0f;
@@ -195,6 +198,7 @@ private:
     float m_renderAspect = 0.0f;
     float m_editorFieldOfView = 50.0f; // the editor camera's lens, restored when leaving Camera View
     float m_flySpeed = 4.0f;
+    float m_seconds = 0.0f;
     bool m_flying = false;   // free camera, right button held
     QPoint m_lookAnchor;     // global cursor position, kept there while looking
     QSet<int> m_flyKeys;     // movement keys held

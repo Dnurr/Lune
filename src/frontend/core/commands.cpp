@@ -1,5 +1,7 @@
 #include "commands.h"
 
+#include <QDateTime>
+
 #include "engine/scene/components.h"
 #include "engine/scene/scene.h"
 #include "selection.h"
@@ -384,4 +386,37 @@ void RenameMaterialCommand::redo()
 void RenameMaterialCommand::undo()
 {
     m_scene->setMaterialName(m_material, m_before);
+}
+
+// ---------------------------------------------------------------------------
+// SetTimelineCommand
+// ---------------------------------------------------------------------------
+
+SetTimelineCommand::SetTimelineCommand(Scene *scene, const Timeline &timeline)
+    : m_scene(scene)
+    , m_before(scene->timeline())
+    , m_after(timeline.valid())
+    , m_time(QDateTime::currentMSecsSinceEpoch())
+{
+    setText(QStringLiteral("Change timeline"));
+}
+
+void SetTimelineCommand::redo()
+{
+    m_scene->setTimeline(m_after);
+}
+
+void SetTimelineCommand::undo()
+{
+    m_scene->setTimeline(m_before);
+}
+
+bool SetTimelineCommand::mergeWith(const QUndoCommand *other)
+{
+    const auto *o = static_cast<const SetTimelineCommand *>(other);
+    if (o->m_scene != m_scene || o->m_time - m_time > 1000)
+        return false;
+    m_after = o->m_after;
+    m_time = o->m_time;
+    return true;
 }

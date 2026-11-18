@@ -286,6 +286,7 @@ void Viewport::render(QRhiCommandBuffer *cb)
         m_gizmo.appendGeometry(overlay);
     m_renderer.setOverlay(std::move(overlay), float(devicePixelRatio()));
     m_renderer.setViewSettings(m_view);
+    m_renderer.setTime(m_seconds);
     if (m_display)
         m_renderer.setDisplayParams(float(m_display->exposure()), m_display->tonemapper());
 
@@ -527,6 +528,14 @@ void Viewport::wheelEvent(QWheelEvent *event)
         m_goal.zoom(steps);
     redraw();
     event->accept();
+}
+
+void Viewport::setTime(float seconds)
+{
+    if (seconds == m_seconds)
+        return;
+    m_seconds = seconds;
+    redraw();
 }
 
 void Viewport::setCenterInFreeArea(bool on)

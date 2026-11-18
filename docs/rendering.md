@@ -68,6 +68,10 @@ Resources:
 
 - Uniform buffers are `Dynamic` and rewritten every frame; each pass in a frame uses its
   own buffer (a dynamic buffer must not be updated twice in one frame).
+- **Scene time**: the seconds of the frame shown in the Timeline (`Timeline::seconds()`,
+  0 on the range's start frame), set with `Renderer::setTime()`. The mesh shaders read it
+  as `viewport.w` of the entity block, the post shaders as `camera.w`; image renders use
+  the frame shown when they start.
 - Each entity with a mesh has a uniform buffer and binding set per material slot
   (submesh): the same matrices, its material's values and textures. Slot 0's buffer also
   serves the shadow and outline passes, which draw the whole mesh (shadows: unless a slot
@@ -277,7 +281,7 @@ when the shading bar's **Post** toggle is on (`ViewSettings::post`). The order i
   then `up[i]` is made from the level below (`texA`) and `down[i]` (`texB`), and the
   composite adds `up[0]` (`texB`) to the scene (`texA`).
 - Every post shader has the same bindings: the `PostBuf` block at 0 (`inputSize`,
-  `outputSize`, `camera` = near, far, depth convention, seconds, then `params0`,
+  `outputSize`, `camera` = near, far, depth convention, scene time, then `params0`,
   `params1`), `texA` at 1, `texB` at 2 (linear, clamped) and the scene's depth at 3
   (nearest). Each shader's header lists what its `params0` holds. Pixel sizes in the
   settings are for a 1080-pixel-tall image and arrive scaled, so the look doesn't depend

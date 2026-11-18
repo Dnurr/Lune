@@ -928,6 +928,7 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
                 v[0] = float(m_pixelSize.width());
                 v[1] = float(m_pixelSize.height());
                 v[2] = wireOnly ? 1.0f : 0.0f; // wireframe.frag: light lines alone, dark ones over surfaces
+                v[3] = m_seconds;              // scene time
                 v += 4;
                 v[0] = eye.x(); v[1] = eye.y(); v[2] = eye.z();
                 v += 4;
@@ -1103,6 +1104,7 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
             frame.nearPlane = camera.nearPlane;
             frame.farPlane = camera.farPlane;
             frame.fieldOfView = camera.fieldOfView;
+            frame.seconds = m_seconds;
             m_post.prepare(rub, frame);
             post = m_post.passCount() > 0;
         }

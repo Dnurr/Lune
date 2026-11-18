@@ -166,6 +166,8 @@ void Panel::hideEvent(QHideEvent *event)
 bool Panel::isOnTitle(const QPoint &pos) const
 {
     // The whole header strip (title row, full panel width) acts as the handle.
+    if (m_title->isHidden() || m_side == Side::Footer)
+        return false;
     return pos.y() <= m_title->geometry().bottom() + 4;
 }
 
@@ -179,6 +181,7 @@ bool Panel::isOnResizeEdge(const QPoint &pos) const
     case Side::Right:
         return pos.x() < kResizeGrip;
     case Side::Bottom:
+    case Side::Footer:
         return pos.y() < kResizeGrip;
     }
     return false;
@@ -188,8 +191,13 @@ void Panel::updateDockSideProperty()
 {
     if (isNested())
         return;
-    static const char *const sides[] = { "left", "right", "bottom" };
+    static const char *const sides[] = { "left", "right", "bottom", "footer" };
     setProperty("dockSide", QString::fromLatin1(sides[int(m_side)]));
+}
+
+void Panel::setTitleVisible(bool visible)
+{
+    m_title->setVisible(visible);
 }
 
 void Panel::setContentFills(bool fills)
@@ -266,6 +274,7 @@ void Panel::slide(bool in)
         away.moveLeft(parentWidget()->width());
         break;
     case Side::Bottom:
+    case Side::Footer:
         away.moveTop(parentWidget()->height());
         break;
     }
@@ -290,7 +299,7 @@ void Panel::slide(bool in)
 
 QJsonObject Panel::layoutState() const
 {
-    static const char *const sides[] = { "left", "right", "bottom" };
+    static const char *const sides[] = { "left", "right", "bottom", "footer" };
     QJsonObject state;
     state["side"] = QString::fromLatin1(sides[int(m_side)]);
     state["width"] = m_width;
@@ -308,6 +317,8 @@ void Panel::restoreLayoutState(const QJsonObject &state)
         setSide(Side::Right);
     else if (side == QLatin1String("bottom"))
         setSide(Side::Bottom);
+    else if (side == QLatin1String("footer"))
+        setSide(Side::Footer);
     m_width = qMax(kMinPanelSize, state["width"].toInt(m_width));
     m_height = qMax(kMinPanelSize, state["height"].toInt(m_height));
     if (state.contains("enabled"))
@@ -326,7 +337,7 @@ void Panel::mousePressEvent(QMouseEvent *event)
         m_snap->stop();
         m_resizing = true;
         m_resizeStart = mapToParent(pos);
-        m_resizeStartSize = m_side == Side::Bottom ? m_height : m_width;
+        m_resizeStartSize = isHorizontalBar() ? m_height : m_width;
         event->accept();
         return;
     }
@@ -364,7 +375,7 @@ void Panel::mouseMoveEvent(QMouseEvent *event)
     if (m_resizing) {
         const QPoint d = mapToParent(pos) - m_resizeStart;
         const QWidget *p = parentWidget();
-        if (m_side == Side::Bottom) {
+        if (isHorizontalBar()) {
             const int maxHeight = qMax(kMinPanelSize, p->height() * 3 / 4);
             m_height = qBound(kMinPanelSize, m_resizeStartSize - d.y(), maxHeight);
         } else {
@@ -379,7 +390,7 @@ void Panel::mouseMoveEvent(QMouseEvent *event)
     if (!m_dragging) {
         // Hover: resize cursor on the inner edge.
         if (isOnResizeEdge(pos))
-            setCursor(m_side == Side::Bottom ? Qt::SizeVerCursor : Qt::SizeHorCursor);
+            setCursor(isHorizontalBar() ? Qt::SizeVerCursor : Qt::SizeHorCursor);
         else
             unsetCursor();
         event->accept();
@@ -566,7 +577,7 @@ QRect Panel::targetGeometry() const
 {
     const QWidget *p = parentWidget();
     const int W = p->width();
-    const int H = p->height();
+    const int fullH = p->height();
     const int m = m_margin;
 
     // Width reserved by a left/right column (widest panel on that side), 0 if empty.
@@ -580,6 +591,25 @@ QRect Panel::targetGeometry() const
     const QList<Panel *> same = siblings(m_side);
     const int n = qMax(1, int(same.size()));
     const int idx = qMax(0, int(same.indexOf(const_cast<Panel *>(this))));
+
+    // Footer panels: full width at the bottom, the first one lowest. The others end above
+    // them (H shrinks by the height they take).
+    const QList<Panel *> footers = siblings(Side::Footer);
+    auto footerHeight = [&](const Panel *fp) { return qMin(fp->m_height, qMax(0, fullH - 2 * m)); };
+    if (m_side == Side::Footer) {
+        int bottom = fullH - m;
+        for (const Panel *fp : footers) {
+            if (fp == this)
+                break;
+            bottom -= footerHeight(fp) + m;
+        }
+        const int h = footerHeight(this);
+        return QRect(m, bottom - h, qMax(0, W - 2 * m), h);
+    }
+    int footerSpace = 0;
+    for (const Panel *fp : footers)
+        footerSpace += footerHeight(fp) + m;
+    const int H = qMax(0, fullH - footerSpace);
 
     if (m_side == Side::Bottom) {
         const int leftW = columnWidth(Side::Left);

@@ -50,6 +50,16 @@ void Scene::clear()
     while (!m_materials.empty())
         removeMaterial(m_materials.back().id);
     m_nextMaterialId = 1;
+    setTimeline({});
+}
+
+void Scene::setTimeline(const Timeline &timeline)
+{
+    const Timeline t = timeline.valid();
+    if (t == m_timeline)
+        return;
+    m_timeline = t;
+    emit timelineChanged();
 }
 
 // ---------------------------------------------------------------------------

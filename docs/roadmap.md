@@ -104,11 +104,11 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 
 ## 4. Timeline
 
-- [ ] Timeline panel: play, pause, scrub, frame range, frame rate (Claude)
+- [x] Timeline panel: play, pause, scrub, frame range, frame rate (Claude)
 - [ ] Keyframes on any animatable property, from the Inspector (Claude)
 - [ ] Animation curves: linear, bezier, constant; curve editor (Claude)
 - [ ] Keyframes and curves in the scene file, undo for every edit (Claude)
-- [ ] Time uniform available to every shader (Claude)
+- [x] Time uniform available to every shader: `viewport.w` (meshes), `camera.w` (post) (Claude)
 
 ## 5. GPU particles
 

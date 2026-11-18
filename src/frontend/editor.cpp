@@ -39,7 +39,9 @@
 #include "components/viewport/cameramenu.h"
 #include "components/viewport/displaymenu.h"
 #include "components/viewport/viewport.h"
+#include "components/panel/timeline/timeline.h"
 #include "core/commands.h"
+#include "core/playback.h"
 #include "core/displayhistory.h"
 #include "core/displaysettings.h"
 #include "core/selection.h"
@@ -67,6 +69,12 @@ Editor::Editor(QWidget *parent)
     // Display changes go on the undo stack too (and so mark the scene as modified).
     new DisplayHistory(m_display, m_undo, this);
     createDefaultScene();
+
+    // The frame shown: its scene time drives the renderer (animated effects, later keyframes).
+    m_playback = new Playback(m_scene, this);
+    auto followTime = [this] { m_viewport->setTime(m_playback->seconds()); };
+    connect(m_playback, &Playback::frameChanged, this, followTime);
+    connect(m_scene, &Scene::timelineChanged, this, followTime);
 
     createMenus();
     createPanels();
@@ -212,6 +220,26 @@ void Editor::createMenus()
     view->addAction(overlays);
     view->addAction(stats);
 
+    // Playback (Timeline panel). Text fields and spin boxes keep their keys (Space, arrows):
+    // they take them before the shortcuts do.
+    QMenu *playback = view->addMenu("Playback");
+    auto playbackAction = [&](const char *text, QKeySequence key, auto slot) {
+        auto *a = playback->addAction(QString::fromLatin1(text), this, slot);
+        a->setShortcut(key);
+        return a;
+    };
+    playbackAction("Play / Pause", QKeySequence(Qt::Key_Space), [this] { m_playback->togglePlaying(); });
+    playbackAction("Next Frame", QKeySequence(Qt::Key_Right), [this] { m_playback->step(1); });
+    playbackAction("Previous Frame", QKeySequence(Qt::Key_Left), [this] { m_playback->step(-1); });
+    playbackAction("Go to Start", QKeySequence(Qt::SHIFT | Qt::Key_Left), [this] {
+        m_playback->pause();
+        m_playback->goToStart();
+    });
+    playbackAction("Go to End", QKeySequence(Qt::SHIFT | Qt::Key_Right), [this] {
+        m_playback->pause();
+        m_playback->goToEnd();
+    });
+
     // Shading (also in the bar at the top left of the viewport); both stay in sync.
     QMenu *shading = view->addMenu("Shading");
     auto *shadingGroup = new QActionGroup(this);
@@ -335,6 +363,10 @@ void Editor::createPanels()
     m_nodes->setMargin(12);
     m_nodes->setPanelWidth(620);
     m_nodes->setPanelEnabled(false); // turned on by the Shading workspace
+
+    // Timeline (footer): under everything, the full width of the window.
+    m_timeline = new TimelinePanel(m_scene, m_playback, m_undo, m_viewport);
+    m_timeline->setMargin(12);
 
     // Drag and drop onto the viewport (from the Assets panel or the file manager).
     m_viewport->setDropSuffixes({ "obj", "gltf", "glb", "hdr", "lune" });
@@ -497,6 +529,8 @@ void Editor::newScene()
     m_viewport->setViewSettings(ViewSettings {});
     m_renderSettings = RenderSettings();
     updateRenderAspect();
+    m_playback->pause();
+    m_playback->goToStart();
     resetDocument(QString());
 }
 
@@ -612,6 +646,7 @@ QJsonObject Editor::editorState() const
     state["display"] = display;
     state["shading"] = shading;
     state["render"] = m_renderSettings.toJson();
+    state["timeline"] = QJsonObject { { "frame", m_playback->frame() } };
     return state;
 }
 
@@ -645,6 +680,8 @@ void Editor::applyEditorState(const QJsonObject &state)
     m_viewport->setViewSettings(v);
     m_renderSettings = RenderSettings::fromJson(state["render"].toObject());
     updateRenderAspect();
+    m_playback->pause();
+    m_playback->setFrame(state["timeline"].toObject()["frame"].toDouble(m_scene->timeline().start));
 }
 
 void Editor::editRenderSettings()
@@ -677,6 +714,7 @@ void Editor::renderImages(bool allPasses)
     request.tonemapper = m_display->tonemapper();
     request.skybox = m_viewport->viewSettings().skybox; // what the viewport shows
     request.post = m_viewport->viewSettings().post;
+    request.seconds = m_playback->seconds(); // the frame shown in the Timeline
     for (const ImagePass *p : passes)
         request.views.push_back(p->view);
 
@@ -740,7 +778,8 @@ QHash<QString, Panel *> Editor::workspacePanels() const
     return { { QStringLiteral("scene"), m_outliner },
              { QStringLiteral("inspector"), m_inspector },
              { QStringLiteral("assets"), m_assets },
-             { QStringLiteral("nodes"), m_nodes } };
+             { QStringLiteral("nodes"), m_nodes },
+             { QStringLiteral("timeline"), m_timeline } };
 }
 
 QJsonObject Editor::captureWorkspace() const
@@ -776,6 +815,7 @@ QJsonObject Editor::defaultWorkspace(const QString &name)
     panels["inspector"] = panel("right", 280, 220, !shading);
     panels["assets"] = panel("bottom", 220, 220, true);
     panels["nodes"] = panel("right", 620, 220, shading);
+    panels["timeline"] = panel("footer", 0, 56, true);
     return panels;
 }
 

@@ -193,6 +193,8 @@ bool save(const Scene &scene, const QString &path, const QJsonObject &editorStat
     root["entities"] = entities;
     if (!materials.isEmpty())
         root["materials"] = materials;
+    const Timeline &t = scene.timeline();
+    root["timeline"] = QJsonObject { { "start", t.start }, { "end", t.end }, { "fps", t.fps } };
     if (!editorState.isEmpty())
         root["editor"] = editorState;
 
@@ -355,6 +357,14 @@ bool load(Scene &scene, const QString &path, QJsonObject *editorState, QStringLi
         scene.insertMaterial(m);
     for (const Entity &e : entities)
         scene.insertEntity(e);
+    {
+        const QJsonObject jt = root["timeline"].toObject();
+        Timeline t;
+        t.start = jt["start"].toInt(t.start);
+        t.end = jt["end"].toInt(t.end);
+        t.fps = jt["fps"].toDouble(t.fps);
+        scene.setTimeline(t);
+    }
     if (editorState)
         *editorState = root["editor"].toObject();
     return true;

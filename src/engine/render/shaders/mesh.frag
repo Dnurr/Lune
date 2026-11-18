@@ -13,7 +13,7 @@ layout(std140, binding = 0) uniform buf {
     mat4 normalMatrix;
     vec4 color;
     vec4 outline;
-    vec4 viewport;
+    vec4 viewport;  // xy: target size in pixels, w: scene time in seconds (Timeline)
     vec4 cameraPos;
     vec4 material;  // x: roughness, y: metallic (0..1), z: alpha cutoff (Clip materials; 0 otherwise),
                     // w: alpha mode of the node material (0 opaque, 1 clip, 2 blend; see Surface.alpha)

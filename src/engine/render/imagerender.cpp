@@ -143,6 +143,7 @@ std::vector<QImage> renderImages(QRhi::Implementation backend, QWindow *window, 
         renderer.initialize(rhi.get(), target.get());
         renderer.setGridLinesVisible(false);
         renderer.setDisplayParams(request.exposure, request.tonemapper);
+        renderer.setTime(request.seconds);
 
         // One offscreen frame; with `readback`, the image is copied into `out`.
         auto frame = [&](bool readback, QImage *out) {

@@ -16,6 +16,7 @@ class Scene;
 //                         "Mesh": { "color": "#b9bbc4", "visible": true } } }
 //     ],
 //     "materials": [ { "id": 1, "name": "Rust", "graph": { "nodes": [...], "links": [...] } } ],
+//     "timeline": { "start": 1, "end": 250, "fps": 24 },
 //     "editor": { ... }   // opaque to the engine: camera etc., written by the editor
 //   }
 //

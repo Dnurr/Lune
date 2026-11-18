@@ -349,6 +349,40 @@ private slots:
         QVERIFY(text.contains("0.1"));
         QVERIFY(!text.contains("0.100000001"));
     }
+
+    void timelineRoundTripAndDefaults()
+    {
+        QTemporaryDir dir;
+        const QString path = dir.filePath("anim.lune");
+        Scene scene;
+        scene.setTimeline({ 10, 130, 30.0 });
+        QVERIFY(SceneIO::save(scene, path, {}));
+
+        Scene loaded;
+        QVERIFY(SceneIO::load(loaded, path));
+        QCOMPARE(loaded.timeline(), (Timeline { 10, 130, 30.0 }));
+
+        // A file without "timeline" (older scenes): the defaults.
+        QFile f(path);
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        QJsonObject root = QJsonDocument::fromJson(f.readAll()).object();
+        f.close();
+        root.remove("timeline");
+        QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        f.write(QJsonDocument(root).toJson());
+        f.close();
+        QVERIFY(SceneIO::load(loaded, path));
+        QCOMPARE(loaded.timeline(), Timeline {});
+    }
+
+    void timelineIsMadeValid()
+    {
+        Scene scene;
+        scene.setTimeline({ 50, 20, 0.0 });
+        QCOMPARE(scene.timeline().end, 50);
+        QCOMPARE(scene.timeline().fps, Timeline::MinFps);
+        QCOMPARE(scene.timeline().seconds(scene.timeline().start), 0.0);
+    }
 };
 
 QTEST_GUILESS_MAIN(TestSceneIO)

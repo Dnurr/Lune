@@ -14,6 +14,8 @@ class DisplaySettings;
 class InspectorPanel;
 class NodesPanel;
 class Panel;
+class Playback;
+class TimelinePanel;
 class QToolButton;
 class OutlinerPanel;
 class QAction;
@@ -128,6 +130,8 @@ private:
     InspectorPanel *m_inspector = nullptr;
     AssetsPanel *m_assets = nullptr;
     NodesPanel *m_nodes = nullptr;
+    Playback *m_playback = nullptr;      // the frame shown, playing
+    TimelinePanel *m_timeline = nullptr; // footer: playback and frame range
     QString m_workspace = QStringLiteral("layout");
     QHash<QString, QJsonObject> m_workspaces; // saved state of the workspaces not shown
     QHash<QString, QToolButton *> m_workspaceTabs;

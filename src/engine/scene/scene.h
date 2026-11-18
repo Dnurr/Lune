@@ -6,6 +6,7 @@
 
 #include "entity.h"
 #include "material.h"
+#include "timeline.h"
 
 // The scene: an ordered list of entities, and a library of materials they can use.
 // It knows nothing about the editor (no selection, no undo): it just holds the data and
@@ -56,6 +57,10 @@ public:
     void setEntityMaterial(EntityId id, int slot, MaterialId material);
     QString uniqueMaterialName(const QString &base) const;
 
+    // Frame range and frame rate (made valid: see Timeline::valid()).
+    const Timeline &timeline() const { return m_timeline; }
+    void setTimeline(const Timeline &timeline);
+
 signals:
     void entityAdded(EntityId id, int index);
     void entityRemoved(EntityId id);
@@ -63,6 +68,7 @@ signals:
     void materialAdded(MaterialId id);
     void materialRemoved(MaterialId id);
     void materialChanged(MaterialId id); // name, graph or alpha mode
+    void timelineChanged();
 
 private:
     Entity *find(EntityId id);
@@ -71,4 +77,5 @@ private:
     EntityId m_nextId = 1;
     std::vector<Material> m_materials;
     MaterialId m_nextMaterialId = 1;
+    Timeline m_timeline;
 };
