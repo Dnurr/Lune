@@ -1,6 +1,6 @@
 #version 440
 
-// Bloom, upsample step (HDR). Author: to be written.
+// Bloom, upsample step (HDR)
 // Runs from the smallest level back up: each step makes level i from the level below it.
 //
 // texA      the level below, already upsampled up to there (or the smallest downsample)
@@ -32,5 +32,23 @@ layout(binding = 3) uniform sampler2D depthTex; // the scene's depth buffer, nea
 
 void main()
 {
-    fragColor = texture(texB, v_uv);
+    float x = inputSize.z;
+    float y = inputSize.w;
+
+    vec3 a = texture(texA, vec2(v_uv.x - x, v_uv.y + y)).rgb;
+    vec3 b = texture(texA, vec2(v_uv.x,     v_uv.y + y)).rgb;
+    vec3 c = texture(texA, vec2(v_uv.x + x, v_uv.y + y)).rgb;
+    vec3 d = texture(texA, vec2(v_uv.x - x, v_uv.y)).rgb;
+    vec3 e = texture(texA, vec2(v_uv.x,     v_uv.y)).rgb;
+    vec3 f = texture(texA, vec2(v_uv.x + x, v_uv.y)).rgb;
+    vec3 g = texture(texA, vec2(v_uv.x - x, v_uv.y - y)).rgb;
+    vec3 h = texture(texA, vec2(v_uv.x,     v_uv.y - y)).rgb;
+    vec3 i = texture(texA, vec2(v_uv.x + x, v_uv.y - y)).rgb;
+
+    vec3 up = e * 4.0;
+    up     += (b + d + f + h) * 2.0;
+    up     += (a + c + g + i);
+    up     *= 1.0 / 16.0;
+
+    fragColor = vec4(mix(texture(texB, v_uv).rgb, up, params0.w), 1.0);
 }
