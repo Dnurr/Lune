@@ -10,15 +10,17 @@ class QSpinBox;
 class QToolButton;
 class QUndoStack;
 class Scene;
+class Selection;
 
 // The frame ruler of the Timeline panel: the scene's whole range from edge to edge, with
-// numbered ticks and the current frame. Press or drag on it to scrub.
+// numbered ticks, the keyframes of the selected entity (diamonds, amber on the current frame)
+// and the current frame. Press or drag on it to scrub.
 class TimelineRuler : public QWidget
 {
     Q_OBJECT
 
 public:
-    TimelineRuler(Scene *scene, Playback *playback, QWidget *parent = nullptr);
+    TimelineRuler(Scene *scene, Playback *playback, Selection *selection, QWidget *parent = nullptr);
 
     QSize sizeHint() const override { return { 400, 36 }; }
     QSize minimumSizeHint() const override { return { 120, 30 }; }
@@ -36,6 +38,7 @@ protected:
 private:
     Scene *m_scene;
     Playback *m_playback;
+    Selection *m_selection;
     bool m_scrubbing = false;
 };
 
@@ -46,7 +49,7 @@ class TimelinePanel : public Panel
     Q_OBJECT
 
 public:
-    TimelinePanel(Scene *scene, Playback *playback, QUndoStack *undo, QWidget *parent);
+    TimelinePanel(Scene *scene, Playback *playback, Selection *selection, QUndoStack *undo, QWidget *parent);
 
 private:
     void syncTimeline(); // fields from the scene's Timeline

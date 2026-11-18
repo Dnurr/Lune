@@ -11,10 +11,12 @@
 #include <QUndoStack>
 #include <cmath>
 
+#include "engine/scene/animation.h"
 #include "engine/scene/scene.h"
 #include "frontend/components/widgets/draglabel.h"
 #include "frontend/core/commands.h"
 #include "frontend/core/playback.h"
+#include "frontend/core/selection.h"
 #include "frontend/theme/icons.h"
 #include "frontend/theme/theme.h"
 
@@ -119,16 +121,19 @@ int tickStep(double pixelsPerFrame, double minPixels)
 // TimelineRuler
 // ---------------------------------------------------------------------------
 
-TimelineRuler::TimelineRuler(Scene *scene, Playback *playback, QWidget *parent)
+TimelineRuler::TimelineRuler(Scene *scene, Playback *playback, Selection *selection, QWidget *parent)
     : QWidget(parent)
     , m_scene(scene)
     , m_playback(playback)
+    , m_selection(selection)
 {
     setObjectName("TimelineRuler");
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setCursor(Qt::SizeHorCursor);
     connect(playback, &Playback::frameChanged, this, qOverload<>(&QWidget::update));
     connect(scene, &Scene::timelineChanged, this, qOverload<>(&QWidget::update));
+    connect(scene, &Scene::entityChanged, this, qOverload<>(&QWidget::update)); // its keys
+    connect(selection, &Selection::changed, this, qOverload<>(&QWidget::update));
 }
 
 double TimelineRuler::xOf(double frame) const
@@ -191,6 +196,33 @@ void TimelineRuler::paintEvent(QPaintEvent *)
         }
     }
 
+    // Keyframes of the selected entity, on the ticks' line.
+    if (const Entity *e = m_scene->entity(m_selection->current())) {
+        const double current = m_playback->frame();
+        const double y = h - 9.0;
+        const double r = 4.5;
+        for (double f : Animation::keyFrames(*e)) {
+            if (f < t.start || f > t.end)
+                continue;
+            const double x = std::round(xOf(f)) + 0.5;
+            const bool here = std::abs(f - current) < 0.01;
+            QPainterPath diamond;
+            diamond.moveTo(x, y - r);
+            diamond.lineTo(x + r, y);
+            diamond.lineTo(x, y + r);
+            diamond.lineTo(x - r, y);
+            diamond.closeSubpath();
+            QColor fill = here ? QColor(0xE3, 0xB3, 0x41) : c.onSurface; // KeyButton::keyColor()
+            if (!here)
+                fill.setAlphaF(0.85f);
+            QColor edge = c.surface;
+            edge.setAlphaF(0.8f);
+            p.setPen(QPen(edge, 1.0));
+            p.setBrush(fill);
+            p.drawPath(diamond);
+        }
+    }
+
     // Current frame: a line through the ruler and its number in a tag at the top.
     const double fx = std::round(xOf(m_playback->frame())) + 0.5;
     p.setPen(QPen(c.primary, 2.0));
@@ -236,7 +268,7 @@ void TimelineRuler::mouseReleaseEvent(QMouseEvent *event)
 // TimelinePanel
 // ---------------------------------------------------------------------------
 
-TimelinePanel::TimelinePanel(Scene *scene, Playback *playback, QUndoStack *undo, QWidget *parent)
+TimelinePanel::TimelinePanel(Scene *scene, Playback *playback, Selection *selection, QUndoStack *undo, QWidget *parent)
     : Panel(QStringLiteral("Timeline"), parent, Panel::Side::Footer)
     , m_scene(scene)
     , m_playback(playback)
@@ -288,7 +320,7 @@ TimelinePanel::TimelinePanel(Scene *scene, Playback *playback, QUndoStack *undo,
     layout->addWidget(m_frame);
     layout->addSpacing(6);
 
-    m_ruler = new TimelineRuler(scene, playback, row);
+    m_ruler = new TimelineRuler(scene, playback, selection, row);
     layout->addWidget(m_ruler, 1);
     layout->addSpacing(10);
 

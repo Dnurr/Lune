@@ -2,6 +2,7 @@
 
 #include <QDateTime>
 
+#include "engine/scene/animation.h"
 #include "engine/scene/components.h"
 #include "engine/scene/scene.h"
 #include "selection.h"
@@ -155,38 +156,50 @@ SetPropertyCommand::SetPropertyCommand(Scene *scene, EntityId id, int component,
     , m_after(after)
 {
     const ComponentDesc &c = components()[size_t(component)];
-    if (const Entity *e = scene->entity(id))
+    if (const Entity *e = scene->entity(id)) {
         m_before = c.get(*e, property);
+        if (Animation::track(*e, component, property)) {
+            m_keyed = true;
+            m_frame = scene->frame();
+            m_animBefore = e->animation;
+            m_animAfter = Animation::withKey(e->animation, component, property, m_frame, after);
+        }
+    }
     m_lastEdit.start();
     setText(QStringLiteral("Change %1").arg(c.properties[size_t(property)].name));
 }
 
-void SetPropertyCommand::apply(const QVariant &value)
+void SetPropertyCommand::apply(const QVariant &value, const std::vector<AnimationTrack> &animation)
 {
     const ComponentDesc &c = components()[size_t(m_component)];
     const int property = m_property;
-    m_scene->modifyEntity(m_entity, [&](Entity &e) { c.set(e, property, value); });
+    m_scene->modifyEntity(m_entity, [&](Entity &e) {
+        c.set(e, property, value);
+        if (m_keyed)
+            e.animation = animation;
+    });
 }
 
 void SetPropertyCommand::redo()
 {
-    apply(m_after);
+    apply(m_after, m_animAfter);
 }
 
 void SetPropertyCommand::undo()
 {
-    apply(m_before);
+    apply(m_before, m_animBefore);
 }
 
 bool SetPropertyCommand::mergeWith(const QUndoCommand *other)
 {
     const auto *o = static_cast<const SetPropertyCommand *>(other);
     if (o->m_entity != m_entity || o->m_component != m_component || o->m_property != m_property
-        || m_lastEdit.elapsed() > kMergeWindowMs)
+        || o->m_keyed != m_keyed || o->m_frame != m_frame || m_lastEdit.elapsed() > kMergeWindowMs)
         return false;
     m_after = o->m_after;
+    m_animAfter = o->m_animAfter;
     m_lastEdit.restart();
-    setObsolete(m_after == m_before);
+    setObsolete(m_after == m_before && m_animAfter == m_animBefore);
     return true;
 }
 
@@ -204,6 +217,7 @@ SetTransformCommand::SetTransformCommand(Scene *scene, EntityId id, const Transf
         m_before = e->transform;
     m_lastEdit.start();
     setText(QStringLiteral("Change %1").arg(fieldName(field)));
+    keyAnimated();
 }
 
 SetTransformCommand::SetTransformCommand(Scene *scene, EntityId id, const Transform &before, const Transform &after,
@@ -216,27 +230,65 @@ SetTransformCommand::SetTransformCommand(Scene *scene, EntityId id, const Transf
     , m_mergeable(false)
 {
     setText(QStringLiteral("Change %1").arg(fieldName(field)));
+    keyAnimated();
+}
+
+void SetTransformCommand::keyAnimated()
+{
+    const Entity *e = m_scene->entity(m_entity);
+    if (!e || e->animation.empty())
+        return;
+    const auto &comps = components();
+    for (int ci = 0; ci < int(comps.size()); ++ci) {
+        if (comps[size_t(ci)].name != QLatin1String("Transform"))
+            continue;
+        Entity moved = *e;
+        moved.transform = m_after;
+        m_animBefore = e->animation;
+        m_animAfter = e->animation;
+        for (int pi = 0; pi < int(comps[size_t(ci)].properties.size()); ++pi) {
+            if (Animation::track(*e, ci, pi)) {
+                m_keyed = true;
+                m_animAfter = Animation::withKey(m_animAfter, ci, pi, m_scene->frame(), comps[size_t(ci)].get(moved, pi));
+            }
+        }
+        m_frame = m_scene->frame();
+    }
+}
+
+void SetTransformCommand::apply(const Transform &transform, const std::vector<AnimationTrack> &animation)
+{
+    if (!m_keyed) {
+        m_scene->setTransform(m_entity, transform);
+        return;
+    }
+    m_scene->modifyEntity(m_entity, [&](Entity &e) {
+        e.transform = transform;
+        e.animation = animation;
+    });
 }
 
 void SetTransformCommand::redo()
 {
-    m_scene->setTransform(m_entity, m_after);
+    apply(m_after, m_animAfter);
 }
 
 void SetTransformCommand::undo()
 {
-    m_scene->setTransform(m_entity, m_before);
+    apply(m_before, m_animBefore);
 }
 
 bool SetTransformCommand::mergeWith(const QUndoCommand *other)
 {
     const auto *o = static_cast<const SetTransformCommand *>(other); // same id() = same type
     if (!m_mergeable || !o->m_mergeable || o->m_entity != m_entity || o->m_field != m_field
-        || m_lastEdit.elapsed() > kMergeWindowMs)
+        || o->m_keyed != m_keyed || o->m_frame != m_frame || m_lastEdit.elapsed() > kMergeWindowMs)
         return false;
     m_after = o->m_after;
+    m_animAfter = o->m_animAfter;
     m_lastEdit.restart();
-    setObsolete(m_after == m_before); // dragged back to where it started: no undo step
+    // Dragged back to where it started: no undo step.
+    setObsolete(m_after == m_before && m_animAfter == m_animBefore);
     return true;
 }
 
@@ -419,4 +471,45 @@ bool SetTimelineCommand::mergeWith(const QUndoCommand *other)
     m_after = o->m_after;
     m_time = o->m_time;
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// SetAnimationCommand
+// ---------------------------------------------------------------------------
+
+SetAnimationCommand::SetAnimationCommand(Scene *scene, EntityId id, std::vector<AnimationTrack> after, const QString &text)
+    : m_scene(scene)
+    , m_entity(id)
+    , m_after(std::move(after))
+{
+    if (const Entity *e = scene->entity(id)) {
+        m_before = e->animation;
+        m_entityBefore = *e;
+    }
+    setText(text);
+}
+
+void SetAnimationCommand::redo()
+{
+    const double frame = m_scene->frame();
+    m_scene->modifyEntity(m_entity, [&](Entity &e) {
+        e.animation = m_after;
+        Animation::applyTo(e, frame);
+    });
+}
+
+void SetAnimationCommand::undo()
+{
+    // The values as they were (a removed key may have changed them), then the old keys.
+    const Entity &before = m_entityBefore;
+    m_scene->modifyEntity(m_entity, [&](Entity &e) {
+        for (const ComponentDesc &c : components()) {
+            if (!c.present(e) || !c.present(before))
+                continue;
+            for (int i = 0; i < int(c.properties.size()); ++i)
+                if (!c.properties[size_t(i)].readOnly)
+                    c.set(e, i, c.get(before, i));
+        }
+        e.animation = m_before;
+    });
 }

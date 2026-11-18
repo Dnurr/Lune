@@ -12,12 +12,15 @@
 #include <QMenu>
 #include <QPushButton>
 #include <QToolButton>
+#include <QStyle>
 #include <QUndoStack>
 #include <memory>
 
+#include "engine/scene/animation.h"
 #include "engine/scene/components.h"
 #include "engine/scene/scene.h"
 #include "frontend/components/widgets/draglabel.h"
+#include "frontend/components/widgets/keybutton.h"
 #include "frontend/components/widgets/vector3.h"
 #include "frontend/core/commands.h"
 #include "frontend/core/selection.h"
@@ -82,6 +85,7 @@ InspectorPanel::InspectorPanel(Scene *scene, Selection *selection, QUndoStack *u
         else
             refresh();
     });
+    connect(m_scene, &Scene::frameChanged, this, &InspectorPanel::refresh); // keys on this frame
     rebuild();
 }
 
@@ -187,6 +191,7 @@ void InspectorPanel::rebuild()
                         hl->addWidget(check);
                         connect(check, &QCheckBox::toggled, this, [this, ci, pi](bool on) { edit(ci, pi, on); });
                         row.show = [check](const QVariant &x) { check->setChecked(x.toBool()); };
+                        addKeyButton(hl, heading, row);
                         m_rows.push_back(std::move(row));
                         continue;
                     }
@@ -205,7 +210,14 @@ void InspectorPanel::rebuild()
                 row.show = [v](const QVariant &x) { v->setValue(x.value<QVector3D>()); };
                 labelHints.push_back([v] { return v->labelWidthHint(); });
                 labelSetters.push_back([v](int w) { v->setLabelWidth(w); });
-                rows->addWidget(v);
+                auto *w = new QWidget(section); // the vector and its key button
+                auto *l = new QHBoxLayout(w);
+                l->setContentsMargins(0, 0, 3, 0);
+                l->setSpacing(2);
+                v->setParent(w);
+                l->addWidget(v, 1);
+                addKeyButton(l, w, row);
+                rows->addWidget(w);
                 break;
             }
             case PropertyType::Float: {
@@ -227,6 +239,8 @@ void InspectorPanel::rebuild()
                 });
                 connect(spin, &QDoubleSpinBox::valueChanged, this, [this, ci, pi](double x) { edit(ci, pi, x); });
                 row.show = [spin](const QVariant &x) { spin->setValue(x.toDouble()); };
+                row.field = spin;
+                addKeyButton(l, w, row);
                 alignLabel(label);
                 rows->addWidget(w);
                 break;
@@ -253,6 +267,7 @@ void InspectorPanel::rebuild()
                     swatch->setStyleSheet(swatchStyle(c));
                     swatch->setToolTip(c.name().toUpper());
                 };
+                addKeyButton(l, w, row);
                 alignLabel(label);
                 rows->addWidget(w);
                 break;
@@ -267,6 +282,7 @@ void InspectorPanel::rebuild()
                 l->addWidget(check, 1);
                 connect(check, &QCheckBox::toggled, this, [this, ci, pi](bool on) { edit(ci, pi, on); });
                 row.show = [check](const QVariant &x) { check->setChecked(x.toBool()); };
+                addKeyButton(l, w, row);
                 alignLabel(label);
                 rows->addWidget(w);
                 break;
@@ -287,6 +303,8 @@ void InspectorPanel::rebuild()
                         edit(ci, pi, index);
                 });
                 row.show = [combo](const QVariant &x) { combo->setCurrentIndex(x.toInt()); };
+                row.field = combo;
+                addKeyButton(l, w, row);
                 alignLabel(label);
                 rows->addWidget(w);
                 break;
@@ -328,6 +346,7 @@ void InspectorPanel::rebuild()
                     pick->setToolTip(path.isEmpty() ? QStringLiteral("Choose a file") : QDir::toNativeSeparators(path));
                     clear->setVisible(!path.isEmpty());
                 };
+                addKeyButton(l, w, row);
                 alignLabel(label);
                 rows->addWidget(w);
                 break;
@@ -342,6 +361,7 @@ void InspectorPanel::rebuild()
                 l->addWidget(label);
                 l->addWidget(value, 1);
                 row.show = [value](const QVariant &x) { value->setText(x.toString()); };
+                addKeyButton(l, w, row);
                 alignLabel(label);
                 rows->addWidget(w);
                 break;
@@ -398,9 +418,114 @@ void InspectorPanel::refresh()
     if (!e)
         return;
     m_updating = true;
-    for (const Row &row : m_rows)
+    const double frame = m_scene->frame();
+    for (const Row &row : m_rows) {
         row.show(components()[size_t(row.component)].get(*e, row.property));
+        if (!row.key)
+            continue;
+        const AnimationTrack *t = Animation::track(*e, row.component, row.property);
+        const auto state = !t ? KeyButton::State::None
+                           : Animation::keyAt(*t, frame) >= 0 ? KeyButton::State::Key
+                                                                : KeyButton::State::Animated;
+        row.key->setState(state);
+        if (row.field) {
+            static const char *names[] = { "", "animated", "key" };
+            const QString anim = QString::fromLatin1(names[int(state)]);
+            if (row.field->property("anim").toString() != anim) {
+                row.field->setProperty("anim", anim);
+                row.field->style()->unpolish(row.field); // the style sheet colors it by "anim"
+                row.field->style()->polish(row.field);
+            }
+        }
+    }
     m_updating = false;
+}
+
+void InspectorPanel::addKeyButton(QBoxLayout *layout, QWidget *parent, Row &row)
+{
+    const PropertyDesc &prop = components()[size_t(row.component)].properties[size_t(row.property)];
+    auto *key = new KeyButton(parent);
+    if (!Animation::animatable(prop)) {
+        // A blank of the same size keeps the editors' right edges lined up.
+        auto *blank = new QWidget(parent);
+        blank->setFixedSize(key->sizeHint());
+        delete key;
+        layout->addWidget(blank);
+        return;
+    }
+    const int ci = row.component, pi = row.property;
+    connect(key, &KeyButton::clicked, this, [this, ci, pi] { toggleKey(ci, pi); });
+    connect(key, &KeyButton::contextMenuRequested, this,
+            [this, ci, pi](const QPoint &pos) { showKeyMenu(ci, pi, pos); });
+    layout->addWidget(key);
+    row.key = key;
+}
+
+void InspectorPanel::toggleKey(int component, int property)
+{
+    const Entity *e = m_scene->entity(m_shown);
+    if (!e)
+        return;
+    const double frame = m_scene->frame();
+    const AnimationTrack *t = Animation::track(*e, component, property);
+    const QString name = components()[size_t(component)].properties[size_t(property)].name;
+    if (t && Animation::keyAt(*t, frame) >= 0)
+        m_undo->push(new SetAnimationCommand(m_scene, m_shown, Animation::withoutKey(e->animation, component, property, frame),
+                                             QStringLiteral("Delete key of %1").arg(name)));
+    else
+        m_undo->push(new SetAnimationCommand(
+            m_scene, m_shown,
+            Animation::withKey(e->animation, component, property, frame, components()[size_t(component)].get(*e, property)),
+            QStringLiteral("Insert key of %1").arg(name)));
+}
+
+void InspectorPanel::showKeyMenu(int component, int property, const QPoint &globalPos)
+{
+    const Entity *e = m_scene->entity(m_shown);
+    if (!e)
+        return;
+    const EntityId id = m_shown;
+    const double frame = m_scene->frame();
+    const PropertyDesc &prop = components()[size_t(component)].properties[size_t(property)];
+    const AnimationTrack *t = Animation::track(*e, component, property);
+    const bool onKey = t && Animation::keyAt(*t, frame) >= 0;
+
+    QMenu menu(this);
+    menu.addAction(onKey ? QStringLiteral("Delete Key") : QStringLiteral("Insert Key"), this,
+                   [this, component, property] { toggleKey(component, property); });
+    if (t && Animation::interpolates(prop.type)) {
+        // The interpolation of the key on this frame, or of the one before it.
+        int current = 0;
+        for (int k = 0; k < int(t->keys.size()); ++k)
+            if (t->keys[size_t(k)].frame <= frame + 0.01)
+                current = k;
+        const Interpolation now = t->keys[size_t(current)].interpolation;
+        QMenu *interp = menu.addMenu(QStringLiteral("Interpolation"));
+        const std::pair<Interpolation, const char *> choices[] = {
+            { Interpolation::Constant, "Constant" }, { Interpolation::Linear, "Linear" }, { Interpolation::Bezier, "Bezier" }
+        };
+        for (const auto &[mode, label] : choices) {
+            const Interpolation m = mode;
+            QAction *a = interp->addAction(QString::fromLatin1(label), this, [this, id, component, property, frame, m] {
+                if (const Entity *en = m_scene->entity(id))
+                    m_undo->push(new SetAnimationCommand(
+                        m_scene, id, Animation::withInterpolation(en->animation, component, property, frame, m),
+                        QStringLiteral("Change interpolation")));
+            });
+            a->setCheckable(true);
+            a->setChecked(mode == now);
+        }
+    }
+    if (t) {
+        menu.addSeparator();
+        const QString name = prop.name;
+        menu.addAction(QStringLiteral("Clear Animation"), this, [this, id, component, property, name] {
+            if (const Entity *en = m_scene->entity(id))
+                m_undo->push(new SetAnimationCommand(m_scene, id, Animation::withoutTrack(en->animation, component, property),
+                                                     QStringLiteral("Clear animation of %1").arg(name)));
+        });
+    }
+    menu.exec(globalPos);
 }
 
 void InspectorPanel::edit(int component, int property, const QVariant &value)

@@ -6,9 +6,7 @@
 
 class Scene;
 
-// The frame the editor shows, and playing it back.
-//
-// The frame always lies within the scene's Timeline (it follows range changes). Playing
+// Playing back the scene's frame (Scene::frame(), which lies within its Timeline). Playing
 // runs in real time at the timeline's frame rate: frames are dropped when the viewport
 // can't keep up, so the duration is always right, and at the end it loops to the start.
 class Playback : public QObject
@@ -18,7 +16,7 @@ class Playback : public QObject
 public:
     explicit Playback(Scene *scene, QObject *parent = nullptr);
 
-    double frame() const { return m_frame; }
+    double frame() const;
     void setFrame(double frame); // limited to the timeline
     // Scene time of the frame shown: Timeline::seconds(frame()).
     float seconds() const;
@@ -40,7 +38,6 @@ private:
     void tick();
 
     Scene *m_scene;
-    double m_frame = 1.0;
     QTimer m_timer;
     QElapsedTimer m_clock;     // since play()
     double m_playFrom = 1.0;   // frame shown when play() was called

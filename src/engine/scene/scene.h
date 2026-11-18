@@ -61,6 +61,12 @@ public:
     const Timeline &timeline() const { return m_timeline; }
     void setTimeline(const Timeline &timeline);
 
+    // The frame the scene is at: animated properties hold their values for it once
+    // Animation::apply() has run. Within the timeline (it follows range changes). Not saved
+    // with the scene (the editor keeps it in its state).
+    double frame() const { return m_frame; }
+    void setFrame(double frame);
+
 signals:
     void entityAdded(EntityId id, int index);
     void entityRemoved(EntityId id);
@@ -69,6 +75,7 @@ signals:
     void materialRemoved(MaterialId id);
     void materialChanged(MaterialId id); // name, graph or alpha mode
     void timelineChanged();
+    void frameChanged(double frame);
 
 private:
     Entity *find(EntityId id);
@@ -78,4 +85,5 @@ private:
     std::vector<Material> m_materials;
     MaterialId m_nextMaterialId = 1;
     Timeline m_timeline;
+    double m_frame = 1.0;
 };

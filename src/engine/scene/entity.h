@@ -5,6 +5,7 @@
 #include <QtGlobal>
 #include <optional>
 
+#include "keyframes.h"
 #include "mesh.h"
 #include "transform.h"
 
@@ -155,4 +156,7 @@ struct Entity
     std::optional<Environment> environment; // set = this entity is the scene's environment
     std::optional<Camera> camera;           // set = this entity is a camera
     std::optional<PostProcess> postProcess; // effects of the image rendered by this entity's camera
+
+    // Keyframes of its properties (engine/scene/animation.h), one track per animated property.
+    std::vector<AnimationTrack> animation;
 };

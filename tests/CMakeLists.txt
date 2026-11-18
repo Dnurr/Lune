@@ -29,4 +29,5 @@ lune_add_test(tst_hdrimage)
 lune_add_test(tst_camera)
 lune_add_test(tst_material)
 lune_add_test(tst_rendersettings)
+lune_add_test(tst_animation)
 target_link_libraries(tst_material PRIVATE Qt6::ShaderToolsPrivate) # compiles generated shaders

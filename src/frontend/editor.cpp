@@ -32,6 +32,7 @@
 #include "components/render/rendersettingsdialog.h"
 #include "components/viewport/shadingmenu.h"
 #include "engine/render/imagerender.h"
+#include "engine/scene/animation.h"
 #include "components/panel/assets/assets.h"
 #include "components/panel/nodes/nodespanel.h"
 #include "components/panel/inspector/inspector.h"
@@ -75,6 +76,8 @@ Editor::Editor(QWidget *parent)
     auto followTime = [this] { m_viewport->setTime(m_playback->seconds()); };
     connect(m_playback, &Playback::frameChanged, this, followTime);
     connect(m_scene, &Scene::timelineChanged, this, followTime);
+    // Animated properties take their values at the new frame.
+    connect(m_scene, &Scene::frameChanged, this, [this] { Animation::apply(*m_scene); });
 
     createMenus();
     createPanels();
@@ -350,7 +353,7 @@ void Editor::createPanels()
     // Inspector (right): built from the component descriptors, hidden while nothing is selected.
     m_inspector = new InspectorPanel(m_scene, m_selection, m_undo, m_viewport);
     m_inspector->setMargin(12);
-    m_inspector->setPanelWidth(280);
+    m_inspector->setPanelWidth(300);
 
     // Assets (bottom): folder tree + contents
     m_assets = new AssetsPanel(m_viewport, Panel::Side::Bottom);
@@ -365,7 +368,7 @@ void Editor::createPanels()
     m_nodes->setPanelEnabled(false); // turned on by the Shading workspace
 
     // Timeline (footer): under everything, the full width of the window.
-    m_timeline = new TimelinePanel(m_scene, m_playback, m_undo, m_viewport);
+    m_timeline = new TimelinePanel(m_scene, m_playback, m_selection, m_undo, m_viewport);
     m_timeline->setMargin(12);
 
     // Drag and drop onto the viewport (from the Assets panel or the file manager).
@@ -682,6 +685,7 @@ void Editor::applyEditorState(const QJsonObject &state)
     updateRenderAspect();
     m_playback->pause();
     m_playback->setFrame(state["timeline"].toObject()["frame"].toDouble(m_scene->timeline().start));
+    Animation::apply(*m_scene); // also when the frame didn't change
 }
 
 void Editor::editRenderSettings()
@@ -812,7 +816,7 @@ QJsonObject Editor::defaultWorkspace(const QString &name)
     const bool shading = name == QLatin1String("shading");
     QJsonObject panels;
     panels["scene"] = panel("left", 220, 220, !shading);
-    panels["inspector"] = panel("right", 280, 220, !shading);
+    panels["inspector"] = panel("right", 300, 220, !shading);
     panels["assets"] = panel("bottom", 220, 220, true);
     panels["nodes"] = panel("right", 620, 220, shading);
     panels["timeline"] = panel("footer", 0, 56, true);

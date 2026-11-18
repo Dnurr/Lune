@@ -7,33 +7,33 @@
 Playback::Playback(Scene *scene, QObject *parent)
     : QObject(parent)
     , m_scene(scene)
-    , m_frame(scene->timeline().start)
 {
     m_timer.setTimerType(Qt::PreciseTimer);
     connect(&m_timer, &QTimer::timeout, this, &Playback::tick);
-    // A new range or rate: stay inside it, and keep the playing speed right.
+    connect(m_scene, &Scene::frameChanged, this, &Playback::frameChanged);
+    // A new rate: keep the playing speed right.
     connect(m_scene, &Scene::timelineChanged, this, [this] {
-        setFrame(m_frame);
         if (isPlaying()) {
-            m_playFrom = m_frame;
+            m_playFrom = frame();
             m_clock.restart();
             m_timer.setInterval(qMax(1, int(500.0 / m_scene->timeline().fps)));
         }
     });
 }
 
+double Playback::frame() const
+{
+    return m_scene->frame();
+}
+
 void Playback::setFrame(double frame)
 {
-    const double f = m_scene->timeline().clamp(frame);
-    if (f == m_frame)
-        return;
-    m_frame = f;
-    emit frameChanged(m_frame);
+    m_scene->setFrame(frame);
 }
 
 float Playback::seconds() const
 {
-    return float(m_scene->timeline().seconds(m_frame));
+    return float(m_scene->timeline().seconds(frame()));
 }
 
 void Playback::play()
@@ -41,9 +41,9 @@ void Playback::play()
     if (isPlaying())
         return;
     const Timeline &t = m_scene->timeline();
-    if (m_frame >= t.end)
+    if (frame() >= t.end)
         setFrame(t.start); // at the end: play from the start
-    m_playFrom = std::floor(m_frame);
+    m_playFrom = std::floor(frame());
     m_clock.start();
     // Twice per frame, so a frame is never shown much later than its time.
     m_timer.start(qMax(1, int(500.0 / t.fps)));
@@ -69,7 +69,7 @@ void Playback::togglePlaying()
 void Playback::step(int frames)
 {
     pause();
-    setFrame(std::round(m_frame) + frames);
+    setFrame(std::round(frame()) + frames);
 }
 
 void Playback::goToStart()

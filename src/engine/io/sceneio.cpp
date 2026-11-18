@@ -13,6 +13,7 @@
 #include <functional>
 #include <vector>
 
+#include "engine/scene/animation.h"
 #include "engine/scene/components.h"
 #include "engine/scene/primitives.h"
 #include "engine/scene/scene.h"
@@ -171,6 +172,26 @@ bool save(const Scene &scene, const QString &path, const QJsonObject &editorStat
             jc[c.name] = props;
         }
         je["components"] = jc;
+
+        QJsonArray animation;
+        for (const AnimationTrack &t : e.animation) {
+            int ci = 0, pi = 0;
+            if (t.keys.empty() || !Animation::resolve(t, &ci, &pi))
+                continue;
+            const PropertyDesc &p = comps[size_t(ci)].properties[size_t(pi)];
+            QJsonArray keys;
+            for (const Keyframe &k : t.keys) {
+                QJsonObject jk;
+                jk["frame"] = tidy(k.frame);
+                jk["value"] = propertyToJson(p, k.value, sceneDir);
+                if (Animation::interpolates(p.type))
+                    jk["interpolation"] = Animation::interpolationName(k.interpolation);
+                keys.append(jk);
+            }
+            animation.append(QJsonObject { { "component", t.component }, { "property", t.property }, { "keys", keys } });
+        }
+        if (!animation.isEmpty())
+            je["animation"] = animation;
         entities.append(je);
     }
 
@@ -310,6 +331,35 @@ bool load(Scene &scene, const QString &path, QJsonObject *editorState, QStringLi
                 } else
                     warn(QStringLiteral("%1: invalid value for %2.%3").arg(e.name, c.name, p.key()));
             }
+        }
+
+        for (const QJsonValue &tv : je["animation"].toArray()) {
+            const QJsonObject jt = tv.toObject();
+            AnimationTrack t;
+            t.component = jt["component"].toString();
+            t.property = jt["property"].toString();
+            int ci = 0, pi = 0;
+            if (!Animation::resolve(t, &ci, &pi)) {
+                warn(QStringLiteral("%1: can't animate %2.%3").arg(e.name, t.component, t.property));
+                continue;
+            }
+            const PropertyDesc &p = comps[size_t(ci)].properties[size_t(pi)];
+            for (const QJsonValue &kv : jt["keys"].toArray()) {
+                const QJsonObject jk = kv.toObject();
+                Keyframe k;
+                k.frame = jk["frame"].toDouble();
+                k.value = propertyFromJson(p, jk["value"], sceneDir);
+                k.interpolation = Animation::interpolationFromName(jk["interpolation"].toString()).value_or(Interpolation::Bezier);
+                if (!k.value.isValid() || !jk["frame"].isDouble()) {
+                    warn(QStringLiteral("%1: invalid key of %2.%3").arg(e.name, t.component, t.property));
+                    continue;
+                }
+                if (Animation::keyAt(t, k.frame) < 0)
+                    t.keys.push_back(k);
+            }
+            std::sort(t.keys.begin(), t.keys.end(), [](const Keyframe &a, const Keyframe &b) { return a.frame < b.frame; });
+            if (!t.keys.empty())
+                e.animation.push_back(std::move(t));
         }
         entities.push_back(std::move(e));
     }

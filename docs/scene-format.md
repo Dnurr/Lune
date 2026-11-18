@@ -61,6 +61,33 @@ under version control. Reading and writing are in `engine/io/sceneio.cpp`.
 | `components` | object | One object per component, keyed by component name, holding its properties. |
 | `material` | integer | Optional: the node material of its (only) material slot, by id. |
 | `materials` | array of integers | Optional, instead of `material` when the mesh has several submeshes: one id per slot, `0` = none. |
+| `animation` | array | Optional: keyframes, one object per animated property (see below). |
+
+### Animation
+
+```json
+"animation": [
+    {
+        "component": "Transform",
+        "property": "position",
+        "keys": [
+            { "frame": 1, "value": [0, 0.5, 0], "interpolation": "bezier" },
+            { "frame": 48, "value": [3, 0.5, 0], "interpolation": "linear" }
+        ]
+    }
+]
+```
+
+- `component` and `property` name the property like in `components` (`"Post Process"`,
+  `"bloom.intensity"`). Numbers, vectors, colors, booleans and enums can be animated; text,
+  files and read-only properties can't (such tracks are reported and skipped).
+- `value` is written like the property's value in `components`.
+- `interpolation` is how the value goes to the next key: `"constant"`, `"linear"` or
+  `"bezier"` (default: smooth, eased, never past a key's value). Booleans and enums always
+  hold their value until the next key, and have no `interpolation`.
+- Before its first key a property has the first key's value, after the last one the last
+  key's. The value under `components` is the one at the frame the scene was saved on; on
+  load the keys decide.
 
 ### Components
 

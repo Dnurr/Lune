@@ -60,6 +60,16 @@ void Scene::setTimeline(const Timeline &timeline)
         return;
     m_timeline = t;
     emit timelineChanged();
+    setFrame(m_frame); // into the new range
+}
+
+void Scene::setFrame(double frame)
+{
+    const double f = m_timeline.clamp(frame);
+    if (f == m_frame)
+        return;
+    m_frame = f;
+    emit frameChanged(m_frame);
 }
 
 // ---------------------------------------------------------------------------

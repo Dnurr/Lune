@@ -98,6 +98,10 @@ the sphere's subsurface scattering lets light bleed around its terminator.</sub>
 - **Timeline**: a bar under everything with playback in real time at the scene's frame
   rate (looping, frames dropped rather than slowed down), a ruler to scrub, and the
   frame range and rate saved in the scene; the scene time reaches every shader.
+- **Keyframe animation**: every number, vector, color, switch and list of the Inspector can
+  be animated from the diamond at the end of its row (constant, linear or eased bezier
+  keys); editing an animated value, with the Inspector or the gizmo, keys it on the current
+  frame. Keys are undoable, saved in the scene and shown on the timeline.
 - **Post-processing chain**: a Post Process component on the camera (depth of field,
   bloom with a mip pyramid, chromatic aberration, vignette, film grain, FXAA), as
   fullscreen passes around tonemapping; effects that are off cost nothing.
@@ -194,6 +198,7 @@ The zip runs on a machine without Qt or Visual Studio; it's what goes on the Rel
 | Free camera: look / fly | Hold right button + move the mouse; W A S D, Q / E down / up, Shift faster |
 | Free camera: speed / move | Wheel while holding the right button / wheel alone moves forward and back |
 | Scrub the timeline | Press or drag on its ruler |
+| Insert / delete a key | Click the diamond at the end of a property's row; right click for interpolation and Clear Animation |
 | Scrub a value | Drag a property's label (Shift = fine, Ctrl = coarse) |
 | Move a panel | Drag its title; it snaps to the nearest edge |
 | Resize a panel | Drag its inner edge (the one facing the viewport) |

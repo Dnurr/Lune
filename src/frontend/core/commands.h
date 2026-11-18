@@ -84,6 +84,8 @@ private:
 // Edit of any reflected property (see engine/scene/components.h), used by the Inspector.
 // Consecutive edits of the same property of the same entity that arrive close together
 // (e.g. the many small steps of a drag on a label) merge into one undo step.
+// An animated property gets a key at the scene's frame with the new value (added, or the
+// key there changed): its keys decide its value (engine/scene/animation.h).
 class SetPropertyCommand : public QUndoCommand
 {
 public:
@@ -96,12 +98,15 @@ public:
     bool mergeWith(const QUndoCommand *other) override;
 
 private:
-    void apply(const QVariant &value);
+    void apply(const QVariant &value, const std::vector<AnimationTrack> &animation);
 
     Scene *m_scene;
     EntityId m_entity;
     int m_component, m_property;
     QVariant m_before, m_after;
+    bool m_keyed = false; // animated: m_animAfter has the key
+    double m_frame = 0.0;
+    std::vector<AnimationTrack> m_animBefore, m_animAfter;
     QElapsedTimer m_lastEdit;
 };
 
@@ -110,6 +115,7 @@ private:
 // close together (e.g. the many small steps of a drag on a label) merge into one undo step.
 // From a gizmo drag: the scene is previewed live during the drag, then one command with the
 // explicit `before` state is pushed on release (never merged).
+// Animated position / rotation / scale get a key at the scene's frame, like SetPropertyCommand.
 class SetTransformCommand : public QUndoCommand
 {
 public:
@@ -126,9 +132,33 @@ private:
     Scene *m_scene;
     EntityId m_entity;
     Transform m_before, m_after;
+    void keyAnimated(); // m_animAfter: keys for the animated transform properties
+    void apply(const Transform &transform, const std::vector<AnimationTrack> &animation);
+
     TransformField m_field;
     bool m_mergeable = true;
+    bool m_keyed = false;
+    double m_frame = 0.0;
+    std::vector<AnimationTrack> m_animBefore, m_animAfter;
     QElapsedTimer m_lastEdit;
+};
+
+// Replaces an entity's keyframes (engine/scene/animation.h builds the new set: a key added
+// or removed, an interpolation changed, a track cleared), then evaluates them at the scene's
+// frame.
+class SetAnimationCommand : public QUndoCommand
+{
+public:
+    SetAnimationCommand(Scene *scene, EntityId id, std::vector<AnimationTrack> after, const QString &text);
+
+    void redo() override;
+    void undo() override;
+
+private:
+    Scene *m_scene;
+    EntityId m_entity;
+    std::vector<AnimationTrack> m_before, m_after;
+    Entity m_entityBefore; // the values before, for undo (removing a track keeps them evaluated)
 };
 
 // ---------------------------------------------------------------------------

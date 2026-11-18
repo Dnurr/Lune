@@ -224,6 +224,9 @@ QFrame#DisplayMenu QAbstractSpinBox, QFrame#DisplayMenu QComboBox { padding: 4px
 QFrame#DisplayMenu QAbstractSpinBox:focus, QFrame#DisplayMenu QComboBox:focus,
 QFrame#DisplayMenu QComboBox:on { padding: 3px 7px; }
 QFrame#DisplayMenu QComboBox { padding-right: 30px; }
+/* Animated properties in the Inspector: green border, amber on a key (KeyButton's colors) */
+QAbstractSpinBox[anim="animated"], QComboBox[anim="animated"] { border-color: #63B57E; }
+QAbstractSpinBox[anim="key"], QComboBox[anim="key"] { border-color: #E3B341; }
 /* Timeline (footer): compact fields on one row */
 Panel#TimelinePanel QAbstractSpinBox { padding: 3px 4px; min-height: 18px; }
 Panel#TimelinePanel QAbstractSpinBox:focus { padding: 2px 3px; }

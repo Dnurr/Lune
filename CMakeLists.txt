@@ -15,6 +15,7 @@ include(cmake/dependencies.cmake)
 # ---------------------------------------------------------------------------
 add_library(lune_engine STATIC
     src/engine/scene/scene.cpp
+    src/engine/scene/animation.cpp
     src/engine/scene/components.cpp
     src/engine/scene/primitives.cpp
     src/engine/scene/picking.cpp
@@ -71,6 +72,7 @@ add_executable(Lune
     src/frontend/components/render/rendersettingsdialog.cpp
     src/frontend/components/render/renderresultdialog.cpp
     src/frontend/components/widgets/draglabel.cpp
+    src/frontend/components/widgets/keybutton.cpp
     src/frontend/components/widgets/vector3.cpp
     src/frontend/components/panel/panel.cpp
     src/frontend/components/panel/inspector/inspector.cpp
