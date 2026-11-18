@@ -97,9 +97,10 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 - [x] Post-process chain in the Renderer: ping-pong targets, ordered passes, settings UI (Claude)
 - [x] Scene cameras: Camera component, Camera View with passepartout, renders from the camera (Claude)
 - [x] Inspector scrolling: long components (Post Process) in short windows (Claude)
-- [ ] Bloom (Author)
+- [x] Bloom: 13-tap downsample with Karis average and threshold, tent upsample (Author)
+- [x] Specular anti-aliasing in `mesh.frag` (normal variance added to the GGX roughness) (Author)
 - [ ] Depth of field (Author)
-- [ ] Vignette, chromatic aberration, film grain (Author)
+- [x] Vignette, chromatic aberration, film grain (Author)
 - [ ] Temporal anti-aliasing or FXAA (Author)
 
 ## 4. Timeline
