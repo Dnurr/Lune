@@ -28,7 +28,36 @@ layout(binding = 3) uniform sampler2D depthTex; // the scene's depth buffer, nea
                                                 // backend (OpenGL-style projection, remapped per backend):
                                                 // view distance = 2nf / (f + n - (2d - 1)(f - n))
 
+const float PI = 3.14159265359;
+
+vec2 Hash(vec2 p)
+{
+    vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.xx + p3.yz) * p3.zy);
+}
+
+vec2 BoxMuller(vec2 u)
+{
+    float u1 = max(u.x, 1e-7);
+    float u2 = u.y;
+
+    float rad = sqrt(-2.0 * log(u1));
+    float ang = 2.0 * PI * u2;
+
+    return vec2(rad * cos(ang), rad * sin(ang));
+}
+
 void main()
 {
-    fragColor = texture(texA, v_uv);
+    vec3 col = texture(texA, v_uv).rgb;
+    
+    vec2 pos = gl_FragCoord.xy;
+    vec2 u = Hash(floor(pos / params0.y) + vec2(camera.w * 137.0, camera.w * 293.0));
+    float g = BoxMuller(u).x;
+    vec3 noise = vec3(g);
+
+    vec3 final = col + noise * params0.x;
+
+    fragColor = vec4(final, 1.0);
 }
