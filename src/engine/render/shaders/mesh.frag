@@ -458,7 +458,7 @@ void main()
     float roughness = max(surf.roughness, 0.045);
     vec3 dndx = dFdx(N);
     vec3 dndy = dFdy(N);
-    float var = 0.25 * (dot(dndx, dndy) + dot(dndy, dndy));
+    float var = 0.25 * (dot(dndx, dndx) + dot(dndy, dndy));
     float ker = min(2.0 * var, 0.18);
     float a = roughness * roughness;
     roughness = sqrt(sqrt(clamp(a * a + ker, 0.0, 1.0)));
