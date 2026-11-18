@@ -3,7 +3,8 @@
 // Film grain (display colors, after tonemapping). Author: to be written.
 //
 // texA      the image
-// params0   x = intensity (0..1), y = grain size in pixels (scaled to this image's height)
+// params0   x = intensity (0..1), y = grain size in pixels (scaled to this image's height),
+//           z = response: sigma of the bell over luminance (0.05..2; small = midtones only)
 // camera.w  seconds, to animate the noise (0 until the timeline drives it)
 //
 // Until then: a copy.

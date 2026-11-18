@@ -242,7 +242,7 @@ void PostProcessor::prepare(QRhiResourceUpdateBatch *rub, const Frame &frame)
         switch (p) {
         case ChromaticAberration: p0[0] = s.chromaticIntensity; p0[1] = pixelScale; break;
         case Vignette: p0[0] = s.vignetteIntensity; p0[1] = s.vignetteSmoothness; p0[2] = aspect; break;
-        case FilmGrain: p0[0] = s.grainIntensity; p0[1] = s.grainSize * pixelScale; break;
+        case FilmGrain: p0[0] = s.grainIntensity; p0[1] = s.grainSize * pixelScale; p0[2] = s.grainResponse; break;
         default: break;
         }
         writeUniforms(rub, p, full, full, p0);

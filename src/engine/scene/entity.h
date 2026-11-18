@@ -109,6 +109,7 @@ struct PostProcess
     bool filmGrain = false;
     float grainIntensity = 0.1f;
     float grainSize = 1.0f; // pixels
+    float grainResponse = 0.25f; // width of the bell over luminance: small = grain only in the midtones
 
     bool fxaa = false;
 

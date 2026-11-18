@@ -98,7 +98,7 @@ like the triangle count, are derived). Current components:
 | | `bloom.enabled`, `.intensity`, `.threshold`, `.radius` | boolean; numbers (default 0.05, 1, 0.6) |
 | | `chromatic aberration.enabled`, `.intensity` | boolean; number (default 0.5) |
 | | `vignette.enabled`, `.intensity`, `.smoothness` | boolean; numbers (default 0.3, 0.5) |
-| | `film grain.enabled`, `.intensity`, `.size` | boolean; numbers (default 0.1, 1 pixel) |
+| | `film grain.enabled`, `.intensity`, `.size`, `.response` | boolean; numbers (default 0.1, 1 pixel, 0.25: how far from the midtones the grain reaches) |
 | | `fxaa.enabled` | boolean |
 
 An entity with a `Light` component is a light. Its transform places it: a point light

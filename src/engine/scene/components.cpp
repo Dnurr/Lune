@@ -285,6 +285,7 @@ ComponentDesc postProcessComponent()
         flag("enabled", "film grain", &P::filmGrain),
         number("intensity", "film grain", &P::grainIntensity, 0.002, 0.0, 1.0),
         number("size", "film grain", &P::grainSize, 0.01, 0.5, 8.0),
+        number("response", "film grain", &P::grainResponse, 0.005, 0.05, 2.0),
         flag("enabled", "fxaa", &P::fxaa),
     };
 
