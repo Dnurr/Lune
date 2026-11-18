@@ -19,7 +19,7 @@ layout(std140, binding = 0) uniform PostBuf {
     vec4 outputSize; // this pass's target: xy = size in pixels, zw = 1 / size
     vec4 camera;     // x = near plane, y = far plane,
                      // z = 1 with a depth texture, -1 without (depthTex is a white 1x1 stand-in)
-                     // w = seconds (0 for now: the timeline will drive it)
+                     // w = scene time in seconds (the Timeline's frame)
     vec4 params0;    // the effect's settings: see below
     vec4 params1;
 };
@@ -52,13 +52,16 @@ vec2 BoxMuller(vec2 u)
 void main()
 {
     vec3 col = texture(texA, v_uv).rgb;
+    float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
+    float z = l - 0.5;
+    float w = exp(-(z * z) / (2.0 * params0.z * params0.z));
     
     vec2 pos = gl_FragCoord.xy;
     vec2 u = Hash(floor(pos / params0.y) + vec2(camera.w * 137.0, camera.w * 293.0));
     float g = BoxMuller(u).x;
     vec3 noise = vec3(g);
 
-    vec3 final = col + noise * params0.x;
+    vec3 final = col + noise * params0.x * w;
 
     fragColor = vec4(final, 1.0);
 }
