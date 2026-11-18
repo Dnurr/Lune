@@ -456,6 +456,13 @@ void main()
 
     vec3 albedo = surf.baseColor;
     float roughness = max(surf.roughness, 0.045);
+    vec3 dndx = dFdx(N);
+    vec3 dndy = dFdy(N);
+    float var = 0.25 * (dot(dndx, dndy) + dot(dndy, dndy));
+    float ker = min(2.0 * var, 0.18);
+    float a = roughness * roughness;
+    roughness = sqrt(sqrt(clamp(a * a + ker, 0.0, 1.0)));
+    
     float metallic = surf.metallic;
     float alpha = material.w > 1.5 ? surf.alpha : 1.0;
 
