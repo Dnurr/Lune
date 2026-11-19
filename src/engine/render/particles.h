@@ -98,6 +98,10 @@ private:
         NodeGraph compiledGraph;     // the graph `graph` was compiled from
         ParticleGraph::Compiled graph;
         QRhiComputePipeline *pipeline = nullptr; // its shader's (in m_graphShaders), or null: the default
+        // The pipeline simSrb was made for. On Direct3D 11 a binding set's registers follow the
+        // first pipeline that uses it, and shaders of different graphs may number them
+        // differently (resources a graph doesn't use are left out): a new pipeline, a new set.
+        const QRhiComputePipeline *srbPipeline = nullptr;
         ParticleEmitter::Blend blend = ParticleEmitter::Additive;
         int capacity = 0;
         std::unique_ptr<QRhiBuffer> particles;     // capacity * ParticleSize

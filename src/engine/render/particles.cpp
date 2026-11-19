@@ -271,6 +271,7 @@ void ParticleSystem::retire(Emitter &e)
 void ParticleSystem::rebuildBindings(Emitter &e)
 {
     retire(e.simSrb);
+    e.srbPipeline = e.pipeline ? e.pipeline : m_simPipe.get();
     using B = QRhiShaderResourceBinding;
     e.simSrb.reset(m_rhi->newShaderResourceBindings());
     e.simSrb->setBindings({ B::uniformBuffer(0, B::ComputeStage, e.simUniforms.get()),
@@ -385,7 +386,7 @@ void ParticleSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float s
                                             quint32(e.forceCapacity) * kForceSize));
             e.forces->create();
         }
-        if (!e.simSrb)
+        if (!e.simSrb || e.srbPipeline != (e.pipeline ? e.pipeline : m_simPipe.get()))
             rebuildBindings(e);
         if (!sameSimulation(reference, e.reference) || !sameForces(linkedReference, e.forceReference)
             || target < e.stepsDone) {
