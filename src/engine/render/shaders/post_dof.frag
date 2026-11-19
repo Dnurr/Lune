@@ -30,7 +30,52 @@ layout(binding = 3) uniform sampler2D depthTex; // the scene's depth buffer, nea
                                                 // backend (OpenGL-style projection, remapped per backend):
                                                 // view distance = 2nf / (f + n - (2d - 1)(f - n))
 
+const float GOLDEN_ANGLE = 2.39996323;
+const float RAD_SCALE    = 0.5;
+
+float CoC(float d)
+{
+    float near = camera.x;
+    float far  = camera.y;
+    float D    = 2.0 * near * far / (far + near - (2.0 * d - 1.0) * (far - near)) * 1000.0; // mm
+
+    float S = params0.x * 1000.0; // focus distance, mm
+    float N = params0.y;          // f-stop
+    float F = params0.w;          // focal length, mm
+    float A = F / N;              // aperture diameter, mm
+
+    float cocMm = A * F * abs(D - S) / (D * (S - F)); // diameter on the sensor
+    float cocPx = cocMm / 24.0 * inputSize.y;         // diameter in pixels
+    return clamp(0.5 * cocPx, 0.0, params0.z);
+}
+
 void main()
 {
-    fragColor = texture(texA, v_uv);
+    if (camera.z < 0.0)
+    {
+        fragColor = texture(texA, v_uv);
+        return;
+    }
+
+    float centerDepth = texture(depthTex, v_uv).r;
+    float centerCoC = CoC(centerDepth);
+
+    vec3 col       = texture(texA, v_uv).rgb;
+    float radScale = max(RAD_SCALE, params0.z / 16.0);
+    float radius   = radScale;
+    float tot      = 1.0;
+    for (float ang = 0.0; radius < params0.z; ang += GOLDEN_ANGLE)
+    {
+        vec2 uv           = v_uv + vec2(cos(ang), sin(ang)) * inputSize.zw * radius;
+        vec3 sampleCol    = texture(texA, uv).rgb;
+        float sampleDepth = texture(depthTex, uv).r;
+        float sampleCoC   = CoC(sampleDepth);
+        if (sampleDepth > centerDepth) sampleCoC = clamp(sampleCoC, 0.0, centerCoC * 2.0);
+        float m = smoothstep(radius - 0.5, radius + 0.5, sampleCoC);
+        col    += mix(col / tot, sampleCol, m);
+        tot    += 1.0;
+        radius += radScale / radius;
+    }
+
+    fragColor = vec4(col / tot, 1.0);
 }
