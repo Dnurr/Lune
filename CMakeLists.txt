@@ -54,6 +54,7 @@ add_library(lune_editor_core STATIC
     src/frontend/core/displaysettings.cpp
     src/frontend/core/displayhistory.cpp
     src/frontend/core/rendersettings.cpp
+    src/frontend/core/batchrender.cpp
     src/frontend/components/viewport/gizmo.cpp
     src/frontend/components/viewport/overlaydraw.cpp
     src/frontend/components/viewport/lighticons.cpp
@@ -129,6 +130,7 @@ qt6_add_shaders(Lune "shaders"
         src/engine/render/shaders/wireframe.vert
         src/engine/render/shaders/wireframe.frag
         src/engine/render/shaders/post_dof.frag
+        src/engine/render/shaders/post_dof_composite.frag
         src/engine/render/shaders/post_bloom_down.frag
         src/engine/render/shaders/post_bloom_up.frag
         src/engine/render/shaders/post_bloom_composite.frag

@@ -13,13 +13,20 @@
 // Post-processing chain of the Renderer: the effects of the scene camera's PostProcess
 // component, as fullscreen passes around the display pass (tonemapping).
 //
-//   scene (HDR) -> depth of field -> bloom -> [display pass] -> chromatic aberration
-//               -> vignette -> film grain -> FXAA -> overlay, glass blur, screen
+//   scene (HDR) -> depth of field -> bloom -> [display pass] -> FXAA
+//               -> chromatic aberration -> vignette -> film grain -> overlay, glass blur, screen
 //
 // Effects that are off are skipped (no pass, no cost). The order is fixed.
 //
-// HDR effects ping-pong between two full-size HDR targets (hdrTexture(0/1)); bloom also has
-// a pyramid of BloomLevels half-size steps:
+// HDR effects ping-pong between two full-size HDR targets (hdrTexture(0/1)). Depth of field
+// blurs at half size, where its gather costs a sixteenth (half the radius in pixels, a
+// quarter of the pixels), and puts the sharp scene back where it's in focus:
+//   half   = dof(scene)                  half size: blurred rgb, blur radius in alpha
+//   result = dof_composite(scene, half)  full size
+// The half-size pass is shifted by a quarter of its pixel so that each pixel's center lands
+// on the center of a full-size pixel (2x, 2y): it computes the full-size effect exactly
+// there, instead of between four pixels that may straddle an object's outline.
+// Bloom has a pyramid of BloomLevels half-size steps:
 //   down[0] = bloom_down(scene)         half size
 //   down[i] = bloom_down(down[i-1])     1/2^(i+1) size
 //   up[i]   = bloom_up(up[i+1] or down[last], down[i])    back up, level by level
@@ -78,6 +85,7 @@ private:
     enum Pass // one uniform buffer each
     {
         DepthOfField,
+        DofComposite,
         BloomDown,                                // + level
         BloomUp = BloomDown + BloomLevels,        // + level (the last level has none)
         BloomComposite = BloomUp + BloomLevels - 1,
@@ -96,7 +104,9 @@ private:
     Target newTarget(const QSize &size, QRhiTexture::Format format, bool hdr);
     // Bindings for one pass: its uniforms, textures a and b (null: a stand-in) and the depth.
     QRhiShaderResourceBindings *bindings(Pass pass, QRhiTexture *a, QRhiTexture *b);
-    void fullscreen(QRhiCommandBuffer *cb, QRhiGraphicsPipeline *pipe, QRhiShaderResourceBindings *srb, const QSize &size);
+    // `offset`: the viewport's shift in pixels (x right, y up, like QRhiViewport).
+    void fullscreen(QRhiCommandBuffer *cb, QRhiGraphicsPipeline *pipe, QRhiShaderResourceBindings *srb, const QSize &size,
+                    QPointF offset = {});
     void writeUniforms(QRhiResourceUpdateBatch *rub, Pass pass, const QSize &input, const QSize &output, const float params0[4],
                        const float params1[4] = nullptr);
 
@@ -107,6 +117,7 @@ private:
     std::unique_ptr<QRhiSampler> m_linear, m_nearest;
     std::array<std::unique_ptr<QRhiBuffer>, PassCount> m_ubufs;
     std::array<Target, 2> m_hdr;
+    Target m_dofHalf;
     std::array<Target, BloomLevels> m_bloomDown;
     std::array<Target, BloomLevels - 1> m_bloomUp;
     Target m_ldr;

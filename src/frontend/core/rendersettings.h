@@ -9,7 +9,7 @@
 // section of the scene file ("render").
 //
 //   F4  Render Image    the final image (the "rendered" pass) at the current frame
-//   F5  Render Video    not yet
+//   F5  Render Video    every frame of the timeline, then an MP4 (ffmpeg)
 //   F6  Render Passes   one image per pass listed in `passes` (ids of imagePasses())
 //
 // The background follows the viewport's Sky toggle (ViewSettings::skybox).

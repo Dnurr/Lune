@@ -56,6 +56,7 @@ void PostProcessor::release()
     m_hdrRp.reset();
     for (auto &t : m_hdr)
         t = {};
+    m_dofHalf = {};
     for (auto &t : m_bloomDown)
         t = {};
     for (auto &t : m_bloomUp)
@@ -102,6 +103,7 @@ void PostProcessor::resize(const QSize &pixelSize, QRhiTexture::Format hdrFormat
     m_ldrRp = ldrRp;
     for (auto &t : m_hdr)
         t = newTarget(pixelSize, hdrFormat, true);
+    m_dofHalf = newTarget((pixelSize / 2).expandedTo(QSize(1, 1)), hdrFormat, true);
     QSize level = pixelSize;
     for (int i = 0; i < BloomLevels; ++i) {
         level = (level / 2).expandedTo(QSize(1, 1));
@@ -136,6 +138,7 @@ void PostProcessor::createPipelines(const QShader &fullscreen)
     for (auto &p : m_pipelines)
         p.reset();
     m_pipelines[DepthOfField] = pipeline("post_dof.frag", m_hdrRp.get());
+    m_pipelines[DofComposite] = pipeline("post_dof_composite.frag", m_hdrRp.get());
     m_pipelines[BloomDown] = pipeline("post_bloom_down.frag", m_hdrRp.get());
     m_pipelines[BloomUp] = pipeline("post_bloom_up.frag", m_hdrRp.get());
     m_pipelines[BloomComposite] = pipeline("post_bloom_composite.frag", m_hdrRp.get());
@@ -218,8 +221,12 @@ void PostProcessor::prepare(QRhiResourceUpdateBatch *rub, const Frame &frame)
     const float pixelScale = float(full.height()) / 1080.0f;
     if (m_dof) {
         const float focalMm = 0.5f * kSensorHeightMm / std::tan(qDegreesToRadians(frame.fieldOfView) * 0.5f);
-        const float p0[4] = { s.focusDistance, s.fStop, s.maxBlur * pixelScale, focalMm };
-        writeUniforms(rub, DepthOfField, full, full, p0);
+        // At half size: one of its pixels is two of the image's, so the radius limit halves
+        // (and inputSize, which the circle of confusion is measured with, is the half size).
+        const QSize half = m_dofHalf.texture->pixelSize();
+        const float p0[4] = { s.focusDistance, s.fStop, s.maxBlur * pixelScale * 0.5f, focalMm };
+        writeUniforms(rub, DepthOfField, half, half, p0);
+        writeUniforms(rub, DofComposite, full, full, p0);
     }
     if (m_bloom) {
         QSize input = full;
@@ -253,14 +260,14 @@ void PostProcessor::prepare(QRhiResourceUpdateBatch *rub, const Frame &frame)
 
 int PostProcessor::passCount() const
 {
-    return (m_dof ? 1 : 0) + (m_bloom ? 2 * BloomLevels : 0) + ldrPassCount();
+    return (m_dof ? 2 : 0) + (m_bloom ? 2 * BloomLevels : 0) + ldrPassCount();
 }
 
 void PostProcessor::fullscreen(QRhiCommandBuffer *cb, QRhiGraphicsPipeline *pipe, QRhiShaderResourceBindings *srb,
-                               const QSize &size)
+                               const QSize &size, QPointF offset)
 {
     cb->setGraphicsPipeline(pipe);
-    cb->setViewport({ 0, 0, float(size.width()), float(size.height()) });
+    cb->setViewport({ float(offset.x()), float(offset.y()), float(size.width()), float(size.height()) });
     cb->setShaderResources(srb);
     cb->draw(3);
 }
@@ -270,15 +277,19 @@ QRhiTexture *PostProcessor::renderHdr(QRhiCommandBuffer *cb, QRhiTexture *scene)
     const QColor black(Qt::black);
     QRhiTexture *current = scene;
     int next = 0; // ping-pong target
-    auto pass = [&](const Target &target, QRhiGraphicsPipeline *pipe, QRhiShaderResourceBindings *srb) {
+    auto pass = [&](const Target &target, QRhiGraphicsPipeline *pipe, QRhiShaderResourceBindings *srb, QPointF offset = {}) {
         cb->beginPass(target.target.get(), black, { 1.0f, 0 });
-        fullscreen(cb, pipe, srb, target.texture->pixelSize());
+        fullscreen(cb, pipe, srb, target.texture->pixelSize(), offset);
         cb->endPass();
     };
 
     if (m_dof) {
+        // A quarter of a pixel right and down (QRhiViewport's y goes up): v_uv at the pixel
+        // (i, j) is then (i + 0.25, j + 0.25) / half size, the center of the full-size pixel
+        // (2i, 2j). (OpenGL rounds viewports to whole pixels: there it stays between four.)
+        pass(m_dofHalf, m_pipelines[DepthOfField].get(), bindings(DepthOfField, current, nullptr), QPointF(0.25, -0.25));
         const Target &out = m_hdr[size_t(next)];
-        pass(out, m_pipelines[DepthOfField].get(), bindings(DepthOfField, current, nullptr));
+        pass(out, m_pipelines[DofComposite].get(), bindings(DofComposite, current, m_dofHalf.texture.get()));
         current = out.texture.get();
         next ^= 1;
     }

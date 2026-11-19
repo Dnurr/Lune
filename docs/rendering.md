@@ -27,7 +27,7 @@ flowchart LR
         bg[Environment background] --> grid[World grid] --> meshes[Opaque meshes] --> blend[See-through meshes, far to near] --> outline[Selection outline]
     end
     subgraph PP["Post, HDR (scene camera's Post Process)"]
-        dof[Depth of field] --> bloom[Bloom: down / up pyramid, composite]
+        dof[Depth of field: half size, composite] --> bloom[Bloom: down / up pyramid, composite]
     end
     subgraph P2["2 &middot; Display (8 bit, sRGB)"]
         disp[Exposure, tonemapping, sRGB] --> lpost[FXAA, chromatic aberration,<br/>vignette, film grain] --> overlay[2D overlay: gizmo]
@@ -51,7 +51,7 @@ flowchart LR
 | Grid | scene | `fullscreen.vert` + `grid.frag` | Fullscreen triangle; each pixel intersects its view ray with y = 0. No depth write: it's the background. Premultiplied alpha: opaque with its own sky, or only the lines over an environment background. Colors converted to linear on the CPU. |
 | Meshes | scene | `mesh.vert` + `mesh.frag` | Depth tested, two-sided, Cook-Torrance (GGX) shading with the scene lights and the environment maps. One draw per submesh, each with its material slot's pipeline (node material or default) and binding set. Writes linear values (can exceed 1). Blend materials last, sorted far to near by entity, with premultiplied-alpha blending and no depth writes; closed meshes in two draws, back faces then front faces, so a glass cube's far side never blends over its near side. |
 | Outline | scene | `outline.vert` + `outline.frag` | Selected entity only. "Inverted hull": back faces pushed outwards in screen space, front faces culled. Its own binding set per entity (entity uniforms only): on Direct3D 11 a binding set's registers follow the first pipeline that used it, and `mesh.frag` puts the entity block in another register. |
-| Post (HDR) | two HDR targets, bloom pyramid | `fullscreen.vert` + `post_dof.frag`, `post_bloom_down/up/composite.frag` | Only the effects that are on; see [Post-processing](#post-processing). |
+| Post (HDR) | two HDR targets, a half-size depth of field target, bloom pyramid | `fullscreen.vert` + `post_dof.frag`, `post_dof_composite.frag`, `post_bloom_down/up/composite.frag` | Only the effects that are on; see [Post-processing](#post-processing). |
 | Display | display (RGBA8) | `fullscreen.vert` + `display.frag` | Converts the linear HDR scene to sRGB for the screen. Exposure and tonemapping go here: `params.x` = exposure (EV), `params.y` = operator index (0 none, 1 Reinhard, 2 ACES, 3 AgX), set with `Renderer::setDisplayParams()` from the editor's `DisplaySettings`. |
 | Post (display) | display, post LDR target | `post_fxaa.frag`, `post_chromatic.frag`, `post_vignette.frag`, `post_grain.frag` | Ping-pong; the last one writes the display image. |
 | Overlay | display | `overlay.vert` + `overlay.frag` | Triangles in widget pixels with premultiplied alpha (the gizmo), in display colors: interface, so exposure/tonemapping never touch it; still blurred behind panels. |
@@ -266,7 +266,7 @@ when the shading bar's **Post** toggle is on (`ViewSettings::post`). The order i
 
 | Stage | Effect | Shader | Reads |
 |---|---|---|---|
-| HDR, before tonemapping | depth of field | `post_dof.frag` | the scene, its depth |
+| HDR, before tonemapping | depth of field | `post_dof.frag` (half size), `post_dof_composite.frag` | the scene, its depth; the half-size result |
 | | bloom | `post_bloom_down.frag` ×6, `post_bloom_up.frag` ×5, `post_bloom_composite.frag` | the scene; the pyramid |
 | display, after tonemapping | FXAA | `post_fxaa.frag` | the image |
 | | chromatic aberration | `post_chromatic.frag` | the image |
@@ -277,6 +277,15 @@ when the shading bar's **Post** toggle is on (`ViewSettings::post`). The order i
   targets, and the display pass reads whichever holds the result. Display effects
   ping-pong between the display image and one more RGBA8 target, arranged so that the
   last one writes the display image (the overlay is drawn in that pass).
+- Depth of field gathers at half size, where it costs about a sixteenth (half the radius in
+  pixels, a quarter of the pixels): `inputSize` and the radius limit (`params0.z`) are the
+  half size's, `texA` and the depth are read by uv. The pass is shifted by a quarter of a
+  pixel, so each of its pixels is computed at the center of the full-size pixel (2i, 2j)
+  rather than between four of them. Its alpha holds the blur that nearer objects spread
+  onto the pixel. The composite, at full size, takes each pixel's own circle of confusion
+  from the full-size depth, reads the half-size image only where its pixels lie at that
+  depth (bilinear weights times a depth weight), and keeps the sharp scene below about one
+  pixel of blur: in-focus outlines stay exactly as sharp as without the effect.
 - Bloom's pyramid: `down[0]` is half the image, each next level half again (6 levels);
   then `up[i]` is made from the level below (`texA`) and `down[i]` (`texB`), and the
   composite adds `up[0]` (`texB`) to the scene (`texA`).
@@ -337,6 +346,13 @@ scene doesn't move, and the scene camera is read at each frame, so it can be ani
 Frames go to `<folder>/<scene>_video/<scene>_frame0001.png` and so on, with progress and
 Cancel; when `ffmpeg` is on the PATH they're then encoded into `<scene>.mp4` next to them
 (H.264, yuv420p, CRF 18, sizes rounded down to even).
+
+**From the command line**, `Lune.exe --render scene.lune [image.png]` renders the final
+image without opening the editor (`frontend/core/batchrender.h`): the frame saved with the
+scene, from its scene camera (or the saved viewport camera), at the size of its Render
+Settings (1920 x 1080 when they follow the viewport), with its exposure, tonemapper and Sky
+and Post toggles. Without a file name it goes where F4 would put it. The exit code is 0
+when the image was written.
 
 ## Glass panels
 

@@ -1,5 +1,6 @@
 #include <QApplication>
 
+#include "frontend/core/batchrender.h"
 #include "frontend/editor.h"
 #include "frontend/frameanimationdriver.h"
 #include "frontend/theme/theme.h"
@@ -9,6 +10,11 @@ int main(int argc, char *argv[]) {
     // Where QSettings keeps the editor layout (on Windows: HKEY_CURRENT_USER\Software\Lune\Lune).
     QApplication::setOrganizationName(QStringLiteral("Lune"));
     QApplication::setApplicationName(QStringLiteral("Lune"));
+
+    // "Lune.exe --render scene.lune [image.png]": the scene's image, without the editor.
+    const QStringList args = QApplication::arguments();
+    if (args.size() > 1 && args.at(1) == QLatin1String("--render"))
+        return renderFromCommandLine(args.mid(2));
 
     // Dark gray palette with a navy accent.
     // Surfaces are neutral grays (no hue); only the accent roles are blue/navy.
@@ -60,7 +66,6 @@ int main(int argc, char *argv[]) {
     animationDriver.install();
 
     // "Lune.exe scene.lune" (or double-clicking an associated .lune file) opens it.
-    const QStringList args = QApplication::arguments();
     if (args.size() > 1)
         editor.loadScene(args.at(1));
 

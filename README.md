@@ -25,6 +25,9 @@ open `demos/materials.lune`, a roughness / metallic chart lit by an HDR environm
 sun and a point light with soft shadows. Drop another `.hdr` image on the viewport to
 change the environment, or a `.glb` model to place it. To build from source, see [Building](#building).
 
+`Lune.exe --render demos/materials.lune out.png` renders a scene's image without opening
+the editor.
+
 **Reading the code:** the hand-written rendering lives in
 [`src/engine/render/shaders`](src/engine/render/shaders). Good places to start:
 
