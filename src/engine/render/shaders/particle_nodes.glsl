@@ -20,8 +20,7 @@
 // @param strength 9.81
 void node_gravity(vec3 acceleration, vec3 direction, float strength, out vec3 result)
 {
-    // TODO (Author): `strength` along `direction`.
-    result = acceleration;
+    result = acceleration + normalize(direction) * strength;
 }
 
 // @node Wind (Forces)
@@ -32,8 +31,8 @@ void node_gravity(vec3 acceleration, vec3 direction, float strength, out vec3 re
 // @param drag 1 range(0, 20)
 void node_wind(vec3 acceleration, vec3 velocity, vec3 direction, float strength, float drag, out vec3 result)
 {
-    // TODO (Author): drag toward a velocity of `strength` along `direction`.
-    result = acceleration;
+    vec3 vel = normalize(direction) * strength;
+    result = acceleration + drag * (vel - velocity);
 }
 
 // @node Attractor (Forces)
@@ -46,8 +45,11 @@ void node_wind(vec3 acceleration, vec3 velocity, vec3 direction, float strength,
 void node_attractor(vec3 acceleration, vec3 position, vec3 center, float strength, float radius, float falloff,
                     out vec3 result)
 {
-    // TODO (Author): toward `center` (negative strength: away), within the reach.
-    result = acceleration;
+    vec3 toCenter = (center - position);
+    float d = length(toCenter);
+    float reach = 1.0;
+    if (radius > 0.0) reach = 1.0 - smoothstep(radius * (1.0 - falloff), radius, d);
+    result = acceleration + toCenter / max(d, 1e-4) * strength * reach;
 }
 
 // @node Turbulence (Forces)
@@ -60,8 +62,8 @@ void node_attractor(vec3 acceleration, vec3 position, vec3 center, float strengt
 void node_turbulence(vec3 acceleration, vec3 position, float time, float strength, float frequency, float speed,
                      out vec3 result)
 {
-    // TODO (Author): curl noise at `position` x `frequency`, drifting at `speed`.
-    result = acceleration;
+    vec3 q = position * frequency + vec3(0.0, time * speed, 0.0);
+    result = acceleration + curlNoise(q) * strength;
 }
 
 // @node Vortex (Forces)
@@ -83,9 +85,28 @@ void node_vortex(vec3 acceleration, vec3 position, vec3 velocity, float time, ve
                  float pull, float lift, float noise, float frequency, float speed, float radius, float falloff,
                  out vec3 result)
 {
-    // TODO (Author): spin around the line through `center` along `axis`, pull toward it,
-    // lift along it, local swirls of `noise`; within the reach (from the axis).
-    result = acceleration;
+    vec3 rel = position - center;
+    float along = dot(rel, axis);
+    vec3 radial = rel - axis * along;
+    float dist = length(radial);
+    vec3 outDir = radial / max(dist, 1e-4);
+    
+    vec3 tangent = cross(axis, outDir);
+
+    vec3 acc = tangent * strength
+             - outDir  * pull
+             + axis    * lift;
+
+    vec3 q = position * frequency + vec3(0.0, time * speed, 0.0);
+    if (noise > 0.0) acc += curlNoise(q) * noise;
+
+    float reach = 1.0;
+    if (radius > 0.0) reach = 1.0 - smoothstep(radius * (1.0 - falloff), radius, dist);
+
+    float vt = dot(velocity, tangent);
+    acc -= outDir * (vt * vt / max(dist, 1e-2));
+
+    result = acceleration + acc * reach;
 }
 
 // @node Add (Math)

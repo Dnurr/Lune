@@ -198,7 +198,7 @@ vec3 curlNoise(vec3 x)
     float dxdz = pz1.x - pz0.x, dzdx = px1.z - px0.z;
     float dydx = px1.y - px0.y, dxdy = py1.x - py0.x;
 
-    return vec3(dzdy - dydz, dxdz - dzdx, dydx - dzdx) / (2.0 * e);
+    return vec3(dzdy - dydz, dxdz - dzdx, dydx - dxdy) / (2.0 * e);
 }
 
 // The acceleration (units / s^2) force `f` gives particle `p` at `time`. The stub gives none.
@@ -258,10 +258,7 @@ vec3 forceAcceleration(Force f, Particle p, float time)
 // age afterwards.
 void updateParticle(inout Particle p, Step s, float dt, float time)
 {
-    for (uint i = s.forces.x; i < s.forces.x + s.forces.y; i++)
-    {
-        p.velocity.xyz += forceAcceleration(forces[i], p, time) * dt;
-    }
+    p.velocity.xyz += graphAcceleration(p, s, time) * dt;
     p.position.xyz += p.velocity.xyz * dt;
 
     float t   = clamp(p.position.w / p.velocity.w, 0.0, 1.0);
