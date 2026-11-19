@@ -131,6 +131,8 @@ void ParticleSystem::createPipelines(QRhiRenderPassDescriptor *sceneRp, int samp
 void ParticleSystem::release()
 {
     m_emitters.clear();
+    m_retired.clear();
+    m_retiredBefore.clear();
     m_additivePipe.reset();
     m_alphaPipe.reset();
     m_simPipe.reset();
@@ -147,8 +149,29 @@ void ParticleSystem::release()
     m_stepsLastFrame = 0;
 }
 
+void ParticleSystem::retire(std::unique_ptr<QRhiBuffer> &buffer)
+{
+    if (buffer)
+        m_retired.emplace_back(buffer.release());
+}
+
+void ParticleSystem::retire(std::unique_ptr<QRhiShaderResourceBindings> &srb)
+{
+    if (srb)
+        m_retired.emplace_back(srb.release());
+}
+
+void ParticleSystem::retire(Emitter &e)
+{
+    retire(e.simSrb);
+    retire(e.particles);
+    retire(e.steps);
+    retire(e.simUniforms);
+}
+
 void ParticleSystem::rebuildBindings(Emitter &e)
 {
+    retire(e.simSrb);
     using B = QRhiShaderResourceBinding;
     e.simSrb.reset(m_rhi->newShaderResourceBindings());
     e.simSrb->setBindings({ B::uniformBuffer(0, B::ComputeStage, e.simUniforms.get()),
@@ -163,7 +186,12 @@ void ParticleSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float s
     m_stepsLastFrame = 0;
     m_drawn = 0;
     m_alive = 0;
+    // What was replaced two frames ago can go now.
+    m_retiredBefore = std::move(m_retired);
+    m_retired.clear();
     if (!m_supported || !scene) {
+        for (auto &[id, e] : m_emitters)
+            retire(e);
         m_emitters.clear();
         return;
     }
@@ -193,16 +221,24 @@ void ParticleSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float s
         const int capacity = qMax(1, entity.emitter->maxParticles);
         if (!e.particles || e.capacity != capacity) {
             e.capacity = capacity;
+            retire(e.particles);
+            retire(e.simSrb);
             e.particles.reset(m_rhi->newBuffer(QRhiBuffer::Static, QRhiBuffer::VertexBuffer | QRhiBuffer::StorageBuffer,
                                                quint32(capacity) * ParticleSize));
             e.particles->create();
             e.stepsDone = -1;
-            e.simSrb.reset();
         }
         if (!e.simUniforms) {
             e.simUniforms.reset(m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, kSimUbufSize));
             e.simUniforms->create();
         }
+        if (!e.steps) { // the most one frame can run: never resized
+            e.steps.reset(m_rhi->newBuffer(QRhiBuffer::Static, QRhiBuffer::StorageBuffer,
+                                           quint32(MaxStepsPerFrame) * kStepSize));
+            e.steps->create();
+        }
+        if (!e.simSrb)
+            rebuildBindings(e);
         if (!sameSimulation(reference, e.reference) || target < e.stepsDone) {
             e.reference = reference;
             e.stepsDone = -1;
@@ -219,15 +255,6 @@ void ParticleSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float s
         if (count > 0) {
             if (target - e.stepsDone > count)
                 m_pending = true;
-            if (!e.steps || e.stepCapacity < count) {
-                e.stepCapacity = qMax(count, 64);
-                e.steps.reset(m_rhi->newBuffer(QRhiBuffer::Static, QRhiBuffer::StorageBuffer,
-                                               quint32(e.stepCapacity) * kStepSize));
-                e.steps->create();
-                e.simSrb.reset();
-            }
-            if (!e.simSrb)
-                rebuildBindings(e);
 
             QByteArray steps(qsizetype(count) * kStepSize, '\0');
             for (int i = 0; i < count; ++i) {
@@ -269,14 +296,18 @@ void ParticleSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float s
             e.stepsDone += count;
             m_stepsLastFrame += count;
         }
-        if (!e.simSrb && e.steps)
-            rebuildBindings(e);
         ++m_drawn;
         const double inLifetime = double(entity.emitter->rate) * entity.emitter->lifetime;
         m_alive += quint64(qMin(double(capacity), qMin(std::floor(e.born), std::ceil(inLifetime))));
     }
-    for (auto it = m_emitters.begin(); it != m_emitters.end();)
-        it = it->second.seen ? std::next(it) : m_emitters.erase(it);
+    for (auto it = m_emitters.begin(); it != m_emitters.end();) {
+        if (it->second.seen) {
+            ++it;
+        } else {
+            retire(it->second);
+            it = m_emitters.erase(it);
+        }
+    }
 
     if (dispatches.empty()) { // nothing to step (paused): just the uploads, if any
         cb->resourceUpdate(rub);

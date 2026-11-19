@@ -67,8 +67,7 @@ private:
         ParticleEmitter::Blend blend = ParticleEmitter::Additive;
         int capacity = 0;
         std::unique_ptr<QRhiBuffer> particles;     // capacity * ParticleSize
-        std::unique_ptr<QRhiBuffer> steps;         // stepCapacity * StepSize
-        int stepCapacity = 0;
+        std::unique_ptr<QRhiBuffer> steps;         // MaxStepsPerFrame steps, made once
         std::unique_ptr<QRhiBuffer> simUniforms;
         std::unique_ptr<QRhiShaderResourceBindings> simSrb;
         int stepsDone = -1;          // steps already in the buffer (-1: must clear it first)
@@ -76,6 +75,11 @@ private:
         bool seen = false;           // in this frame's scene
     };
     void rebuildBindings(Emitter &e);
+    // Keeps a replaced GPU resource alive until two frames later, so nothing recorded for
+    // the frame (or still in flight) can see it destroyed.
+    void retire(std::unique_ptr<QRhiBuffer> &buffer);
+    void retire(std::unique_ptr<QRhiShaderResourceBindings> &srb);
+    void retire(Emitter &e);
 
     QRhi *m_rhi = nullptr;
     bool m_supported = false;
@@ -86,6 +90,7 @@ private:
     std::unique_ptr<QRhiShaderResourceBindings> m_drawSrb;
     std::unique_ptr<QRhiGraphicsPipeline> m_additivePipe, m_alphaPipe;
     std::unordered_map<EntityId, Emitter> m_emitters;
+    std::vector<std::unique_ptr<QRhiResource>> m_retired, m_retiredBefore; // this frame's, the last one's
     bool m_pending = false;
     int m_drawn = 0;
     quint64 m_alive = 0;

@@ -92,6 +92,11 @@ add_executable(Lune
     src/main.cpp
 )
 target_link_libraries(Lune PRIVATE lune_editor_core Qt6::Widgets)
+# A map of the executable's functions (build/Lune.map): turns the addresses of a crash dump
+# into function names, without shipping debug symbols.
+if(MSVC)
+    target_link_options(Lune PRIVATE /MAP)
+endif()
 
 # Shaders: compiled at build time by qsb (Qt Shader Tools) for every QRhi backend,
 # embedded as resources at :/shaders/<name>.qsb. They're attached to the executable
