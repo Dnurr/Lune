@@ -107,7 +107,7 @@ the sphere's subsurface scattering lets light bleed around its terminator.</sub>
   keys moved in time and value, tangent handles, box selection, interpolation per key. It
   shares the bottom with the Assets browser like a tab.
 - **Post-processing chain**: a Post Process component on the camera (depth of field,
-  bloom with a mip pyramid, chromatic aberration, vignette, film grain, FXAA), as
+  bloom with a mip pyramid, FXAA, chromatic aberration, vignette, film grain), as
   fullscreen passes around tonemapping; effects that are off cost nothing.
 - **Scene files** (`.lune`, JSON, paths relative to the scene), a **stats overlay** (F12)
   and **automated tests** for the scene model, undo, file formats, importers, picking,

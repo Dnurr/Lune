@@ -30,7 +30,7 @@ flowchart LR
         dof[Depth of field] --> bloom[Bloom: down / up pyramid, composite]
     end
     subgraph P2["2 &middot; Display (8 bit, sRGB)"]
-        disp[Exposure, tonemapping, sRGB] --> lpost[Chromatic aberration, vignette,<br/>film grain, FXAA] --> overlay[2D overlay: gizmo]
+        disp[Exposure, tonemapping, sRGB] --> lpost[FXAA, chromatic aberration,<br/>vignette, film grain] --> overlay[2D overlay: gizmo]
     end
     subgraph P3["3 &middot; Blur (reduced res)"]
         down[Downsample] --> h1[Blur H] --> v1[Blur V] --> h2[Blur H] --> v2[Blur V]
@@ -53,7 +53,7 @@ flowchart LR
 | Outline | scene | `outline.vert` + `outline.frag` | Selected entity only. "Inverted hull": back faces pushed outwards in screen space, front faces culled. Its own binding set per entity (entity uniforms only): on Direct3D 11 a binding set's registers follow the first pipeline that used it, and `mesh.frag` puts the entity block in another register. |
 | Post (HDR) | two HDR targets, bloom pyramid | `fullscreen.vert` + `post_dof.frag`, `post_bloom_down/up/composite.frag` | Only the effects that are on; see [Post-processing](#post-processing). |
 | Display | display (RGBA8) | `fullscreen.vert` + `display.frag` | Converts the linear HDR scene to sRGB for the screen. Exposure and tonemapping go here: `params.x` = exposure (EV), `params.y` = operator index (0 none, 1 Reinhard, 2 ACES, 3 AgX), set with `Renderer::setDisplayParams()` from the editor's `DisplaySettings`. |
-| Post (display) | display, post LDR target | `post_chromatic.frag`, `post_vignette.frag`, `post_grain.frag`, `post_fxaa.frag` | Ping-pong; the last one writes the display image. |
+| Post (display) | display, post LDR target | `post_fxaa.frag`, `post_chromatic.frag`, `post_vignette.frag`, `post_grain.frag` | Ping-pong; the last one writes the display image. |
 | Overlay | display | `overlay.vert` + `overlay.frag` | Triangles in widget pixels with premultiplied alpha (the gizmo), in display colors: interface, so exposure/tonemapping never touch it; still blurred behind panels. |
 | Downsample | blur A | `downsample.frag` | Average of 4 bilinear taps (16 texels) of the display image. |
 | Blur ×4 | B, A, B, A | `blur.frag` | Separable 9-tap Gaussian with 5 bilinear fetches; two H+V iterations; `params.z` scales the sample spacing. |
@@ -268,10 +268,10 @@ when the shading bar's **Post** toggle is on (`ViewSettings::post`). The order i
 |---|---|---|---|
 | HDR, before tonemapping | depth of field | `post_dof.frag` | the scene, its depth |
 | | bloom | `post_bloom_down.frag` ×6, `post_bloom_up.frag` ×5, `post_bloom_composite.frag` | the scene; the pyramid |
-| display, after tonemapping | chromatic aberration | `post_chromatic.frag` | the image |
+| display, after tonemapping | FXAA | `post_fxaa.frag` | the image |
+| | chromatic aberration | `post_chromatic.frag` | the image |
 | | vignette | `post_vignette.frag` | the image |
 | | film grain | `post_grain.frag` | the image |
-| | FXAA | `post_fxaa.frag` | the image |
 
 - An effect that is off has no pass. HDR effects ping-pong between two full-size HDR
   targets, and the display pass reads whichever holds the result. Display effects

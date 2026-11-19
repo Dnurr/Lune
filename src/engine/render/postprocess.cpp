@@ -193,14 +193,16 @@ void PostProcessor::prepare(QRhiResourceUpdateBatch *rub, const Frame &frame)
     m_bloom = s.enabled && s.bloom;
     m_ldrPasses.clear();
     if (s.enabled) {
+        // FXAA first: it smooths the scene's edges, before the lens and film effects add
+        // fringes and noise it would mistake for edges.
+        if (s.fxaa)
+            m_ldrPasses.push_back(Fxaa);
         if (s.chromaticAberration)
             m_ldrPasses.push_back(ChromaticAberration);
         if (s.vignette)
             m_ldrPasses.push_back(Vignette);
         if (s.filmGrain)
             m_ldrPasses.push_back(FilmGrain);
-        if (s.fxaa)
-            m_ldrPasses.push_back(Fxaa);
     }
 
     // camera: near, far, depth texture (1) or the stand-in (-1), seconds. The depth values are

@@ -82,7 +82,7 @@ struct Camera
 
 // Post-processing of the image a camera renders, in a fixed order:
 //   HDR, before tonemapping:  depth of field, bloom
-//   display, after it:        chromatic aberration, vignette, film grain, FXAA
+//   display, after it:        FXAA, chromatic aberration, vignette, film grain
 // Each effect has a switch; an effect that is off costs nothing. The values reach the
 // effect's shader as params0/params1 (see PostProcessor in engine/render/postprocess.h).
 // Used from the scene camera's entity (the first enabled Camera), when it has one.

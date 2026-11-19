@@ -95,7 +95,7 @@ struct ViewSettings
 //      post    -> HDR effects of the scene camera's Post Process: depth of field, bloom
 //                 (PostProcessor; Rendered shading with ViewSettings::post only)
 //   2. display -> scene converted for the screen (exposure, tonemapping), then the display
-//                 effects (chromatic aberration, vignette, film grain, FXAA), then the
+//                 effects (FXAA, chromatic aberration, vignette, film grain), then the
 //                 2D overlay (gizmo) on top, in display colors                [8 bit, sRGB]
 //   3. blur    -> display image downsampled and blurred (Gaussian, 2 iterations)
 //   4. final   -> display image, with the blurred copy inside the "glass" rectangles
