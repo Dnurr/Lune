@@ -32,12 +32,19 @@ layout(binding = 1) uniform sampler2D sceneDistance; // view depth of the scene,
 
 void main()
 {
-    // TODO (Author): soft particles: fade out where the scene is less than soft.y behind.
     float r = length(v_corner);
     if (r > 1.0) discard;
 
     float falloff = 1.0 - smoothstep(0.0, 1.0, r);
     float alpha   = v_color.a * falloff;
+    
+    if (soft.x > 0.5)
+    {
+        float sceneDepth = texelFetch(sceneDistance, ivec2(gl_FragCoord.xy), 0).r;
+        float particleDepth = 1.0 / gl_FragCoord.w;
+        float fade = clamp((sceneDepth - particleDepth) / max(soft.y, 1e-4), 0.0, 1.0);
+        alpha *= fade;
+    }
 
     fragColor = vec4(v_color.rgb * alpha, alpha);
 }
