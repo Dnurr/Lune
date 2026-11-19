@@ -169,6 +169,38 @@ private slots:
         QCOMPARE(loaded.sceneCamera(), &loaded.entities()[0]);
     }
 
+    void emitterRoundTrip()
+    {
+        QTemporaryDir dir;
+        const QString path = dir.filePath("emitter.lune");
+
+        Scene scene;
+        Entity e;
+        e.name = QStringLiteral("Sparks");
+        e.emitter = ParticleEmitter {};
+        e.emitter->rate = 750.0f;
+        e.emitter->maxParticles = 12345;
+        e.emitter->seed = 7;
+        e.emitter->shape = ParticleEmitter::Box;
+        e.emitter->shapeSize = QVector3D(1.0f, 0.25f, 2.0f);
+        e.emitter->spread = 40.0f;
+        e.emitter->endColor = QColor(10, 20, 200);
+        e.emitter->blend = ParticleEmitter::Alpha;
+        scene.createEntity(e);
+
+        QString error;
+        QVERIFY2(SceneIO::save(scene, path, {}, &error), qPrintable(error));
+        const QJsonObject json = readJson(path)["entities"].toArray()[0].toObject()["components"].toObject()["Particle Emitter"].toObject();
+        QCOMPARE(json["shape.shape"].toString(), QStringLiteral("box"));
+        QCOMPARE(json["emission.max particles"].toDouble(), 12345.0);
+
+        Scene loaded;
+        QStringList warnings;
+        QVERIFY2(SceneIO::load(loaded, path, nullptr, &warnings, &error), qPrintable(error));
+        QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join('\n')));
+        QCOMPARE(loaded.entities()[0].emitter, e.emitter);
+    }
+
     void environmentRoundTripWithRelativeImage()
     {
         QTemporaryDir dir;

@@ -156,6 +156,7 @@ void Renderer::initialize(QRhi *rhi, QRhiRenderTarget *target)
 
         m_ibl.initialize(m_rhi);
         m_post.initialize(m_rhi);
+        m_particles.initialize(m_rhi);
         m_shadows.initialize(m_rhi);
         m_textures.initialize(m_rhi);
 
@@ -382,6 +383,7 @@ void Renderer::createPipelines(QRhiRenderTarget *target)
     }
     m_displayPipe = pipeline(fullscreen, QStringLiteral("display.frag"), m_displaySrb.get(), m_ldrRp.get(), 1);
     m_post.createPipelines(fullscreen);
+    m_particles.createPipelines(m_sceneRp.get(), 1);
     // The overlay is interface, not scene: drawn after the display conversion, in display colors,
     // so exposure/tonemapping never touch it. It's still before the blur, so panels blur it too.
     m_overlayPipe = pipeline(loadShader(QStringLiteral("overlay.vert")), QStringLiteral("overlay.frag"),
@@ -394,6 +396,7 @@ void Renderer::createPipelines(QRhiRenderTarget *target)
 
 void Renderer::release()
 {
+    m_particles.release();
     m_materialShaders.clear();
     m_meshes.clear();
     m_entities.clear();
@@ -1188,7 +1191,15 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         m_stats.triangles += quint64(c.indexCount / 3) * quint64(m_shadows.viewCount());
     }
 
-    // 0. Shadow atlases (every mesh's depth from each shadowed light), translucency map
+    // 0. Particles up to the scene time (compute; drawn in the scene pass), then the shadow
+    //    atlases (every mesh's depth from each shadowed light), translucency map
+    const bool particles = !wireOnly && !dataView;
+    m_particles.simulate(cb, particles ? scene : nullptr, m_seconds);
+    m_particles.prepareDraw(rub, m_rhi->clipSpaceCorrMatrix() * viewProj, camera.view(), eye, m_pixelSize, m_seconds);
+    m_stats.emitters = m_particles.emitterCount();
+    m_stats.particles = m_particles.particleCount();
+    m_stats.particleSteps = m_particles.stepsLastFrame();
+    m_stats.drawCalls += m_stats.emitters;
     m_shadows.render(cb, rub, casters);
 
     // 1. Scene (HDR, linear): environment and grid as background (no depth), opaque meshes,
@@ -1205,6 +1216,7 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
     if (!wireOnly) {
         for (const SurfaceDraw &s : surfaces)
             drawMesh(s.pipe, s.srb, s.mesh, s.firstIndex, s.indexCount);
+        m_particles.draw(cb, fullViewport);
     }
     QRhiGraphicsPipeline *wirePipe = wireOnly ? m_wirePipe.get() : m_view.wireOverlay ? m_wireOverPipe.get() : nullptr;
     if (wirePipe) {

@@ -36,6 +36,7 @@ add_library(lune_engine STATIC
     src/engine/render/shadowmaps.cpp
     src/engine/render/imagerender.cpp
     src/engine/render/postprocess.cpp
+    src/engine/render/particles.cpp
 )
 # Includes are relative to src/: "engine/scene/scene.h", "frontend/core/selection.h"
 target_include_directories(lune_engine PUBLIC src)
@@ -138,6 +139,18 @@ qt6_add_shaders(Lune "shaders"
         src/engine/render/shaders/post_vignette.frag
         src/engine/render/shaders/post_grain.frag
         src/engine/render/shaders/post_fxaa.frag
+        src/engine/render/shaders/particle.vert
+        src/engine/render/shaders/particle.frag
+)
+# Compute shaders need GLSL ES 3.1 / GLSL 4.3 where the backend is OpenGL.
+qt6_add_shaders(Lune "compute_shaders"
+    PREFIX "/shaders"
+    BASE "src/engine/render/shaders"
+    GLSL "310es,430"
+    HLSL 50
+    MSL 12
+    FILES
+        src/engine/render/shaders/particles.comp
 )
 
 if(WIN32)

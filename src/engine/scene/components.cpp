@@ -1,6 +1,7 @@
 #include "components.h"
 
 #include <QVector3D>
+#include <cmath>
 
 #include "engine/io/hdrimage.h"
 
@@ -142,7 +143,7 @@ ComponentDesc lightComponent()
             e.light = Light {};
     };
     c.remove = [](Entity &e) { e.light.reset(); };
-    c.canAdd = [](const Entity &e) { return !e.light && !e.camera; };
+    c.canAdd = [](const Entity &e) { return !e.light && !e.camera && !e.emitter; };
     return c;
 }
 ComponentDesc environmentComponent()
@@ -197,7 +198,7 @@ ComponentDesc environmentComponent()
             e.environment = Environment {};
     };
     c.remove = [](Entity &e) { e.environment.reset(); };
-    c.canAdd = [](const Entity &e) { return !e.environment && !e.camera; };
+    c.canAdd = [](const Entity &e) { return !e.environment && !e.camera && !e.emitter; };
     return c;
 }
 ComponentDesc cameraComponent()
@@ -239,7 +240,7 @@ ComponentDesc cameraComponent()
         e.camera.reset();
         e.postProcess.reset(); // only means something on a camera
     };
-    c.canAdd = [](const Entity &e) { return !e.mesh && !e.light && !e.environment; };
+    c.canAdd = [](const Entity &e) { return !e.mesh && !e.light && !e.environment && !e.emitter; };
     return c;
 }
 
@@ -317,11 +318,112 @@ ComponentDesc postProcessComponent()
     c.canAdd = [](const Entity &e) { return e.camera.has_value() && !e.postProcess; };
     return c;
 }
+ComponentDesc emitterComponent()
+{
+    auto prop = [](const char *name, const char *group, PropertyType type, double step = 0.01, double lo = -1e6,
+                   double hi = 1e6) {
+        PropertyDesc d { QString::fromLatin1(name), type, step, lo, hi };
+        d.group = QString::fromLatin1(group);
+        return d;
+    };
+    PropertyDesc shape = prop("shape", "shape", PropertyType::Enum);
+    shape.options = { QStringLiteral("point"), QStringLiteral("sphere"), QStringLiteral("box"), QStringLiteral("disc") };
+    PropertyDesc blend = prop("blend", "look", PropertyType::Enum);
+    blend.options = { QStringLiteral("additive"), QStringLiteral("alpha") };
+
+    ComponentDesc c;
+    c.name = QStringLiteral("Particle Emitter");
+    c.properties = {
+        prop("enabled", "", PropertyType::Bool),
+        prop("rate", "emission", PropertyType::Float, 1.0, 0.0, 1e6),
+        prop("lifetime", "emission", PropertyType::Float, 0.01, 0.01, 600.0),
+        prop("lifetime variation", "emission", PropertyType::Float, 0.005, 0.0, 1.0),
+        prop("max particles", "emission", PropertyType::Float, 50.0, 1.0, 4000000.0),
+        prop("seed", "emission", PropertyType::Float, 0.2, 0.0, 1000000.0),
+        shape,
+        prop("size", "shape", PropertyType::Vector3, 0.01),
+        prop("speed", "velocity", PropertyType::Float, 0.02, 0.0, 1e4),
+        prop("speed variation", "velocity", PropertyType::Float, 0.005, 0.0, 1.0),
+        prop("spread", "velocity", PropertyType::Float, 0.2, 0.0, 180.0),
+        prop("start color", "look", PropertyType::Color),
+        prop("end color", "look", PropertyType::Color),
+        prop("start opacity", "look", PropertyType::Float, 0.005, 0.0, 1.0),
+        prop("end opacity", "look", PropertyType::Float, 0.005, 0.0, 1.0),
+        prop("intensity", "look", PropertyType::Float, 0.02, 0.0, 1000.0),
+        prop("start size", "look", PropertyType::Float, 0.002, 0.0, 1e3),
+        prop("end size", "look", PropertyType::Float, 0.002, 0.0, 1e3),
+        blend,
+    };
+    c.present = [](const Entity &e) { return e.emitter.has_value(); };
+    c.get = [](const Entity &e, int i) -> QVariant {
+        if (!e.emitter)
+            return {};
+        const ParticleEmitter &p = *e.emitter;
+        switch (i) {
+        case 0: return p.enabled;
+        case 1: return double(p.rate);
+        case 2: return double(p.lifetime);
+        case 3: return double(p.lifetimeVariation);
+        case 4: return double(p.maxParticles);
+        case 5: return double(p.seed);
+        case 6: return int(p.shape);
+        case 7: return QVariant::fromValue(p.shapeSize);
+        case 8: return double(p.speed);
+        case 9: return double(p.speedVariation);
+        case 10: return double(p.spread);
+        case 11: return p.startColor;
+        case 12: return p.endColor;
+        case 13: return double(p.startOpacity);
+        case 14: return double(p.endOpacity);
+        case 15: return double(p.intensity);
+        case 16: return double(p.startSize);
+        case 17: return double(p.endSize);
+        case 18: return int(p.blend);
+        }
+        return {};
+    };
+    c.set = [](Entity &e, int i, const QVariant &v) {
+        if (!e.emitter)
+            return;
+        ParticleEmitter &p = *e.emitter;
+        const double x = v.toDouble();
+        auto f = [x](double lo, double hi) { return float(qBound(lo, x, hi)); };
+        switch (i) {
+        case 0: p.enabled = v.toBool(); break;
+        case 1: p.rate = f(0.0, 1e6); break;
+        case 2: p.lifetime = f(0.01, 600.0); break;
+        case 3: p.lifetimeVariation = f(0.0, 1.0); break;
+        case 4: p.maxParticles = int(std::lround(qBound(1.0, x, 4000000.0))); break;
+        case 5: p.seed = int(std::lround(qBound(0.0, x, 1000000.0))); break;
+        case 6: p.shape = ParticleEmitter::Shape(qBound(0, v.toInt(), 3)); break;
+        case 7: p.shapeSize = v.value<QVector3D>(); break;
+        case 8: p.speed = f(0.0, 1e4); break;
+        case 9: p.speedVariation = f(0.0, 1.0); break;
+        case 10: p.spread = f(0.0, 180.0); break;
+        case 11: p.startColor = v.value<QColor>(); break;
+        case 12: p.endColor = v.value<QColor>(); break;
+        case 13: p.startOpacity = f(0.0, 1.0); break;
+        case 14: p.endOpacity = f(0.0, 1.0); break;
+        case 15: p.intensity = f(0.0, 1000.0); break;
+        case 16: p.startSize = f(0.0, 1e3); break;
+        case 17: p.endSize = f(0.0, 1e3); break;
+        case 18: p.blend = ParticleEmitter::Blend(qBound(0, v.toInt(), 1)); break;
+        }
+    };
+    c.add = [](Entity &e) {
+        if (!e.emitter)
+            e.emitter = ParticleEmitter {};
+    };
+    c.remove = [](Entity &e) { e.emitter.reset(); };
+    c.canAdd = [](const Entity &e) { return !e.mesh && !e.light && !e.environment && !e.camera; };
+    return c;
+}
 } // namespace
 
 const std::vector<ComponentDesc> &components()
 {
     static const std::vector<ComponentDesc> all = { transformComponent(), meshComponent(), materialComponent(), lightComponent(),
-                                                    environmentComponent(), cameraComponent(), postProcessComponent() };
+                                                    environmentComponent(), cameraComponent(), postProcessComponent(),
+                                                    emitterComponent() };
     return all;
 }

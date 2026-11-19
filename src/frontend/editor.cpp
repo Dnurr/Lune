@@ -338,6 +338,12 @@ void Editor::createMenus()
         m_undo->push(new AddEntityCommand(m_scene, m_selection, e));
     });
     m_addMenu->addAction("Camera", this, &Editor::addCamera);
+    m_addMenu->addAction("Particle Emitter", this, [this] {
+        Entity e;
+        e.name = m_scene->uniqueName(QStringLiteral("Emitter"));
+        e.emitter = ParticleEmitter {};
+        m_undo->push(new AddEntityCommand(m_scene, m_selection, e));
+    });
     m_addMenu->addSeparator();
     m_addMenu->addAction(importAction);
 

@@ -117,6 +117,50 @@ struct PostProcess
     bool operator==(const PostProcess &) const = default;
 };
 
+// A source of GPU particles (engine/render/particles.h). New particles start on the emitter's
+// shape and fly along its local +Y axis; the simulation runs on the timeline, so the same frame
+// always shows the same particles (scrubbing back simulates again from the start).
+struct ParticleEmitter
+{
+    enum Shape
+    {
+        Point = 0,
+        Sphere = 1, // shapeSize.x = radius
+        Box = 2,    // shapeSize = edge lengths
+        Disc = 3,   // shapeSize.x = radius, in the local XZ plane
+    };
+    enum Blend
+    {
+        Additive = 0, // glows: light adds up, no sorting needed
+        Alpha = 1,    // smoke, dust: premultiplied alpha over the scene
+    };
+
+    bool enabled = true;
+    float rate = 200.0f;              // particles per second
+    float lifetime = 2.0f;            // seconds
+    float lifetimeVariation = 0.25f;  // 0..1: up to this fraction is taken off each lifetime, at random
+    int maxParticles = 10000;         // the buffer's size: the oldest are replaced when it's full
+    int seed = 1;                     // another seed, another random pattern
+
+    Shape shape = Point;
+    QVector3D shapeSize { 0.5f, 0.5f, 0.5f };
+
+    float speed = 2.0f;               // units per second, along local +Y
+    float speedVariation = 0.2f;      // 0..1, random fraction taken off
+    float spread = 15.0f;             // degrees: half angle of the cone directions are taken in
+
+    QColor startColor { 0xFF, 0xC8, 0x78 }; // sRGB, at birth
+    QColor endColor { 0xFF, 0x50, 0x20 };   // sRGB, at death
+    float startOpacity = 1.0f;
+    float endOpacity = 0.0f;
+    float intensity = 2.0f;           // HDR multiplier of the colors (bloom picks bright particles up)
+    float startSize = 0.08f;          // world units
+    float endSize = 0.02f;
+    Blend blend = Additive;
+
+    bool operator==(const ParticleEmitter &) const = default;
+};
+
 struct Entity
 {
     EntityId id = InvalidEntity;
@@ -156,6 +200,7 @@ struct Entity
     std::optional<Environment> environment; // set = this entity is the scene's environment
     std::optional<Camera> camera;           // set = this entity is a camera
     std::optional<PostProcess> postProcess; // effects of the image rendered by this entity's camera
+    std::optional<ParticleEmitter> emitter; // set = this entity emits particles
 
     // Keyframes of its properties (engine/scene/animation.h), one track per animated property.
     std::vector<AnimationTrack> animation;

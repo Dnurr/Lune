@@ -13,6 +13,7 @@
 #include "engine/material/materialcompiler.h"
 #include "engine/scene/entity.h"
 #include "iblmaps.h"
+#include "particles.h"
 #include "postprocess.h"
 #include "shadowmaps.h"
 #include "texturecache.h"
@@ -49,6 +50,9 @@ struct FrameStats
     int meshes = 0;         // visible entities with a mesh
     int textures = 0;       // material textures bound (with repeats), fallbacks excluded
     int renderPasses = 0;
+    int emitters = 0;       // particle emitters drawn
+    quint64 particles = 0;  // particles alive (estimated, see ParticleSystem)
+    int particleSteps = 0;  // simulation steps run this frame
 };
 
 // How meshes are shaded (the viewport's shading menu, and each pass of an image render).
@@ -89,9 +93,10 @@ struct ViewSettings
 //
 // Frame:
 //   0. ibl     -> environment maps, only when the environment changed (IblMaps)
+//      particles -> emitters simulated up to the scene time (ParticleSystem, compute)
 //      shadow  -> depth of every mesh seen from each shadowed light (ShadowMaps)
 //   1. scene   -> environment background (optional), world grid, meshes (depth tested),
-//                 selection outline                                         [HDR, linear]
+//                 particles, selection outline                             [HDR, linear]
 //      post    -> HDR effects of the scene camera's Post Process: depth of field, bloom
 //                 (PostProcessor; Rendered shading with ViewSettings::post only)
 //   2. display -> scene converted for the screen (exposure, tonemapping), then the display
@@ -160,7 +165,8 @@ public:
     // Why a material image couldn't be loaded (empty if fine, loading, or never used).
     QString textureError(const QString &image) const { return m_textures.error(image); }
     // Something the last frame drew is still loading (textures): render again soon.
-    bool needsAnotherFrame() const { return m_textures.loading(); }
+    // Also while particles catch up with a long jump in time (ParticleSystem::pending()).
+    bool needsAnotherFrame() const { return m_textures.loading() || m_particles.pending(); }
 
 private:
     struct GpuMesh
@@ -279,6 +285,7 @@ private:
     IblMaps m_ibl; // environment cubemaps and BRDF LUT, bindings 3..5 of every mesh SRB
 
     PostProcessor m_post; // post-processing targets and passes
+    ParticleSystem m_particles; // emitters' buffers, simulation and draws
 
     // Offscreen targets:
     //   scene   full size, HDR (RGBA16F) + depth, linear values

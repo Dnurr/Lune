@@ -44,7 +44,7 @@ void StatsOverlay::frameRendered(double cpuMs, const FrameStats &stats, const ch
                            "%4 fps   %5 ms/frame\n"
                            "CPU %6 ms  (max %7)\n"
                            "%8 draws  %9 passes  %10 tris\n"
-                           "%11 meshes  %12 entities  %13 textures")
+                           "%11 meshes  %12 entities  %13 textures%14")
                 .arg(QString::fromLatin1(backend))
                 .arg(pixelSize.width())
                 .arg(pixelSize.height())
@@ -57,7 +57,12 @@ void StatsOverlay::frameRendered(double cpuMs, const FrameStats &stats, const ch
                 .arg(c.toString(qulonglong(stats.triangles)))
                 .arg(stats.meshes)
                 .arg(entities)
-                .arg(stats.textures));
+                .arg(stats.textures)
+                .arg(stats.emitters == 0 ? QString()
+                                         : QStringLiteral("\n%1 particles  %2 emitters  %3 steps")
+                                               .arg(c.toString(qulonglong(stats.particles)))
+                                               .arg(stats.emitters)
+                                               .arg(stats.particleSteps)));
     reposition();
 
     m_window.restart();

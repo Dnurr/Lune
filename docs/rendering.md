@@ -20,11 +20,14 @@ flowchart LR
     subgraph P0["0 &middot; IBL maps (only when the environment changes)"]
         conv[Equirect to cube] --> irr[Irradiance] --> pre[Prefiltered specular]
     end
+    subgraph PC["Particles (compute)"]
+        sim[Every emitter: the steps due this frame]
+    end
     subgraph PS["Shadow maps"]
         sdir[Directional atlas] --> spoint[Point atlas, 6 faces per light] --> strans[Translucency map]
     end
     subgraph P1["1 &middot; Scene (HDR, linear, color + depth)"]
-        bg[Environment background] --> grid[World grid] --> meshes[Opaque meshes] --> blend[See-through meshes, far to near] --> outline[Selection outline]
+        bg[Environment background] --> grid[World grid] --> meshes[Opaque meshes] --> blend[See-through meshes, far to near] --> parts[Particles] --> outline[Selection outline]
     end
     subgraph PP["Post, HDR (scene camera's Post Process)"]
         dof[Depth of field: half size, composite] --> bloom[Bloom: down / up pyramid, composite]
@@ -38,7 +41,7 @@ flowchart LR
     subgraph P4["4 &middot; Final (widget target)"]
         comp[Composite: display image, blurred copy inside glass rects]
     end
-    P0 --> PS --> P1 --> PP --> P2 --> P3 --> P4
+    P0 --> PC --> PS --> P1 --> PP --> P2 --> P3 --> P4
     P2 --> P4
 ```
 
@@ -50,6 +53,7 @@ flowchart LR
 | Background | scene (RGBA16F) | `background.vert` + `background.frag` | Only when the Environment's `background` is on: the environment in each view ray's direction. |
 | Grid | scene | `fullscreen.vert` + `grid.frag` | Fullscreen triangle; each pixel intersects its view ray with y = 0. No depth write: it's the background. Premultiplied alpha: opaque with its own sky, or only the lines over an environment background. Colors converted to linear on the CPU. |
 | Meshes | scene | `mesh.vert` + `mesh.frag` | Depth tested, two-sided, Cook-Torrance (GGX) shading with the scene lights and the environment maps. One draw per submesh, each with its material slot's pipeline (node material or default) and binding set. Writes linear values (can exceed 1). Blend materials last, sorted far to near by entity, with premultiplied-alpha blending and no depth writes; closed meshes in two draws, back faces then front faces, so a glass cube's far side never blends over its near side. |
+| Particles | scene | `particle.vert` + `particle.frag`, after `particles.comp` | One instanced draw per emitter, six vertices per particle slot, read from the simulation's buffer; depth tested, no depth writes, additive or premultiplied-alpha blending. See [Particles](#particles). |
 | Outline | scene | `outline.vert` + `outline.frag` | Selected entity only. "Inverted hull": back faces pushed outwards in screen space, front faces culled. Its own binding set per entity (entity uniforms only): on Direct3D 11 a binding set's registers follow the first pipeline that used it, and `mesh.frag` puts the entity block in another register. |
 | Post (HDR) | two HDR targets, a half-size depth of field target, bloom pyramid | `fullscreen.vert` + `post_dof.frag`, `post_dof_composite.frag`, `post_bloom_down/up/composite.frag` | Only the effects that are on; see [Post-processing](#post-processing). |
 | Display | display (RGBA8) | `fullscreen.vert` + `display.frag` | Converts the linear HDR scene to sRGB for the screen. Exposure and tonemapping go here: `params.x` = exposure (EV), `params.y` = operator index (0 none, 1 Reinhard, 2 ACES, 3 AgX), set with `Renderer::setDisplayParams()` from the editor's `DisplaySettings`. |
@@ -301,6 +305,36 @@ when the shading bar's **Post** toggle is on (`ViewSettings::post`). The order i
   `clipSpaceCorrMatrix()`): the distance along the view is `2nf / (f + n - (2d - 1)(f - n))`.
 - The shaders start as plain copies (bloom's composite returns the scene): the effects
   themselves are the author's to write.
+
+## Particles
+
+Entities with a **Particle Emitter** component (`ParticleEmitter` in `entity.h`), run by
+`ParticleSystem` (`engine/render/particles.h`) in Rendered, Preview, Clay and Unlit shading.
+
+- **Buffers.** Each emitter has a ring buffer of `max particles` slots of 64 bytes
+  (`Particle` in `particles.comp`: position and age, velocity and lifetime, color, size /
+  rotation / random). The same buffer is the compute shader's storage buffer and the draw's
+  instance vertex buffer; QRhi orders the compute pass before the draw.
+- **Time.** The simulation advances in fixed steps of one timeline frame from the start
+  frame: frame `start + k` shows the particles after `k` steps. For each step due, the CPU
+  evaluates the emitter at that frame (its animated transform, rate, shape, velocity and
+  look) into a `Step` of the steps buffer, and counts the particles born by its end (the sum
+  of `rate x dt`, as a double). One dispatch per frame then runs all of them: each thread
+  takes its slot through every step, since particles don't interact. Going back in time, or
+  any change to the emitter (its values at the first frame, its transform or its keys),
+  clears the buffer and simulates again from the first step; more than 2400 steps continue
+  on the next frames (`Renderer::needsAnotherFrame()`). So a frame looks the same whether it
+  was played, scrubbed to, or rendered (F4, F5, `--render`).
+- **Emission.** Particle `n` (counted from the start) goes to slot `n % max particles`,
+  replacing whatever was there, and is born at a time spread evenly inside its step, then
+  simulated for the rest of that step: streams stay smooth at any rate. `random(index,
+  channel)` gives each particle its own repeatable random numbers (with the emitter's seed).
+- **Shaders.** `particles.comp`'s `main()` is the driver (which particle a slot gets, aging,
+  dead slots); `emitParticle()` and `updateParticle()` are the author's, and start as stubs
+  (every particle standing still at the emitter). `particle.vert` / `particle.frag` start
+  as a few-pixel dot per live particle. A particle is dead when its age reaches its lifetime.
+- **Stats.** The overlay shows the particles alive (estimated from the emission: born within
+  a lifetime, at most the buffer), the emitters and the steps simulated in the last frame.
 
 ## Scene cameras
 

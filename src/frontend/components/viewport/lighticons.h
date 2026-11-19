@@ -18,6 +18,8 @@ class Scene;
 //   directional light:  disc and ring, plus a line showing where it shines
 //   camera:             its frustum in the world (a pyramid from the eye), with a
 //                       triangle on top showing which way is up
+//   particle emitter:   ring with three sparks in its start color, and a line showing
+//                       where the particles go (local +Y)
 namespace LightIcons
 {
 // Click distance from the icon center (or a camera's lines), in pixels.

@@ -78,6 +78,39 @@ void append(const Scene &scene, const OrbitCamera &camera, const QSizeF &viewSiz
         }
     }
     for (const Entity &e : scene.entities()) {
+        if (!e.emitter)
+            continue;
+        bool inFront = false;
+        const QPointF c = camera.project(e.transform.position, viewSize, &inFront);
+        if (!inFront)
+            continue;
+        QColor ring = e.id == selected ? kRingSelected : kRing;
+        QColor fill = e.emitter->startColor;
+        if (!e.emitter->enabled) {
+            ring = dimmed(ring);
+            fill = dimmed(fill);
+        }
+        // Where the particles go (local +Y), then a ring with three sparks inside.
+        const QVector3D up = e.transform.matrix().mapVector(QVector3D(0.0f, 1.0f, 0.0f)).normalized();
+        bool tipInFront = false;
+        const QPointF far = camera.project(e.transform.position + up, viewSize, &tipInFront);
+        QPointF d = far - c;
+        const double len = std::hypot(d.x(), d.y());
+        if (tipInFront && len > 1e-3) {
+            d /= len;
+            const QPointF start = c + d * (kRingRadius + 3.0);
+            const QPointF end = c + d * kDirectionPixels;
+            segment(out, start, end, kLine, ring);
+            const QPointF n(-d.y(), d.x());
+            triangle(out, end + d * 7.0, end + n * 4.0, end - n * 4.0, ring);
+        }
+        OverlayDraw::ring(out, c, kRingRadius, kLine, ring);
+        for (int i = 0; i < 3; ++i) {
+            const double a = M_PI * 2.0 * i / 3.0 - M_PI / 2.0;
+            disc(out, c + QPointF(std::cos(a), std::sin(a)) * (kRingRadius * 0.45), kDisc * 0.45, fill);
+        }
+    }
+    for (const Entity &e : scene.entities()) {
         if (!e.light)
             continue;
         bool inFront = false;
@@ -137,7 +170,7 @@ EntityId hitTest(const Scene &scene, const OrbitCamera &camera, const QSizeF &vi
         }
     }
     for (const Entity &e : scene.entities()) {
-        if (!e.light)
+        if (!e.light && !e.emitter)
             continue;
         bool inFront = false;
         const QPointF c = camera.project(e.transform.position, viewSize, &inFront);

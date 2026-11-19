@@ -112,6 +112,10 @@ the sphere's subsurface scattering lets light bleed around its terminator.</sub>
 - **Post-processing chain**: a Post Process component on the camera (depth of field,
   bloom with a mip pyramid, FXAA, chromatic aberration, vignette, film grain), as
   fullscreen passes around tonemapping; effects that are off cost nothing.
+- **GPU particles**: Particle Emitter entities simulated by a compute shader, one dispatch
+  per frame for every step due, tied to the timeline so that a frame always shows the same
+  particles (scrubbing, renders and videos agree); instanced quads straight from the
+  simulation's buffer, additive or alpha blended.
 - **Scene files** (`.lune`, JSON, paths relative to the scene), a **stats overlay** (F12)
   and **automated tests** for the scene model, undo, file formats, importers, picking,
   gizmo and material compiler.

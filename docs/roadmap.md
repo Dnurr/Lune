@@ -116,16 +116,28 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 
 ## 5. GPU particles
 
-- [ ] Compute pipeline support in the Renderer: storage buffers, dispatch, barriers (Claude)
-- [ ] Emitter component: rate, lifetime, shape, start velocity, color (Claude)
+- [x] Compute pipeline support in the Renderer: storage buffers, dispatch (QRhi orders the passes) (Claude)
+- [x] Particle Emitter component: rate, lifetime, shape, velocity, colors, sizes, blend; Add menu, viewport icon (Claude)
+- [x] Simulation driver in `particles.comp`: ring buffer, emission spread inside each step, aging, recycling (Claude)
+- [x] Deterministic playback tied to the timeline: fixed steps, animated emitters evaluated per step, scrubbing back simulates again (Claude)
+- [x] Particle count, emitters and steps in the stats overlay (Claude)
+- [ ] `emitParticle()` and `updateParticle()` in `particles.comp`: shapes, directions, motion, color and size over life (Author)
+- [ ] Particle rendering in `particle.vert/.frag`: billboards, soft shapes (Author)
 - [ ] Force components: gravity, wind, turbulence, attractors (Claude: components and buffers)
-- [ ] Emission and simulation compute shaders (Author)
 - [ ] Forces and noise fields in the simulation (Author)
-- [ ] Particle rendering: billboards, soft particles, blending, sorting (Author)
-- [ ] Deterministic playback tied to the timeline, scrubbing, cache (Claude)
-- [ ] Particle count and simulation time in the stats overlay (Claude)
+- [ ] Soft particles: a copy of the scene depth for `particle.frag` (Claude), the fade (Author)
+- [ ] Sorting for alpha-blended particles (Claude: sort pass, Author: if a custom key is wanted)
+- [ ] Simulation cache: snapshots every N frames, so long scrubs don't start from the first frame (Claude)
 
-## 6. Output
+## 6. Volumetrics
+
+- [ ] Fog Volume component: global or box, density, color, anisotropy, height falloff (Claude)
+- [ ] Froxel grid: 3D textures fitted to the camera frustum, compute passes (Claude, on the particles' compute support)
+- [ ] Light scattering into the froxels: every light with its shadow maps, phase function (Author)
+- [ ] Integration along each view ray, fog applied to meshes, background and particles (Author)
+- [ ] Temporal reprojection for stable noise (Claude: history volumes, Author: the blend)
+
+## 7. Output
 
 - [x] Render settings: resolution, output folder, passes (Claude)
 - [x] Render settings: frame range (the timeline's) (Claude)
@@ -139,7 +151,6 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 
 ## Ideas, not scheduled
 
-- Volumetrics: fog, light shafts (Author)
 - Area lights with LTC (Author)
 - Screen-space reflections and ambient occlusion (Author)
 - Mesh sequences or Alembic import for animated geometry (Claude)
