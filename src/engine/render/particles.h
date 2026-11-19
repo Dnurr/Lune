@@ -24,8 +24,8 @@ class Scene;
 // (transform, rate, shape, velocity, look: the animated values at that step) go to the GPU in
 // a steps buffer, and one dispatch per frame runs every step that is due, each thread taking
 // its particle through all of them (particles don't interact). Going back in time, or editing
-// the emitter, starts again from the first step. Very long jumps are split over several frames
-// (pending()).
+// the emitter, starts again from the first step. Long jumps are split over several frames
+// (pending()), within FrameBudget.
 //
 // Emission: the number of particles born by the end of step k is the sum of rate x dt over the
 // steps (kept as a double on the CPU), particle n (counted from the start) lives in slot
@@ -40,6 +40,12 @@ class ParticleSystem
 public:
     static constexpr int ParticleSize = 64; // vec4 position (w = age), velocity (w = lifetime), color, extra
     static constexpr int MaxStepsPerFrame = 2400; // a re-simulation longer than this continues next frame
+    // GPU work one frame may take, in particle steps weighted by the forces' cost (a noise
+    // force counts as NoiseForceCost plain ones). Catching up after a jump or an edit is spread
+    // over frames to stay under it: one long dispatch would make Windows reset the GPU
+    // (a "device lost" after about two seconds).
+    static constexpr double FrameBudget = 4.0e6;
+    static constexpr double NoiseForceCost = 10.0;
 
     void initialize(QRhi *rhi);
     // Pipelines for drawing into the scene pass.

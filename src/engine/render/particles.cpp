@@ -241,12 +241,20 @@ void ParticleSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float s
     // The scene's forces, and how they are at the first frame (for spotting edits).
     std::vector<const Entity *> forceEntities;
     std::vector<Entity> forceReference;
+    // Cost of one particle step: the particle itself, plus each force (noise forces cost more).
+    double stepCost = 1.0;
     for (const Entity &entity : scene->entities()) {
         if (entity.force) {
             forceEntities.push_back(&entity);
             forceReference.push_back(at(entity, timeline.start));
+            if (entity.force->enabled) {
+                const bool noise = entity.force->type == ParticleForce::Turbulence
+                    || (entity.force->type == ParticleForce::Vortex && entity.force->noise > 0.0f);
+                stepCost += noise ? NoiseForceCost : 1.0;
+            }
         }
     }
+    double budget = FrameBudget; // shared by the emitters, in weighted particle steps
 
     QRhiResourceUpdateBatch *rub = m_rhi->nextResourceUpdateBatch();
     struct Dispatch
@@ -303,7 +311,10 @@ void ParticleSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float s
             e.born = 0.0;
         }
 
-        const int count = qMin(target - e.stepsDone, MaxStepsPerFrame);
+        // At least one step, so every emitter keeps moving; at most what the budget left allows.
+        const int affordable = int(qBound(1.0, budget / (double(capacity) * stepCost), double(MaxStepsPerFrame)));
+        const int count = qMin(target - e.stepsDone, affordable);
+        budget = qMax(0.0, budget - double(qMax(count, 0)) * double(capacity) * stepCost);
         if (count > 0) {
             if (target - e.stepsDone > count)
                 m_pending = true;
