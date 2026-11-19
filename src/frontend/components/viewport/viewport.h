@@ -120,6 +120,9 @@ public:
     // Node materials: why one can't be drawn (empty = fine). materialErrorsChanged() after a
     // frame that changed any.
     QString materialError(MaterialId id) const { return m_renderer.materialError(id); }
+    // Why an emitter's particle graph can't be used (empty = fine); also reported through
+    // materialErrorsChanged().
+    QString particleGraphError(EntityId emitter) const { return m_renderer.particleGraphError(emitter); }
     // Why a material image couldn't be loaded (empty = fine or still loading).
     QString textureError(const QString &image) const { return m_renderer.textureError(image); }
 

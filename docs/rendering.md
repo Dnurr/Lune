@@ -336,6 +336,17 @@ Entities with a **Particle Emitter** component (`ParticleEmitter` in `entity.h`)
   `particles.comp`: transform, type and settings), and `Step.forces` gives its range; editing
   a force simulates again like editing the emitter. What each type does is
   `forceAcceleration()`, the author's.
+- **Graphs.** An emitter can have a node graph (`ParticleEmitter::graph`, edited in the node
+  editor with the emitter selected) that decides what acts on its particles: force nodes
+  chained into a **Particle Output** (the acceleration). `ParticleGraph`
+  (`engine/material/particlegraph.h`) generates `graphAcceleration()` from it, with the node
+  functions of `particle_nodes.glsl`, and `ParticleSystem` compiles particles.comp with it at
+  runtime (cached by code). Built-in nodes: **Scene Forces** (every Force component; an
+  emitter without a graph behaves like the default graph, which has just this) and
+  **Object** (an entity's position and axes at each step, from the forces buffer after the
+  step's forces, `Step.objects`), so a force can follow a moving entity. Unlinked values go to
+  `SimBuf.graphParams` and editing them compiles nothing; a graph that doesn't compile leaves
+  the emitter on the default shader, with the reason in the node editor.
 - **Shaders.** `particles.comp`'s `main()` is the driver (which particle a slot gets, aging,
   dead slots); `emitParticle()` and `updateParticle()` are the author's, and start as stubs
   (every particle standing still at the emitter). `particle.vert` / `particle.frag` start

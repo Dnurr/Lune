@@ -1,6 +1,8 @@
 #pragma once
 
 #include <QString>
+#include <functional>
+#include <map>
 #include <vector>
 
 #include "nodegraph.h"
@@ -55,8 +57,33 @@ struct CompiledMaterial
     bool ok() const { return error.isEmpty(); }
 };
 
+// What every graph compiler shares (materials here, particles in particlegraph.h): the
+// statements computing the nodes that reach the output node, in dependency order, and the
+// expression feeding each input of the output node.
+struct GraphCode
+{
+    QString body;                               // GLSL statements, 4-space indented
+    std::map<QString, QString> outputInputs;    // output node input -> expression
+    std::vector<MaterialParam> params;          // <paramArray>[i] <- params[i]
+    std::vector<MaterialTexture> textures;      // <texturePrefix><i> <- textures[i]
+    QString error;                              // empty when fine
+};
+
+// Statements for a built-in node (NodeType::builtin): declare and compute its outputs, named
+// as the generator names them (n<id>_<port>). `input` gives the expression feeding an input.
+using BuiltinNode = std::function<QString(const GraphNode &node, const NodeType &type,
+                                          const std::function<QString(const PortDesc &)> &input)>;
+
 namespace MaterialCompiler
 {
+// Variable holding a node's output in generated code: n<node>_<port>.
+QString variable(int node, const QString &port);
+
+// The shared part of compile(): `noOutput` is the error without an output node. Unlinked inputs
+// with a value read <paramArray>[slot]; texture inputs <texturePrefix><slot>.
+GraphCode generate(const NodeGraph &graph, const NodeLibrary &library, const QString &paramArray,
+                   const QString &texturePrefix, const QString &noOutput, const BuiltinNode &builtin = {});
+
 constexpr int MaxParams = 32;  // must match MAX_MATERIAL_PARAMS in mesh.frag
 constexpr int MaxTextures = 8; // materialTexture0..7 in mesh.frag
 constexpr int FirstTextureBinding = 11; // binding of materialTexture0 in mesh.frag

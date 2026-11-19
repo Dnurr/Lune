@@ -125,6 +125,9 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 - [x] Particle rendering in `particle.vert/.frag`: rotated camera-facing billboards, soft round falloff (Author)
 - [x] Force components: gravity, wind, turbulence, attractor, vortex (axis spin, pull, lift, local swirl); on any entity, so they follow it; per-step buffer (Claude)
 - [ ] `forceAcceleration()` in `particles.comp`: each force type, curl noise for turbulence and the vortex's swirl (Author)
+- [x] Particle graphs: a node graph per emitter in the node editor, compiled into the simulation shader at runtime; Scene Forces and Object (follow an entity) built in; values edited without compiling again (Claude)
+- [ ] `updateParticle()` takes the acceleration from `graphAcceleration()`; force node functions in `particle_nodes.glsl` (Author)
+- [ ] More graph outputs: color, size and opacity over life, emission (shape, velocity), kill and collision nodes (Claude: outputs and codegen, Author: nodes)
 - [ ] Soft particles: a copy of the scene depth for `particle.frag` (Claude), the fade (Author)
 - [ ] Sorting for alpha-blended particles (Claude: sort pass, Author: if a custom key is wanted)
 - [ ] Simulation cache: snapshots every N frames, so long scrubs don't start from the first frame (Claude)
@@ -154,7 +157,6 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 - Area lights with LTC (Author)
 - Screen-space reflections and ambient occlusion (Author)
 - Mesh sequences or Alembic import for animated geometry (Claude)
-- Node-based particle graphs (both), on the node editor and graph model of the materials
 - USD import / export: scenes, meshes, cameras, lights, UsdPreviewSurface materials (Claude)
 - Hydra render delegate, so Lune can render inside Houdini Solaris and other Hydra hosts;
   needs the renderer fed by an adapter instead of reading the editor's `Scene` directly

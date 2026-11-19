@@ -227,6 +227,30 @@ private:
     QElapsedTimer m_lastEdit;
 };
 
+// The particle graph of an emitter entity (ParticleEmitter::graph). Edits with the same merge
+// key close together (dragging a value) merge into one undo step.
+class SetEmitterGraphCommand : public QUndoCommand
+{
+public:
+    SetEmitterGraphCommand(Scene *scene, EntityId entity, const NodeGraph &after, const QString &text,
+                           const QString &mergeKey = QString());
+
+    void redo() override;
+    void undo() override;
+
+    int id() const override { return 7; }
+    bool mergeWith(const QUndoCommand *other) override;
+
+private:
+    void apply(const NodeGraph &graph);
+
+    Scene *m_scene;
+    EntityId m_entity;
+    NodeGraph m_before, m_after;
+    QString m_mergeKey;
+    QElapsedTimer m_lastEdit;
+};
+
 // A material's alpha mode and cutoff. Cutoff edits close together (dragging the value)
 // merge into one undo step.
 class SetMaterialAlphaCommand : public QUndoCommand

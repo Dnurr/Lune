@@ -383,6 +383,49 @@ bool SetMaterialGraphCommand::mergeWith(const QUndoCommand *other)
     return true;
 }
 
+SetEmitterGraphCommand::SetEmitterGraphCommand(Scene *scene, EntityId entity, const NodeGraph &after, const QString &text,
+                                               const QString &mergeKey)
+    : m_scene(scene)
+    , m_entity(entity)
+    , m_after(after)
+    , m_mergeKey(mergeKey)
+{
+    setText(text);
+    if (const Entity *e = scene->entity(entity); e && e->emitter)
+        m_before = e->emitter->graph;
+    m_lastEdit.start();
+}
+
+void SetEmitterGraphCommand::apply(const NodeGraph &graph)
+{
+    m_scene->modifyEntity(m_entity, [&graph](Entity &e) {
+        if (e.emitter)
+            e.emitter->graph = graph;
+    });
+}
+
+void SetEmitterGraphCommand::redo()
+{
+    apply(m_after);
+}
+
+void SetEmitterGraphCommand::undo()
+{
+    apply(m_before);
+}
+
+bool SetEmitterGraphCommand::mergeWith(const QUndoCommand *other)
+{
+    const auto *o = static_cast<const SetEmitterGraphCommand *>(other);
+    if (m_mergeKey.isEmpty() || o->m_mergeKey != m_mergeKey || o->m_entity != m_entity
+        || m_lastEdit.elapsed() > kMergeWindowMs)
+        return false;
+    m_after = o->m_after;
+    m_lastEdit.restart();
+    setObsolete(m_after == m_before);
+    return true;
+}
+
 SetMaterialAlphaCommand::SetMaterialAlphaCommand(Scene *scene, MaterialId material, AlphaMode mode, float cutoff)
     : m_scene(scene)
     , m_material(material)

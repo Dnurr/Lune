@@ -12,6 +12,8 @@
 //   updateParticle()  one step of a live particle (Author): motion, forces, color and size
 //                     over its life.
 //   forceAcceleration()  what one Force component does to a particle (Author).
+//   graphAcceleration()  the emitter's particle graph (generated, see the end of the file):
+//                     the acceleration from its force nodes; without a graph, the scene's forces.
 //
 // A particle is dead when its age reaches its lifetime (position.w >= velocity.w). Slots
 // start zeroed: dead.
@@ -41,6 +43,7 @@ struct Step
     vec4  startColor; // rgb = linear color x intensity, a = opacity, at birth
     vec4  endColor;   // the same at death
     uvec4 forces;     // this step's records in forces[]: x = first, y = count
+    uvec4 objects;    // the transforms of the graph's Object nodes in forces[]: x = first, y = count
 };
 layout(std430, binding = 2) readonly buffer Steps { Step steps[]; };
 
@@ -59,9 +62,15 @@ struct Force
 };
 layout(std430, binding = 3) readonly buffer Forces { Force forces[]; };
 
+// The emitter's particle graph, defined between the graph markers at the end of the file.
+vec3 graphAcceleration(Particle p, Step s, float time);
+
+#define MAX_GRAPH_PARAMS 32 // ParticleGraph::MaxParams
+
 layout(std140, binding = 0) uniform SimBuf {
     uvec4 counts; // x = slots (max particles), y = steps in this dispatch, z = seed
     vec4 params;  // x = dt (seconds per step)
+    vec4 graphParams[MAX_GRAPH_PARAMS]; // the graph's unlinked input values
 };
 
 // Random numbers: the same for the same particle on every run, so the simulation is
@@ -160,6 +169,21 @@ void updateParticle(inout Particle p, Step s, float dt, float time)
     p.color   = mix(s.startColor, s.endColor, t);
     p.extra.x = mix(s.life.z, s.life.w, t);
 }
+
+// --- Particle graph (Claude) ---------------------------------------------------------
+// Replaced by the emitter's graph when it has one (ParticleGraph in
+// engine/material/particlegraph.h): the node functions of particle_nodes.glsl, then a
+// graphAcceleration() made from the graph. Without a graph: every Force component of the
+// scene, as the default graph (Scene Forces -> Particle Output) does.
+//@graph-begin
+vec3 graphAcceleration(Particle p, Step s, float time)
+{
+    vec3 acceleration = vec3(0.0);
+    for (uint i = s.forces.x; i < s.forces.x + s.forces.y; ++i)
+        acceleration += forceAcceleration(forces[i], p, time);
+    return acceleration;
+}
+//@graph-end
 
 // --- Driver ---------------------------------------------------------------------------
 

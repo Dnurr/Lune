@@ -67,6 +67,48 @@ NodeType outputNode()
     return t;
 }
 
+// Particle graphs: the output takes the acceleration (units / s^2) the forces give the particle.
+NodeType particleOutputNode()
+{
+    NodeType t;
+    t.id = QString::fromLatin1(NodeLibrary::OutputType);
+    t.title = QStringLiteral("Particle Output");
+    t.isOutput = true;
+    t.inputs = { { QStringLiteral("acceleration"), PortType::Vec3, false, true, QVector3D() } };
+    return t;
+}
+
+// Every Force component of the scene, added to the acceleration so far.
+NodeType sceneForcesNode()
+{
+    NodeType t;
+    t.id = QStringLiteral("scene_forces");
+    t.title = QStringLiteral("Scene Forces");
+    t.category = QStringLiteral("Forces");
+    t.builtin = true;
+    t.inputs = { { QStringLiteral("acceleration"), PortType::Vec3, false, true, QVector3D() } };
+    t.outputs = { { QStringLiteral("result"), PortType::Vec3, false, true, QVector3D() } };
+    return t;
+}
+
+// An entity of the scene, followed through the simulation (animated, moving): its position and
+// its axes, to place forces on it.
+NodeType objectNode()
+{
+    NodeType t;
+    t.id = QStringLiteral("object");
+    t.title = QStringLiteral("Object");
+    t.category = QStringLiteral("Input");
+    t.builtin = true;
+    PortDesc entity { QStringLiteral("object"), PortType::Entity, false, false, 0.0 };
+    t.inputs = { entity };
+    t.outputs = { { QStringLiteral("position"), PortType::Vec3, false, true, QVector3D() },
+                  { QStringLiteral("axis"), PortType::Vec3, false, true, QVector3D() },    // local +Y
+                  { QStringLiteral("forward"), PortType::Vec3, false, true, QVector3D() }, // local -Z
+                  { QStringLiteral("right"), PortType::Vec3, false, true, QVector3D() } }; // local +X
+    return t;
+}
+
 // "expr(...)" in a @param spec: removed from `spec`, its content returned (parentheses
 // may nest). Empty if there's none.
 QString takeExpression(QString &spec, QString *error)
@@ -160,14 +202,20 @@ bool applyParam(PortDesc &port, const QString &spec, QString *error)
 }
 } // namespace
 
-NodeLibrary::NodeLibrary(const QString &glslSource)
-    : m_source(glslSource)
+NodeLibrary::NodeLibrary(const QString &glslSource, Kind kind)
+    : m_kind(kind)
+    , m_source(glslSource)
 {
     static const QRegularExpression function(QStringLiteral(R"(void\s+node_(\w+)\s*\(([^)]*)\))"));
     const QStringList lines = glslSource.split('\n');
     QStringList annotations; // "@..." lines collected above the next function
     for (int i = 0; i < lines.size(); ++i) {
-        const QString line = lines[i].trimmed();
+        QString line = lines[i].trimmed();
+        // A signature over several lines: joined up to its closing parenthesis.
+        if (line.startsWith(QLatin1String("void node_")) && !line.contains(u')')) {
+            while (i + 1 < lines.size() && !line.contains(u')'))
+                line += QLatin1Char(' ') + lines[++i].trimmed();
+        }
         if (line.startsWith(QLatin1String("// @"))) {
             annotations.append(line.mid(4).trimmed());
             continue;
@@ -252,7 +300,13 @@ NodeLibrary::NodeLibrary(const QString &glslSource)
             m_types.push_back(t);
         annotations.clear();
     }
-    m_types.push_back(outputNode());
+    if (kind == Kind::Particle) {
+        m_types.push_back(sceneForcesNode());
+        m_types.push_back(objectNode());
+        m_types.push_back(particleOutputNode());
+    } else {
+        m_types.push_back(outputNode());
+    }
 }
 
 const NodeLibrary &NodeLibrary::instance()
@@ -260,6 +314,15 @@ const NodeLibrary &NodeLibrary::instance()
     static const NodeLibrary library = [] {
         QFile f(QStringLiteral(":/shadersrc/material_nodes.glsl"));
         return NodeLibrary(f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString());
+    }();
+    return library;
+}
+
+const NodeLibrary &NodeLibrary::particleInstance()
+{
+    static const NodeLibrary library = [] {
+        QFile f(QStringLiteral(":/shadersrc/particle_nodes.glsl"));
+        return NodeLibrary(f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString(), Kind::Particle);
     }();
     return library;
 }

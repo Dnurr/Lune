@@ -158,6 +158,9 @@ public:
     // Node materials: why a material can't be drawn (graph or shader compile error, empty
     // if it's fine or wasn't drawn yet). Entities using it fall back to their own values.
     QString materialError(MaterialId id) const { return m_materialErrors.value(id); }
+    // Particle graphs: why an emitter's graph can't be used (empty if fine). Changes are
+    // reported by takeMaterialErrorsChanged() too.
+    QString particleGraphError(EntityId emitter) const { return m_particles.error(emitter); }
     // True once after a frame that changed some material's error, or in which an image
     // failed to load (e.g. to refresh the UI).
     bool takeMaterialErrorsChanged();

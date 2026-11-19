@@ -182,8 +182,9 @@ public:
                     const qreal labelWidth = fm.horizontalAdvance(p.name) + 8;
                     const QRectF valueRect = r.adjusted(labelWidth, 0, 0, 0);
                     painter->setPen(QColor("#9A9AA6"));
+                    const QString text = p.type == PortType::Entity ? m_view->entityName(v) : valueText(v, p);
                     painter->drawText(valueRect, Qt::AlignVCenter | Qt::AlignRight,
-                                      fm.elidedText(valueText(v, p), Qt::ElideMiddle, valueRect.width()));
+                                      fm.elidedText(text, Qt::ElideMiddle, valueRect.width()));
                 }
             }
             if (p.linkable)
@@ -248,6 +249,22 @@ void NodeEditorView::setGraph(const NodeGraph &graph, const NodeLibrary *library
     m_hasGraph = true;
     rebuild();
     frameOnce();
+}
+
+void NodeEditorView::setEntityNames(const QHash<quint64, QString> &names)
+{
+    if (names == m_entityNames)
+        return;
+    m_entityNames = names;
+    m_scene->update(); // Object nodes show the names
+}
+
+QString NodeEditorView::entityName(const QVariant &value) const
+{
+    const double id = value.toDouble();
+    if (id <= 0.0)
+        return QStringLiteral("none");
+    return m_entityNames.value(quint64(std::llround(id)), QStringLiteral("missing"));
 }
 
 void NodeEditorView::frameOnce()
@@ -648,7 +665,8 @@ void NodeEditorView::showAddMenu(const QPoint &globalPos, const QPointF &scenePo
         hasOutput |= n.type == QLatin1String(NodeLibrary::OutputType);
     if (!hasOutput) {
         menu.addSeparator();
-        menu.addAction(QStringLiteral("Material Output"))->setData(QString::fromLatin1(NodeLibrary::OutputType));
+        const NodeType *output = m_library->outputType();
+        menu.addAction(output ? output->title : QStringLiteral("Output"))->setData(QString::fromLatin1(NodeLibrary::OutputType));
     }
     if (selectedNode() || !m_scene->selectedItems().isEmpty()) {
         menu.addSeparator();

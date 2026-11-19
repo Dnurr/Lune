@@ -1,22 +1,25 @@
 #include "particles.h"
 
 #include <QFile>
+#include <QVector2D>
 #include <QtMath>
+#include <rhi/qshaderbaker.h>
 #include <cmath>
 #include <cstring>
 
+#include "engine/material/materialcompiler.h"
 #include "engine/scene/animation.h"
 #include "engine/scene/scene.h"
 
 namespace
 {
 // Step in particles.comp (std430): mat4 emitter, vec4 time, uvec4 spawn, vec4 shape,
-// vec4 velocity, vec4 life, vec4 startColor, vec4 endColor, uvec4 forces.
-constexpr int kStepSize = 64 + 8 * 16;
+// vec4 velocity, vec4 life, vec4 startColor, vec4 endColor, uvec4 forces, uvec4 objects.
+constexpr int kStepSize = 64 + 9 * 16;
 // Force in particles.comp (std430): mat4 transform, vec4 params0, params1, params2.
 constexpr int kForceSize = 64 + 3 * 16;
-// SimBuf: uvec4 counts, vec4 params.
-constexpr int kSimUbufSize = 32;
+// SimBuf: uvec4 counts, vec4 params, vec4 graphParams[MAX_GRAPH_PARAMS].
+constexpr int kSimUbufSize = 32 + ParticleGraph::MaxParams * 16;
 // DrawBuf: mat4 viewProj, vec4 cameraRight, cameraUp, cameraPos, params.
 constexpr int kDrawUbufSize = 64 + 4 * 16;
 constexpr int kWorkgroupSize = 256; // local_size_x in particles.comp
@@ -163,6 +166,8 @@ void ParticleSystem::createPipelines(QRhiRenderPassDescriptor *sceneRp, int samp
 void ParticleSystem::release()
 {
     m_emitters.clear();
+    m_graphShaders.clear();
+    m_errors.clear();
     m_retired.clear();
     m_retiredBefore.clear();
     m_additivePipe.reset();
@@ -179,6 +184,67 @@ void ParticleSystem::release()
     m_drawn = 0;
     m_alive = 0;
     m_stepsLastFrame = 0;
+}
+
+void ParticleSystem::setError(EntityId emitter, const QString &error)
+{
+    if (m_errors.value(emitter) == error)
+        return;
+    if (error.isEmpty())
+        m_errors.remove(emitter);
+    else
+        m_errors.insert(emitter, error);
+    m_errorsChanged = true;
+}
+
+QRhiComputePipeline *ParticleSystem::graphPipeline(const QString &code, QString *error)
+{
+    auto it = m_graphShaders.find(code);
+    if (it == m_graphShaders.end()) {
+        GraphShader g;
+        if (m_simSource.isEmpty()) {
+            QFile f(QStringLiteral(":/shadersrc/particles.comp"));
+            if (f.open(QIODevice::ReadOnly))
+                m_simSource = QString::fromUtf8(f.readAll());
+        }
+        const QString source = ParticleGraph::insertInto(m_simSource, code);
+        if (source.isEmpty()) {
+            g.error = QStringLiteral("particles.comp has no graph markers.");
+        } else {
+            // Compiled for the backend in use only: much faster than every target.
+            QShaderBaker baker;
+            QList<QShaderBaker::GeneratedShader> targets;
+            switch (m_rhi->backend()) {
+            case QRhi::Vulkan: targets.append({ QShader::SpirvShader, QShaderVersion(100) }); break;
+            case QRhi::D3D11:
+            case QRhi::D3D12: targets.append({ QShader::HlslShader, QShaderVersion(50) }); break;
+            case QRhi::Metal: targets.append({ QShader::MslShader, QShaderVersion(12) }); break;
+            case QRhi::OpenGLES2:
+                targets.append({ QShader::GlslShader, QShaderVersion(430) });
+                targets.append({ QShader::GlslShader, QShaderVersion(310, QShaderVersion::GlslEs) });
+                break;
+            default: break;
+            }
+            baker.setGeneratedShaders(targets);
+            baker.setGeneratedShaderVariants({ QShader::StandardShader });
+            baker.setSourceString(source.toUtf8(), QShader::ComputeStage, "particle graph");
+            const QShader shader = baker.bake();
+            if (!shader.isValid()) {
+                g.error = QStringLiteral("Shader error: ") + baker.errorMessage().trimmed();
+            } else {
+                g.pipeline.reset(m_rhi->newComputePipeline());
+                g.pipeline->setShaderStage({ QRhiShaderStage::Compute, shader });
+                g.pipeline->setShaderResourceBindings(m_simLayout.get());
+                if (!g.pipeline->create()) {
+                    g.pipeline.reset();
+                    g.error = QStringLiteral("The graph's simulation pipeline can't be created.");
+                }
+            }
+        }
+        it = m_graphShaders.emplace(code, std::move(g)).first;
+    }
+    *error = it->second.error;
+    return it->second.pipeline.get();
 }
 
 void ParticleSystem::retire(std::unique_ptr<QRhiBuffer> &buffer)
@@ -270,6 +336,30 @@ void ParticleSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float s
         Emitter &e = m_emitters[entity.id];
         e.seen = true;
         const Entity reference = at(entity, timeline.start);
+
+        // The graph: compiled again when it changed; its shader from the cache.
+        const NodeGraph &graph = entity.emitter->graph;
+        if (graph != e.compiledGraph || (e.compiledGraph.nodes.empty() && !graph.nodes.empty())) {
+            e.compiledGraph = graph;
+            e.graph = graph.nodes.empty() ? ParticleGraph::Compiled {}
+                                          : ParticleGraph::compile(graph, NodeLibrary::particleInstance());
+        }
+        QString graphError = e.graph.error;
+        e.pipeline = nullptr;
+        if (!graph.nodes.empty() && e.graph.ok())
+            e.pipeline = graphPipeline(e.graph.code, &graphError);
+        setError(entity.id, graphError);
+        // The graph's objects (and their state at the first frame, for spotting edits).
+        std::vector<const Entity *> objects;
+        std::vector<Entity> linkedReference = forceReference;
+        if (e.pipeline) {
+            for (quint64 id : e.graph.objects) {
+                const Entity *o = id ? scene->entity(EntityId(id)) : nullptr;
+                objects.push_back(o);
+                if (o)
+                    linkedReference.push_back(at(*o, timeline.start));
+            }
+        }
         const int capacity = qMax(1, entity.emitter->maxParticles);
         if (!e.particles || e.capacity != capacity) {
             e.capacity = capacity;
@@ -297,10 +387,10 @@ void ParticleSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float s
         }
         if (!e.simSrb)
             rebuildBindings(e);
-        if (!sameSimulation(reference, e.reference) || !sameForces(forceReference, e.forceReference)
+        if (!sameSimulation(reference, e.reference) || !sameForces(linkedReference, e.forceReference)
             || target < e.stepsDone) {
             e.reference = reference;
-            e.forceReference = forceReference;
+            e.forceReference = linkedReference;
             e.stepsDone = -1;
         }
         e.blend = entity.emitter->blend;
@@ -360,6 +450,17 @@ void ParticleSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float s
                 putColor(v + 40, p.endColor, p.intensity, p.endOpacity);
                 const quint32 forceRange[4] = { firstForce, quint32(forceCount) - firstForce, 0, 0 };
                 std::memcpy(v + 44, forceRange, sizeof(forceRange));
+                // The graph's objects during this step, after the forces (identity for a missing one).
+                const quint32 firstObject = quint32(forceCount);
+                for (const Entity *o : objects) {
+                    forces.resize(qsizetype(forceCount + 1) * kForceSize, '\0');
+                    float *r = reinterpret_cast<float *>(forces.data() + qsizetype(forceCount) * kForceSize);
+                    const QMatrix4x4 m = o ? at(*o, timeline.start + k).transform.matrix() : QMatrix4x4();
+                    std::memcpy(r, m.constData(), 64);
+                    ++forceCount;
+                }
+                const quint32 objectRange[4] = { firstObject, quint32(forceCount) - firstObject, 0, 0 };
+                std::memcpy(v + 48, objectRange, sizeof(objectRange));
             }
             rub->uploadStaticBuffer(e.steps.get(), 0, quint32(steps.size()), steps.constData());
             if (forceCount > e.forceCapacity) {
@@ -377,6 +478,31 @@ void ParticleSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float s
             float sim[kSimUbufSize / 4] = {};
             std::memcpy(sim, counts, sizeof(counts));
             sim[4] = dt;
+            if (e.pipeline) { // the graph's values: colors linear, like materials
+                const NodeLibrary &library = NodeLibrary::particleInstance();
+                for (size_t i = 0; i < e.graph.params.size(); ++i) {
+                    const MaterialParam &param = e.graph.params[i];
+                    const GraphNode *node = graph.node(param.node);
+                    const NodeType *type = node ? library.type(node->type) : nullptr;
+                    const PortDesc *port = type ? type->input(param.port) : nullptr;
+                    if (!port)
+                        continue;
+                    const QVariant value = MaterialCompiler::inputValue(*node, *port);
+                    float *slot = sim + 8 + i * 4;
+                    if (port->type == PortType::Float) {
+                        slot[0] = value.toFloat();
+                    } else if (port->type == PortType::Vec2) {
+                        const QVector2D v2 = value.value<QVector2D>();
+                        slot[0] = v2.x();
+                        slot[1] = v2.y();
+                    } else {
+                        const QVector3D v3 = value.value<QVector3D>();
+                        slot[0] = port->color ? linear(v3.x()) : v3.x();
+                        slot[1] = port->color ? linear(v3.y()) : v3.y();
+                        slot[2] = port->color ? linear(v3.z()) : v3.z();
+                    }
+                }
+            }
             rub->updateDynamicBuffer(e.simUniforms.get(), 0, kSimUbufSize, sim);
             dispatches.push_back({ &e, (capacity + kWorkgroupSize - 1) / kWorkgroupSize });
             e.stepsDone += count;
@@ -390,6 +516,7 @@ void ParticleSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float s
         if (it->second.seen) {
             ++it;
         } else {
+            setError(it->first, QString());
             retire(it->second);
             it = m_emitters.erase(it);
         }
@@ -400,8 +527,8 @@ void ParticleSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float s
         return;
     }
     cb->beginComputePass(rub);
-    cb->setComputePipeline(m_simPipe.get());
     for (const Dispatch &d : dispatches) {
+        cb->setComputePipeline(d.emitter->pipeline ? d.emitter->pipeline : m_simPipe.get());
         cb->setShaderResources(d.emitter->simSrb.get());
         cb->dispatch(d.groups, 1, 1);
     }

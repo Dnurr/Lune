@@ -665,7 +665,7 @@ QRhiGraphicsPipeline *Renderer::shadowPipeline(MaterialShader &s, const QString 
 
 bool Renderer::takeMaterialErrorsChanged()
 {
-    const bool changed = m_materialErrorsChanged;
+    const bool changed = m_particles.takeErrorsChanged() | m_materialErrorsChanged;
     m_materialErrorsChanged = false;
     return changed;
 }

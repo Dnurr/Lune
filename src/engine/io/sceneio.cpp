@@ -199,6 +199,8 @@ bool save(const Scene &scene, const QString &path, const QJsonObject &editorStat
         }
         if (!animation.isEmpty())
             je["animation"] = animation;
+        if (e.emitter && !e.emitter->graph.nodes.empty())
+            je["particleGraph"] = e.emitter->graph.toJson();
         entities.append(je);
     }
 
@@ -339,6 +341,9 @@ bool load(Scene &scene, const QString &path, QJsonObject *editorState, QStringLi
                     warn(QStringLiteral("%1: invalid value for %2.%3").arg(e.name, c.name, p.key()));
             }
         }
+
+        if (e.emitter && je["particleGraph"].isObject())
+            e.emitter->graph = NodeGraph::fromJson(je["particleGraph"].toObject());
 
         for (const QJsonValue &tv : je["animation"].toArray()) {
             const QJsonObject jt = tv.toObject();

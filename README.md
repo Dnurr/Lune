@@ -115,7 +115,9 @@ the sphere's subsurface scattering lets light bleed around its terminator.</sub>
 - **GPU particles**: Particle Emitter entities simulated by a compute shader, one dispatch
   per frame for every step due, tied to the timeline so that a frame always shows the same
   particles (scrubbing, renders and videos agree); instanced quads straight from the
-  simulation's buffer, additive or alpha blended. **Forces** on any entity, so they follow
+  simulation's buffer, additive or alpha blended. **Particle graphs**: each emitter can
+  have its own node graph of forces, compiled into its simulation shader at runtime, with
+  nodes that follow other entities. **Forces** on any entity, so they follow
   it: gravity, wind, turbulence, attractors and vortices (spin around an axis, pull, lift).
 - **Scene files** (`.lune`, JSON, paths relative to the scene), a **stats overlay** (F12)
   and **automated tests** for the scene model, undo, file formats, importers, picking,

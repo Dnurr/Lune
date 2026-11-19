@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QHash>
 #include <QMatrix4x4>
 #include <QVector3D>
 #include <memory>
@@ -7,6 +8,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "engine/material/particlegraph.h"
 #include "engine/scene/entity.h"
 
 class Scene;
@@ -35,6 +37,13 @@ class Scene;
 // its forces (as they are at that step: animated, moving with their entity) in a forces
 // buffer; Step.forces says which records are its. Editing a force simulates again, like
 // editing the emitter.
+//
+// Particle graphs: an emitter with a graph (ParticleEmitter::graph) gets its own simulation
+// shader, particles.comp with the generated graphAcceleration() (ParticleGraph), compiled
+// at runtime when the graph's code changes and cached by code; its values go to
+// SimBuf.graphParams, and the transforms of its Object nodes, per step, after the step's
+// forces (Step.objects). A graph that doesn't compile leaves that emitter on the default
+// shader (the scene's forces), with the reason in error().
 class ParticleSystem
 {
 public:
@@ -71,11 +80,24 @@ public:
     quint64 particleCount() const { return m_alive; }
     int stepsLastFrame() const { return m_stepsLastFrame; }
 
+    // Why an emitter's graph can't be used (graph or shader error); empty when fine.
+    QString error(EntityId emitter) const { return m_errors.value(emitter); }
+    // True once after a frame that changed some emitter's error.
+    bool takeErrorsChanged()
+    {
+        const bool changed = m_errorsChanged;
+        m_errorsChanged = false;
+        return changed;
+    }
+
 private:
     struct Emitter
     {
         Entity reference;            // the entity at the first frame: a change means simulating again
-        std::vector<Entity> forceReference; // the same for the scene's forces
+        std::vector<Entity> forceReference; // the same for the scene's forces and the graph's objects
+        NodeGraph compiledGraph;     // the graph `graph` was compiled from
+        ParticleGraph::Compiled graph;
+        QRhiComputePipeline *pipeline = nullptr; // its shader's (in m_graphShaders), or null: the default
         ParticleEmitter::Blend blend = ParticleEmitter::Additive;
         int capacity = 0;
         std::unique_ptr<QRhiBuffer> particles;     // capacity * ParticleSize
@@ -94,6 +116,20 @@ private:
     void retire(std::unique_ptr<QRhiBuffer> &buffer);
     void retire(std::unique_ptr<QRhiShaderResourceBindings> &srb);
     void retire(Emitter &e);
+    // The simulation pipeline for a graph's code, compiled on first use; null (and `error` set)
+    // if it doesn't compile.
+    QRhiComputePipeline *graphPipeline(const QString &code, QString *error);
+    void setError(EntityId emitter, const QString &error);
+
+    struct GraphShader
+    {
+        QString error;
+        std::unique_ptr<QRhiComputePipeline> pipeline;
+    };
+    std::unordered_map<QString, GraphShader> m_graphShaders; // by generated code
+    QString m_simSource; // particles.comp as GLSL, with the graph markers
+    QHash<EntityId, QString> m_errors;
+    bool m_errorsChanged = false;
 
     QRhi *m_rhi = nullptr;
     bool m_supported = false;

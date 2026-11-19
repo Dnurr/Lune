@@ -23,6 +23,7 @@ add_library(lune_engine STATIC
     src/engine/material/nodelibrary.cpp
     src/engine/material/materialcompiler.cpp
     src/engine/material/gltfmaterialgraph.cpp
+    src/engine/material/particlegraph.cpp
     src/engine/io/objloader.cpp
     src/engine/io/gltfloader.cpp
     src/engine/io/meshimport.cpp
@@ -187,7 +188,8 @@ qt6_add_resources(Lune "icons"
 
 # GLSL sources needed at runtime: node materials put generated code into mesh.frag and
 # compile it again (and, for their shadows, into shadow_material.glsl); the node types are
-# read from material_nodes.glsl.
+# read from material_nodes.glsl. Particle graphs do the same with particles.comp and
+# particle_nodes.glsl.
 qt6_add_resources(Lune "shadersrc"
     PREFIX "/shadersrc"
     BASE "src/engine/render/shaders"
@@ -195,4 +197,6 @@ qt6_add_resources(Lune "shadersrc"
         src/engine/render/shaders/mesh.frag
         src/engine/render/shaders/material_nodes.glsl
         src/engine/render/shaders/shadow_material.glsl
+        src/engine/render/shaders/particles.comp
+        src/engine/render/shaders/particle_nodes.glsl
 )

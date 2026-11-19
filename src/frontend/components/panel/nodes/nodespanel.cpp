@@ -17,6 +17,7 @@
 
 #include "engine/material/materialcompiler.h"
 #include "engine/material/nodelibrary.h"
+#include "engine/material/particlegraph.h"
 #include "engine/scene/scene.h"
 #include "frontend/components/viewport/viewport.h"
 #include "frontend/components/widgets/draglabel.h"
@@ -165,7 +166,12 @@ NodesPanel::NodesPanel(Scene *scene, Selection *selection, QUndoStack *undoStack
     column->addWidget(m_splitter, 1);
     contentLayout()->addWidget(body, 1);
 
-    connect(m_new, &QToolButton::clicked, this, &NodesPanel::newMaterial);
+    connect(m_new, &QToolButton::clicked, this, [this] {
+        if (m_emitter != InvalidEntity)
+            newParticleGraph();
+        else
+            newMaterial();
+    });
     connect(m_rename, &QToolButton::clicked, this, &NodesPanel::renameMaterial);
     connect(m_combo, &QComboBox::activated, this, &NodesPanel::chooseMaterial);
     connect(m_slotCombo, &QComboBox::activated, this, [this](int index) {
@@ -175,17 +181,18 @@ NodesPanel::NodesPanel(Scene *scene, Selection *selection, QUndoStack *undoStack
         syncFromSelection();
     });
     connect(m_editor, &NodeEditorView::filesDropped, this, &NodesPanel::dropImages);
-    connect(m_editor, &NodeEditorView::edited, this, [this](const NodeGraph &after, const QString &text, const QString &key) {
-        if (m_scene->material(m_material))
-            m_undo->push(new SetMaterialGraphCommand(m_scene, m_material, after, text, key));
-    });
+    connect(m_editor, &NodeEditorView::edited, this,
+            [this](const NodeGraph &after, const QString &text, const QString &key) { pushGraph(after, text, key); });
     connect(m_editor, &NodeEditorView::nodeSelected, this, &NodesPanel::rebuildProperties);
 
     connect(m_selection, &Selection::changed, this, &NodesPanel::syncFromSelection);
     connect(m_scene, &Scene::entityChanged, this, [this](EntityId id) {
+        refreshEntityNames();
         if (id == m_selection->current())
-            syncFromSelection(); // its material may have changed (assign, undo)
+            syncFromSelection(); // its material (or particle graph) may have changed (assign, undo)
     });
+    connect(m_scene, &Scene::entityAdded, this, &NodesPanel::refreshEntityNames);
+    connect(m_scene, &Scene::entityRemoved, this, &NodesPanel::refreshEntityNames);
     connect(m_scene, &Scene::materialAdded, this, &NodesPanel::refreshMaterials);
     connect(m_scene, &Scene::materialRemoved, this, [this](MaterialId id) {
         if (id == m_material)
@@ -204,13 +211,82 @@ NodesPanel::NodesPanel(Scene *scene, Selection *selection, QUndoStack *undoStack
     });
 
     refreshMaterials();
+    refreshEntityNames();
     syncFromSelection();
+}
+
+const NodeGraph *NodesPanel::shownGraph() const
+{
+    if (m_emitter != InvalidEntity) {
+        const Entity *e = m_scene->entity(m_emitter);
+        return e && e->emitter && !e->emitter->graph.nodes.empty() ? &e->emitter->graph : nullptr;
+    }
+    const Material *m = m_scene->material(m_material);
+    return m ? &m->graph : nullptr;
+}
+
+const NodeLibrary &NodesPanel::library() const
+{
+    return m_emitter != InvalidEntity ? NodeLibrary::particleInstance() : NodeLibrary::instance();
+}
+
+void NodesPanel::pushGraph(const NodeGraph &after, const QString &text, const QString &mergeKey)
+{
+    if (!shownGraph())
+        return;
+    if (m_emitter != InvalidEntity)
+        m_undo->push(new SetEmitterGraphCommand(m_scene, m_emitter, after, text, mergeKey));
+    else
+        m_undo->push(new SetMaterialGraphCommand(m_scene, m_material, after, text, mergeKey));
+}
+
+void NodesPanel::refreshEntityNames()
+{
+    QHash<quint64, QString> names;
+    for (const Entity &e : m_scene->entities())
+        names.insert(e.id, e.name);
+    m_editor->setEntityNames(names);
+    if (m_emitter != InvalidEntity) {
+        m_propertiesSignature.clear(); // object choosers list the entities
+        rebuildProperties();
+    }
+}
+
+void NodesPanel::newParticleGraph()
+{
+    const Entity *e = m_scene->entity(m_emitter);
+    if (!e || !e->emitter || !e->emitter->graph.nodes.empty())
+        return;
+    m_undo->push(new SetEmitterGraphCommand(m_scene, m_emitter, ParticleGraph::defaultGraph(),
+                                            QStringLiteral("Add particle graph")));
 }
 
 void NodesPanel::syncFromSelection()
 {
     const Entity *e = m_scene->entity(m_selection->current());
     const EntityId id = e ? e->id : InvalidEntity;
+    // An emitter: its particle graph instead of a material.
+    const EntityId emitter = e && e->emitter ? e->id : InvalidEntity;
+    if (emitter != m_emitter) {
+        m_editor->clearGraph(); // another graph: framed again when shown
+        m_emitter = emitter;
+        m_propertiesSignature.clear();
+    }
+    const bool particles = m_emitter != InvalidEntity;
+    m_combo->setVisible(!particles);
+    m_rename->setVisible(!particles);
+    m_new->setToolTip(particles ? QStringLiteral("Give the emitter a particle graph (starting with the scene's forces)")
+                                : QStringLiteral("New material (given to the selected entity)"));
+    if (particles) {
+        m_slotCombo->hide();
+        m_new->setEnabled(!shownGraph());
+        m_hint->setText(QStringLiteral("Press + to give the emitter a particle graph.\n"
+                                       "Without one, every Force of the scene acts on it."));
+        refreshGraph();
+        return;
+    }
+    m_hint->setText(QStringLiteral("Select a mesh and press + to give it a node material,\n"
+                                   "or pick an existing material above."));
     if (id != m_slotEntity) {
         m_slotEntity = id;
         m_slot = 0;
@@ -265,13 +341,13 @@ void NodesPanel::refreshMaterials()
 
 void NodesPanel::refreshGraph()
 {
-    const Material *m = m_scene->material(m_material);
-    if (m)
-        m_editor->setGraph(m->graph, &NodeLibrary::instance());
+    const NodeGraph *g = shownGraph();
+    if (g)
+        m_editor->setGraph(*g, &library());
     else
         m_editor->clearGraph();
-    m_hint->setVisible(!m);
-    m_splitter->setVisible(m);
+    m_hint->setVisible(!g);
+    m_splitter->setVisible(g);
     rebuildProperties();
     refreshAlpha();
     refreshStatus();
@@ -279,7 +355,7 @@ void NodesPanel::refreshGraph()
 
 void NodesPanel::refreshAlpha()
 {
-    const Material *m = m_scene->material(m_material);
+    const Material *m = m_emitter == InvalidEntity ? m_scene->material(m_material) : nullptr;
     m_alphaRow->setVisible(m);
     if (!m)
         return;
@@ -293,6 +369,15 @@ void NodesPanel::refreshAlpha()
 
 void NodesPanel::refreshStatus()
 {
+    if (m_emitter != InvalidEntity) {
+        QString text = shownGraph() ? m_viewport->particleGraphError(m_emitter) : QString();
+        if (shownGraph() && !library().errors().isEmpty())
+            text += (text.isEmpty() ? QString() : QStringLiteral("\n")) + QStringLiteral("particle_nodes.glsl: ")
+                + library().errors().join(QStringLiteral("\n"));
+        m_status->setText(text);
+        m_status->setVisible(!text.isEmpty());
+        return;
+    }
     QString text = m_viewport->materialError(m_material);
     // Images of the material that can't be loaded.
     if (const Material *m = m_scene->material(m_material)) {
@@ -318,10 +403,10 @@ void NodesPanel::refreshStatus()
 
 void NodesPanel::rebuildProperties()
 {
-    const Material *m = m_scene->material(m_material);
+    const NodeGraph *m = shownGraph();
     const int nodeId = m ? m_editor->selectedNode() : 0;
-    const GraphNode *node = m ? m->graph.node(nodeId) : nullptr;
-    const NodeType *type = node ? NodeLibrary::instance().type(node->type) : nullptr;
+    const GraphNode *node = m ? m->node(nodeId) : nullptr;
+    const NodeType *type = node ? library().type(node->type) : nullptr;
 
     // Same node, same unlinked inputs: only the values changed, keep the widgets
     // (rebuilding them would interrupt a drag on a label).
@@ -329,8 +414,10 @@ void NodesPanel::rebuildProperties()
     if (type) {
         signature = QString::number(nodeId);
         for (const PortDesc &p : type->inputs) {
-            if (!(p.linkable && m->graph.linkTo(nodeId, p.name)))
+            if (!(p.linkable && m->linkTo(nodeId, p.name)))
                 signature += QLatin1Char(',') + p.name;
+            if (p.type == PortType::Entity) // the chooser shows the entity: rebuilt when it changes
+                signature += QLatin1Char('=') + QString::number(node->values.value(p.name).toDouble());
             if (p.type == PortType::Texture) { // image rows show the file: rebuilt when it changes
                 const TextureValue t = TextureValue::fromVariant(node->values.value(p.name), p.linear);
                 signature += QLatin1Char('=') + t.image + (t.linear ? QStringLiteral("|data") : QString());
@@ -346,7 +433,9 @@ void NodesPanel::rebuildProperties()
                 continue;
             const QVariant v = MaterialCompiler::inputValue(*node, *p);
             const QList<QDoubleSpinBox *> spins = w->findChildren<QDoubleSpinBox *>();
-            if (p->type == PortType::Vec2 && spins.size() == 2) {
+            if (p->type == PortType::Entity) {
+                continue; // the chooser: rebuilt with the entity names
+            } else if (p->type == PortType::Vec2 && spins.size() == 2) {
                 const QVector2D xy = v.value<QVector2D>();
                 QSignalBlocker blockX(spins[0]), blockY(spins[1]);
                 spins[0]->setValue(xy.x());
@@ -383,7 +472,7 @@ void NodesPanel::rebuildProperties()
     m_propertiesLayout->addWidget(title);
 
     for (const PortDesc &p : type->inputs) {
-        if (p.linkable && m->graph.linkTo(nodeId, p.name))
+        if (p.linkable && m->linkTo(nodeId, p.name))
             continue; // linked: its value comes from the link
         if (!p.hasValue() && p.type != PortType::Texture)
             continue; // computed by the shader (expr()): nothing to edit
@@ -394,7 +483,26 @@ void NodesPanel::rebuildProperties()
         l->setContentsMargins(3, 0, 3, 0);
         l->setSpacing(6);
         const QString port = p.name;
-        if (p.type == PortType::Texture) {
+        if (p.type == PortType::Entity) {
+            // An entity of the scene (Object nodes): chosen from a list.
+            auto *label = new QLabel(p.name, row);
+            label->setMinimumWidth(70);
+            auto *choose = new QComboBox(row);
+            choose->addItem(QStringLiteral("None"), 0.0);
+            const double current = value.toDouble();
+            for (const Entity &e : m_scene->entities()) {
+                if (e.id == m_emitter)
+                    continue;
+                choose->addItem(e.name, double(e.id));
+                if (double(e.id) == current)
+                    choose->setCurrentIndex(choose->count() - 1);
+            }
+            connect(choose, &QComboBox::activated, this, [this, nodeId, port, choose](int index) {
+                editValue(nodeId, port, choose->itemData(index).toDouble());
+            });
+            l->addWidget(label);
+            l->addWidget(choose, 1);
+        } else if (p.type == PortType::Texture) {
             // Image: the file (click to choose), color or data, remove.
             const TextureValue t = TextureValue::fromVariant(node->values.value(p.name), p.linear);
             auto *label = new QLabel(p.name, row);
@@ -484,9 +592,9 @@ void NodesPanel::rebuildProperties()
             swatch->setCursor(Qt::PointingHandCursor);
             swatch->setStyleSheet(swatchStyle(toColor(value.value<QVector3D>())));
             connect(swatch, &QPushButton::clicked, this, [this, nodeId, port] {
-                const Material *mat = m_scene->material(m_material);
-                const GraphNode *n = mat ? mat->graph.node(nodeId) : nullptr;
-                const NodeType *t = n ? NodeLibrary::instance().type(n->type) : nullptr;
+                const NodeGraph *graph = shownGraph();
+                const GraphNode *n = graph ? graph->node(nodeId) : nullptr;
+                const NodeType *t = n ? library().type(n->type) : nullptr;
                 const PortDesc *pd = t ? t->input(port) : nullptr;
                 if (!pd)
                     return;
@@ -511,30 +619,29 @@ void NodesPanel::rebuildProperties()
 
 void NodesPanel::editValue(int node, const QString &port, const QVariant &value)
 {
-    const Material *m = m_scene->material(m_material);
-    if (!m || !m->graph.node(node))
+    const NodeGraph *g = shownGraph();
+    if (!g || !g->node(node))
         return;
-    NodeGraph after = m->graph;
+    NodeGraph after = *g;
     after.node(node)->values[port] = value;
-    m_undo->push(new SetMaterialGraphCommand(m_scene, m_material, after, QStringLiteral("Edit node value"),
-                                             QStringLiteral("value:%1:%2").arg(node).arg(port)));
+    pushGraph(after, QStringLiteral("Edit node value"), QStringLiteral("value:%1:%2").arg(node).arg(port));
 }
 
 void NodesPanel::editTexture(int node, const QString &port, const TextureValue &value)
 {
-    const Material *m = m_scene->material(m_material);
-    if (!m || !m->graph.node(node))
+    const NodeGraph *g = shownGraph();
+    if (!g || !g->node(node))
         return;
-    NodeGraph after = m->graph;
+    NodeGraph after = *g;
     after.node(node)->values[port] = value.toVariant();
-    m_undo->push(new SetMaterialGraphCommand(m_scene, m_material, after, QStringLiteral("Set image")));
+    pushGraph(after, QStringLiteral("Set image"));
 }
 
 void NodesPanel::chooseImage(int node, const QString &port)
 {
-    const Material *m = m_scene->material(m_material);
-    const GraphNode *n = m ? m->graph.node(node) : nullptr;
-    const NodeType *type = n ? NodeLibrary::instance().type(n->type) : nullptr;
+    const NodeGraph *g = shownGraph();
+    const GraphNode *n = g ? g->node(node) : nullptr;
+    const NodeType *type = n ? library().type(n->type) : nullptr;
     const PortDesc *p = type ? type->input(port) : nullptr;
     if (!p)
         return;
@@ -552,9 +659,9 @@ void NodesPanel::chooseImage(int node, const QString &port)
 
 void NodesPanel::dropImages(const QStringList &paths, const QPointF &scenePos, int nodeId)
 {
-    const Material *m = m_scene->material(m_material);
+    const Material *m = m_emitter == InvalidEntity ? m_scene->material(m_material) : nullptr;
     if (!m || paths.isEmpty())
-        return;
+        return; // images: materials only
     const NodeLibrary &library = NodeLibrary::instance();
     NodeGraph after = m->graph;
 

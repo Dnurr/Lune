@@ -5,6 +5,7 @@
 #include <QtGlobal>
 #include <optional>
 
+#include "engine/material/nodegraph.h"
 #include "keyframes.h"
 #include "mesh.h"
 #include "transform.h"
@@ -157,6 +158,9 @@ struct ParticleEmitter
     float startSize = 0.08f;          // world units
     float endSize = 0.02f;
     Blend blend = Additive;
+    // What acts on the particles (engine/material/particlegraph.h). No nodes: every Force
+    // component of the scene, like the default graph.
+    NodeGraph graph;
 
     bool operator==(const ParticleEmitter &) const = default;
 };

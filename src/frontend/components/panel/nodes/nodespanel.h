@@ -4,6 +4,8 @@
 #include "engine/scene/entity.h"
 
 class NodeEditorView;
+class NodeLibrary;
+struct NodeGraph;
 class QComboBox;
 class QDoubleSpinBox;
 class QPointF;
@@ -17,7 +19,8 @@ class Scene;
 class Selection;
 class Viewport;
 
-// Node editor for materials (the Shading workspace):
+// Node editor for materials (the Shading workspace), and for particle graphs: with an emitter
+// selected it shows the emitter's graph (ParticleEmitter::graph) instead, + gives it one.
 //   header      the material shown: the selected entity's, chosen from the scene's library
 //               (choosing one assigns it to the selected entity), + for a new one, rename;
 //               a slot chooser when the entity's mesh has several submeshes (materials);
@@ -39,6 +42,14 @@ public:
     MaterialId shownMaterial() const { return m_material; }
 
 private:
+    // The graph shown (the material's or the emitter's) and its node library; null: none.
+    const NodeGraph *shownGraph() const;
+    const NodeLibrary &library() const;
+    // Applies an edit of the shown graph through the undo stack.
+    void pushGraph(const NodeGraph &after, const QString &text, const QString &mergeKey = QString());
+    void refreshEntityNames();     // Object nodes show entity names
+    void newParticleGraph();
+
     void syncFromSelection();      // the selected entity's material (in the current slot), if any
     void refreshSlots();           // slot combo of the selected entity
     void showMaterial(MaterialId id);
@@ -60,6 +71,7 @@ private:
     QUndoStack *m_undo;
     Viewport *m_viewport;
     MaterialId m_material = NoMaterial;
+    EntityId m_emitter = InvalidEntity; // set: showing this emitter's particle graph
     bool m_syncing = false;
     EntityId m_slotEntity = InvalidEntity; // entity m_slot refers to
     int m_slot = 0;                        // its material slot shown

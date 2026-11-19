@@ -42,6 +42,9 @@ public:
 
     int selectedNode() const; // the only selected node, or 0
     void frameAll();
+    // Names shown for entity settings (Object nodes), by entity id.
+    void setEntityNames(const QHash<quint64, QString> &names);
+    QString entityName(const QVariant &value) const;
 
 signals:
     void edited(const NodeGraph &after, const QString &text, const QString &mergeKey);
@@ -89,6 +92,7 @@ private:
 
     QGraphicsScene *m_scene = nullptr;
     const NodeLibrary *m_library = nullptr;
+    QHash<quint64, QString> m_entityNames;
     NodeGraph m_graph;
     bool m_hasGraph = false;
     QHash<int, NodeItem *> m_items;

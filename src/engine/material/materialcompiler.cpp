@@ -14,6 +14,7 @@ QString glslType(PortType t)
     case PortType::Vec2: return QStringLiteral("vec2");
     case PortType::Vec3: return QStringLiteral("vec3");
     case PortType::Texture: return QStringLiteral("sampler2D");
+    case PortType::Entity: return QStringLiteral("float");
     }
     return QString();
 }
@@ -44,11 +45,12 @@ QString swizzle(PortType t)
     }
 }
 
+} // namespace
+
 QString variable(int node, const QString &port)
 {
     return QStringLiteral("n%1_%2").arg(node).arg(port);
 }
-} // namespace
 
 QVariant inputValue(const GraphNode &node, const PortDesc &port)
 {
@@ -56,9 +58,10 @@ QVariant inputValue(const GraphNode &node, const PortDesc &port)
     return v.isValid() ? v : port.defaultValue;
 }
 
-CompiledMaterial compile(const NodeGraph &graph, const NodeLibrary &library)
+GraphCode generate(const NodeGraph &graph, const NodeLibrary &library, const QString &paramArray,
+                   const QString &texturePrefix, const QString &noOutput, const BuiltinNode &builtin)
 {
-    CompiledMaterial result;
+    GraphCode result;
     const GraphNode *output = nullptr;
     for (const GraphNode &n : graph.nodes) {
         if (n.type == QLatin1String(NodeLibrary::OutputType)) {
@@ -67,7 +70,7 @@ CompiledMaterial compile(const NodeGraph &graph, const NodeLibrary &library)
         }
     }
     if (!output) {
-        result.error = QStringLiteral("The material has no Material Output node.");
+        result.error = noOutput;
         return result;
     }
 
@@ -118,13 +121,13 @@ CompiledMaterial compile(const NodeGraph &graph, const NodeLibrary &library)
         if (in.type == PortType::Texture) {
             const int slot = int(result.textures.size());
             result.textures.push_back({ n.id, in.name });
-            return QStringLiteral("materialTexture%1").arg(slot);
+            return texturePrefix + QString::number(slot);
         }
         if (!in.expression.isEmpty())
             return QStringLiteral("(%1)").arg(in.expression);
         const int slot = int(result.params.size());
         result.params.push_back({ n.id, in.name, in.type, in.color });
-        return QStringLiteral("materialParams[%1].%2").arg(slot).arg(swizzle(in.type));
+        return QStringLiteral("%1[%2].%3").arg(paramArray).arg(slot).arg(swizzle(in.type));
     };
 
     QString body;
@@ -132,6 +135,12 @@ CompiledMaterial compile(const NodeGraph &graph, const NodeLibrary &library)
         const NodeType *type = library.type(n->type);
         if (type->isOutput)
             continue;
+        if (type->builtin) {
+            body += QStringLiteral("    // %1 (node %2)\n").arg(type->title).arg(n->id);
+            if (builtin)
+                body += builtin(*n, *type, [&](const PortDesc &in) { return inputExpr(*n, in); });
+            continue;
+        }
         QStringList args;
         for (const PortDesc &in : type->inputs)
             args.append(inputExpr(*n, in));
@@ -143,9 +152,27 @@ CompiledMaterial compile(const NodeGraph &graph, const NodeLibrary &library)
         body += QStringLiteral("    node_%1(%2);\n").arg(type->id, args.join(QStringLiteral(", ")));
     }
     const NodeType *outType = library.type(output->type);
-    body += QStringLiteral("    Surface s;\n");
     for (const PortDesc &in : outType->inputs)
-        body += QStringLiteral("    s.%1 = %2;\n").arg(in.name, inputExpr(*output, in));
+        result.outputInputs[in.name] = inputExpr(*output, in);
+    result.body = body;
+    return result;
+}
+
+CompiledMaterial compile(const NodeGraph &graph, const NodeLibrary &library)
+{
+    CompiledMaterial result;
+    const GraphCode g = generate(graph, library, QStringLiteral("materialParams"), QStringLiteral("materialTexture"),
+                                 QStringLiteral("The material has no Material Output node."));
+    if (!g.error.isEmpty()) {
+        result.error = g.error;
+        return result;
+    }
+    result.params = g.params;
+    result.textures = g.textures;
+    QString body = g.body;
+    body += QStringLiteral("    Surface s;\n");
+    for (const PortDesc &in : library.outputType()->inputs)
+        body += QStringLiteral("    s.%1 = %2;\n").arg(in.name, g.outputInputs.at(in.name));
     body += QStringLiteral("    return s;\n");
 
     if (int(result.params.size()) > MaxParams) {
