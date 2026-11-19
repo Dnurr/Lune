@@ -1,14 +1,12 @@
 #version 440
 
-// Depth of field (HDR, before tonemapping). Author: to be written.
+// Depth of field (HDR, before tonemapping)
 //
 // texA      the scene (linear HDR)
 // depthTex  its depth (see the binding below for turning it into a distance; camera.xy = near, far)
 // params0   x = focus distance (world units), y = f-stop, z = max blur radius in pixels
 //           (already scaled to this image's height), w = focal length in mm (from the
 //           vertical field of view, for a 24 mm tall sensor)
-//
-// Until then: a copy of the scene.
 
 layout(location = 0) in vec2 v_uv;  // 0..1 over the target, (0,0) = top left on every backend
 layout(location = 1) in vec2 v_ndc;
