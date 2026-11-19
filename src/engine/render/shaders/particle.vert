@@ -15,6 +15,7 @@ layout(std140, binding = 0) uniform DrawBuf {
     vec4 cameraUp;     // xyz: its up axis
     vec4 cameraPos;    // xyz: the eye
     vec4 params;       // xy = viewport size in pixels, z = scene time (seconds)
+    vec4 soft;         // x = 1 when the scene's distance is there, y = the emitter's softness (particle.frag)
 };
 
 layout(location = 0) out vec2 v_corner; // -1..1 across the quad

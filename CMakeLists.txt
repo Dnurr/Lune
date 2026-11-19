@@ -147,6 +147,7 @@ qt6_add_shaders(Lune "shaders"
         src/engine/render/shaders/post_fxaa.frag
         src/engine/render/shaders/particle.vert
         src/engine/render/shaders/particle.frag
+        src/engine/render/shaders/scene_distance.frag
 )
 # Compute shaders need GLSL ES 3.1 / GLSL 4.3 where the backend is OpenGL.
 qt6_add_shaders(Lune "compute_shaders"

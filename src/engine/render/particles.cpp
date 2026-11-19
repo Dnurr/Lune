@@ -1,6 +1,7 @@
 #include "particles.h"
 
 #include <QFile>
+#include <QImage>
 #include <QVector2D>
 #include <QtMath>
 #include <rhi/qshaderbaker.h>
@@ -20,8 +21,8 @@ constexpr int kStepSize = 64 + 9 * 16;
 constexpr int kForceSize = 64 + 3 * 16;
 // SimBuf: uvec4 counts, vec4 params, vec4 graphParams[MAX_GRAPH_PARAMS].
 constexpr int kSimUbufSize = 32 + ParticleGraph::MaxParams * 16;
-// DrawBuf: mat4 viewProj, vec4 cameraRight, cameraUp, cameraPos, params.
-constexpr int kDrawUbufSize = 64 + 4 * 16;
+// DrawBuf: mat4 viewProj, vec4 cameraRight, cameraUp, cameraPos, params, soft.
+constexpr int kDrawUbufSize = 64 + 5 * 16;
 constexpr int kWorkgroupSize = 256; // local_size_x in particles.comp
 
 QShader loadShader(const QString &name)
@@ -99,9 +100,20 @@ void ParticleSystem::initialize(QRhi *rhi)
     m_supported = m_rhi->isFeatureSupported(QRhi::Compute) && m_rhi->isFeatureSupported(QRhi::Instancing);
     m_drawUniforms.reset(m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, kDrawUbufSize));
     m_drawUniforms->create();
+    m_nearest.reset(m_rhi->newSampler(QRhiSampler::Nearest, QRhiSampler::Nearest, QRhiSampler::None,
+                                      QRhiSampler::ClampToEdge, QRhiSampler::ClampToEdge));
+    m_nearest->create();
+    // Stand-in for the scene's distance where it doesn't exist: never read (DrawBuf.soft.x = 0).
+    m_distanceStandIn.reset(m_rhi->newTexture(QRhiTexture::RGBA8, QSize(1, 1)));
+    m_distanceStandIn->create();
+    m_pendingUpload = m_rhi->nextResourceUpdateBatch();
+    QImage white(1, 1, QImage::Format_RGBA8888);
+    white.fill(Qt::white);
+    m_pendingUpload->uploadTexture(m_distanceStandIn.get(), white);
     using B = QRhiShaderResourceBinding;
     m_drawSrb.reset(m_rhi->newShaderResourceBindings());
-    m_drawSrb->setBindings({ B::uniformBuffer(0, B::VertexStage | B::FragmentStage, m_drawUniforms.get()) });
+    m_drawSrb->setBindings({ B::uniformBuffer(0, B::VertexStage | B::FragmentStage, m_drawUniforms.get()),
+                             B::sampledTexture(1, B::FragmentStage, m_distanceStandIn.get(), m_nearest.get()) });
     m_drawSrb->create();
     if (!m_supported)
         return;
@@ -178,6 +190,13 @@ void ParticleSystem::release()
     m_layoutStorage.reset();
     m_drawSrb.reset();
     m_drawUniforms.reset();
+    if (m_pendingUpload) {
+        m_pendingUpload->release();
+        m_pendingUpload = nullptr;
+    }
+    m_distanceStandIn.reset();
+    m_nearest.reset();
+    m_sceneDistance = nullptr;
     m_rhi = nullptr;
     m_supported = false;
     m_pending = false;
@@ -266,6 +285,28 @@ void ParticleSystem::retire(Emitter &e)
     retire(e.steps);
     retire(e.forces);
     retire(e.simUniforms);
+    retire(e.drawSrb);
+    retire(e.drawUniforms);
+}
+
+void ParticleSystem::setSceneDistance(QRhiTexture *texture)
+{
+    if (texture == m_sceneDistance)
+        return;
+    m_sceneDistance = texture;
+    for (auto &[id, e] : m_emitters)
+        retire(e.drawSrb); // made again, with the new texture, when drawn
+}
+
+void ParticleSystem::rebuildDrawBindings(Emitter &e)
+{
+    using B = QRhiShaderResourceBinding;
+    retire(e.drawSrb);
+    e.drawSrb.reset(m_rhi->newShaderResourceBindings());
+    e.drawSrb->setBindings({ B::uniformBuffer(0, B::VertexStage | B::FragmentStage, e.drawUniforms.get()),
+                             B::sampledTexture(1, B::FragmentStage,
+                                               m_sceneDistance ? m_sceneDistance : m_distanceStandIn.get(), m_nearest.get()) });
+    e.drawSrb->create();
 }
 
 void ParticleSystem::rebuildBindings(Emitter &e)
@@ -324,6 +365,11 @@ void ParticleSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float s
     double budget = FrameBudget; // shared by the emitters, in weighted particle steps
 
     QRhiResourceUpdateBatch *rub = m_rhi->nextResourceUpdateBatch();
+    if (m_pendingUpload) { // the distance stand-in's pixel, from initialize()
+        rub->merge(m_pendingUpload);
+        m_pendingUpload->release();
+        m_pendingUpload = nullptr;
+    }
     struct Dispatch
     {
         Emitter *emitter;
@@ -395,6 +441,13 @@ void ParticleSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float s
             e.stepsDone = -1;
         }
         e.blend = entity.emitter->blend;
+        e.softness = entity.emitter->softness;
+        if (!e.drawUniforms) {
+            e.drawUniforms.reset(m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, kDrawUbufSize));
+            e.drawUniforms->create();
+        }
+        if (!e.drawSrb)
+            rebuildDrawBindings(e);
         if (e.stepsDone < 0) { // from the start: every particle dead (lifetime 0)
             const QByteArray zeros(qsizetype(capacity) * ParticleSize, '\0');
             rub->uploadStaticBuffer(e.particles.get(), zeros.constData());
@@ -551,7 +604,13 @@ void ParticleSystem::prepareDraw(QRhiResourceUpdateBatch *rub, const QMatrix4x4 
     data[28] = float(viewportPixels.width());
     data[29] = float(viewportPixels.height());
     data[30] = seconds;
-    rub->updateDynamicBuffer(m_drawUniforms.get(), 0, kDrawUbufSize, data);
+    data[32] = m_sceneDistance ? 1.0f : 0.0f; // soft: the scene's distance is there, the emitter's softness
+    for (auto &[id, e] : m_emitters) {
+        if (!e.drawUniforms)
+            continue;
+        data[33] = e.softness;
+        rub->updateDynamicBuffer(e.drawUniforms.get(), 0, kDrawUbufSize, data);
+    }
 }
 
 void ParticleSystem::draw(QRhiCommandBuffer *cb, const QRhiViewport &viewport)
@@ -559,11 +618,11 @@ void ParticleSystem::draw(QRhiCommandBuffer *cb, const QRhiViewport &viewport)
     if (!m_supported || !m_additivePipe)
         return;
     for (auto &[id, e] : m_emitters) {
-        if (!e.particles || e.stepsDone <= 0)
+        if (!e.particles || e.stepsDone <= 0 || !e.drawSrb)
             continue;
         cb->setGraphicsPipeline(e.blend == ParticleEmitter::Additive ? m_additivePipe.get() : m_alphaPipe.get());
         cb->setViewport(viewport);
-        cb->setShaderResources(m_drawSrb.get());
+        cb->setShaderResources(e.drawSrb.get());
         const QRhiCommandBuffer::VertexInput vin(e.particles.get(), 0);
         cb->setVertexInput(0, 1, &vin);
         cb->draw(6, quint32(e.capacity)); // two triangles per particle; dead ones collapse

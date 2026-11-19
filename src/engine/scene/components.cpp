@@ -353,6 +353,7 @@ ComponentDesc emitterComponent()
         prop("start size", "look", PropertyType::Float, 0.002, 0.0, 1e3),
         prop("end size", "look", PropertyType::Float, 0.002, 0.0, 1e3),
         blend,
+        prop("softness", "look", PropertyType::Float, 0.005, 0.0, 100.0),
     };
     c.present = [](const Entity &e) { return e.emitter.has_value(); };
     c.get = [](const Entity &e, int i) -> QVariant {
@@ -379,6 +380,7 @@ ComponentDesc emitterComponent()
         case 16: return double(p.startSize);
         case 17: return double(p.endSize);
         case 18: return int(p.blend);
+        case 19: return double(p.softness);
         }
         return {};
     };
@@ -408,6 +410,7 @@ ComponentDesc emitterComponent()
         case 16: p.startSize = f(0.0, 1e3); break;
         case 17: p.endSize = f(0.0, 1e3); break;
         case 18: p.blend = ParticleEmitter::Blend(qBound(0, v.toInt(), 1)); break;
+        case 19: p.softness = f(0.0, 100.0); break;
         }
     };
     c.add = [](Entity &e) {

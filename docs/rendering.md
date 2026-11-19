@@ -53,7 +53,8 @@ flowchart LR
 | Background | scene (RGBA16F) | `background.vert` + `background.frag` | Only when the Environment's `background` is on: the environment in each view ray's direction. |
 | Grid | scene | `fullscreen.vert` + `grid.frag` | Fullscreen triangle; each pixel intersects its view ray with y = 0. No depth write: it's the background. Premultiplied alpha: opaque with its own sky, or only the lines over an environment background. Colors converted to linear on the CPU. |
 | Meshes | scene | `mesh.vert` + `mesh.frag` | Depth tested, two-sided, Cook-Torrance (GGX) shading with the scene lights and the environment maps. One draw per submesh, each with its material slot's pipeline (node material or default) and binding set. Writes linear values (can exceed 1). Blend materials last, sorted far to near by entity, with premultiplied-alpha blending and no depth writes; closed meshes in two draws, back faces then front faces, so a glass cube's far side never blends over its near side. |
-| Particles | scene | `particle.vert` + `particle.frag`, after `particles.comp` | One instanced draw per emitter, six vertices per particle slot, read from the simulation's buffer; depth tested, no depth writes, additive or premultiplied-alpha blending. See [Particles](#particles). |
+| Scene distance | R32F, scene size | `fullscreen.vert` + `scene_distance.frag` | With particles: the depth as view depth, for soft particles. |
+| Particles | scene (kept: not cleared) | `particle.vert` + `particle.frag`, after `particles.comp` | One instanced draw per emitter, six vertices per particle slot, read from the simulation's buffer; depth tested, no depth writes, additive or premultiplied-alpha blending. See [Particles](#particles). |
 | Outline | scene | `outline.vert` + `outline.frag` | Selected entity only. "Inverted hull": back faces pushed outwards in screen space, front faces culled. Its own binding set per entity (entity uniforms only): on Direct3D 11 a binding set's registers follow the first pipeline that used it, and `mesh.frag` puts the entity block in another register. |
 | Post (HDR) | two HDR targets, a half-size depth of field target, bloom pyramid | `fullscreen.vert` + `post_dof.frag`, `post_dof_composite.frag`, `post_bloom_down/up/composite.frag` | Only the effects that are on; see [Post-processing](#post-processing). |
 | Display | display (RGBA8) | `fullscreen.vert` + `display.frag` | Converts the linear HDR scene to sRGB for the screen. Exposure and tonemapping go here: `params.x` = exposure (EV), `params.y` = operator index (0 none, 1 Reinhard, 2 ACES, 3 AgX), set with `Renderer::setDisplayParams()` from the editor's `DisplaySettings`. |
@@ -351,6 +352,14 @@ Entities with a **Particle Emitter** component (`ParticleEmitter` in `entity.h`)
   dead slots); `emitParticle()` and `updateParticle()` are the author's, and start as stubs
   (every particle standing still at the emitter). `particle.vert` / `particle.frag` start
   as a few-pixel dot per live particle. A particle is dead when its age reaches its lifetime.
+- **Soft particles.** With emitters in the scene, the scene pass ends before the particles:
+  a distance pass (`scene_distance.frag`) turns the depth buffer into view depth (an R32F
+  texture, pixel for pixel), then the scene's targets are drawn into again without clearing
+  them (`PreserveColorContents | PreserveDepthStencilContents`), with the particles. In
+  `particle.frag`, `texelFetch(sceneDistance, ivec2(gl_FragCoord.xy), 0).r` is how far the
+  scene behind is, and `1.0 / gl_FragCoord.w` the particle's own view depth: the emitter's
+  `softness` (DrawBuf.soft.y, one uniform buffer per emitter) says over what distance it fades
+  out against surfaces. Where the depth can't be sampled, a stand-in is bound and soft.x is 0.
 - **Stats.** The overlay shows the particles alive (estimated from the emission: born within
   a lifetime, at most the buffer), the emitters and the steps simulated in the last frame.
 

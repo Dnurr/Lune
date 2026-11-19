@@ -96,7 +96,10 @@ struct ViewSettings
 //      particles -> emitters simulated up to the scene time (ParticleSystem, compute)
 //      shadow  -> depth of every mesh seen from each shadowed light (ShadowMaps)
 //   1. scene   -> environment background (optional), world grid, meshes (depth tested),
-//                 particles, selection outline                             [HDR, linear]
+//                 selection outline                                         [HDR, linear]
+//      distance-> with particles: the scene's depth as view depth (scene_distance.frag), for
+//                 soft particles
+//      particles-> the scene again, kept (not cleared): the particles, depth tested
 //      post    -> HDR effects of the scene camera's Post Process: depth of field, bloom
 //                 (PostProcessor; Rendered shading with ViewSettings::post only)
 //   2. display -> scene converted for the screen (exposure, tonemapping), then the display
@@ -299,6 +302,17 @@ private:
     std::unique_ptr<QRhiTexture> m_sceneDepthTex;     // otherwise: post effects read it (depth of field)
     std::unique_ptr<QRhiTextureRenderTarget> m_sceneRt, m_displayRt, m_blurARt, m_blurBRt;
     std::unique_ptr<QRhiRenderPassDescriptor> m_sceneRp; // color + depth
+    // The scene's targets without clearing them: the particles' pass, after the distance pass.
+    std::unique_ptr<QRhiTextureRenderTarget> m_sceneKeepRt;
+    std::unique_ptr<QRhiRenderPassDescriptor> m_sceneKeepRp;
+    // The scene's view depth (one float per pixel), for soft particles; only where the depth
+    // can be sampled (m_sceneDepthTex).
+    std::unique_ptr<QRhiTexture> m_distanceTex;
+    std::unique_ptr<QRhiTextureRenderTarget> m_distanceRt;
+    std::unique_ptr<QRhiRenderPassDescriptor> m_distanceRp;
+    std::unique_ptr<QRhiShaderResourceBindings> m_distanceSrb;
+    std::unique_ptr<QRhiGraphicsPipeline> m_distancePipe;
+    std::unique_ptr<QRhiBuffer> m_distanceUbuf;
     std::unique_ptr<QRhiRenderPassDescriptor> m_ldrRp;   // RGBA8 color only: display and blur targets
 
     std::unique_ptr<QRhiShaderResourceBindings> m_gridSrb, m_displaySrb, m_downSrb, m_compositeSrb, m_overlaySrb;

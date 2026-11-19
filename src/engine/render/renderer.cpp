@@ -153,6 +153,7 @@ void Renderer::initialize(QRhi *rhi, QRhiRenderTarget *target)
         m_lightsUbuf = ubuf(kLightsUbufSize);
         m_envUbuf = ubuf(kEnvUbufSize);
         m_backgroundUbuf = ubuf(kBackgroundUbufSize);
+        m_distanceUbuf = ubuf(16);
 
         m_ibl.initialize(m_rhi);
         m_post.initialize(m_rhi);
@@ -236,6 +237,34 @@ void Renderer::createSizeDependentResources()
         m_sceneRp.reset(m_sceneRt->newCompatibleRenderPassDescriptor());
     m_sceneRt->setRenderPassDescriptor(m_sceneRp.get());
     m_sceneRt->create();
+    m_sceneKeepRt.reset(m_rhi->newTextureRenderTarget(sceneDesc, QRhiTextureRenderTarget::PreserveColorContents
+                                                                     | QRhiTextureRenderTarget::PreserveDepthStencilContents));
+    if (!m_sceneKeepRp)
+        m_sceneKeepRp.reset(m_sceneKeepRt->newCompatibleRenderPassDescriptor());
+    m_sceneKeepRt->setRenderPassDescriptor(m_sceneKeepRp.get());
+    m_sceneKeepRt->create();
+
+    // The scene's view depth for soft particles: one float per pixel (half floats where 32-bit
+    // ones can't be rendered to).
+    m_distanceSrb.reset();
+    m_distanceRt.reset();
+    m_distanceTex.reset();
+    if (m_sceneDepthTex) {
+        const QRhiTexture::Format distanceFormat =
+            m_rhi->isTextureFormatSupported(QRhiTexture::R32F, QRhiTexture::RenderTarget) ? QRhiTexture::R32F : hdrFormat;
+        m_distanceTex = texture(m_pixelSize, distanceFormat);
+        m_distanceRt.reset(m_rhi->newTextureRenderTarget({ QRhiColorAttachment(m_distanceTex.get()) }));
+        if (!m_distanceRp)
+            m_distanceRp.reset(m_distanceRt->newCompatibleRenderPassDescriptor());
+        m_distanceRt->setRenderPassDescriptor(m_distanceRp.get());
+        m_distanceRt->create();
+        using B = QRhiShaderResourceBinding;
+        m_distanceSrb.reset(m_rhi->newShaderResourceBindings());
+        m_distanceSrb->setBindings({ B::uniformBuffer(0, B::FragmentStage, m_distanceUbuf.get()),
+                                     B::sampledTexture(1, B::FragmentStage, m_sceneDepthTex.get(), m_sampler.get()) });
+        m_distanceSrb->create();
+    }
+    m_particles.setSceneDistance(m_distanceTex.get());
 
     // Display and blur targets have the same format: one render pass descriptor for all three.
     auto ldrTarget = [this](QRhiTexture *t) {
@@ -383,7 +412,10 @@ void Renderer::createPipelines(QRhiRenderTarget *target)
     }
     m_displayPipe = pipeline(fullscreen, QStringLiteral("display.frag"), m_displaySrb.get(), m_ldrRp.get(), 1);
     m_post.createPipelines(fullscreen);
-    m_particles.createPipelines(m_sceneRp.get(), 1);
+    m_particles.createPipelines(m_sceneKeepRp.get(), 1);
+    m_distancePipe.reset();
+    if (m_distanceSrb)
+        m_distancePipe = pipeline(fullscreen, QStringLiteral("scene_distance.frag"), m_distanceSrb.get(), m_distanceRp.get(), 1);
     // The overlay is interface, not scene: drawn after the display conversion, in display colors,
     // so exposure/tonemapping never touch it. It's still before the blur, so panels blur it too.
     m_overlayPipe = pipeline(loadShader(QStringLiteral("overlay.vert")), QStringLiteral("overlay.frag"),
@@ -397,6 +429,14 @@ void Renderer::createPipelines(QRhiRenderTarget *target)
 void Renderer::release()
 {
     m_particles.release();
+    m_distancePipe.reset();
+    m_distanceSrb.reset();
+    m_distanceRt.reset();
+    m_distanceTex.reset();
+    m_distanceRp.reset();
+    m_distanceUbuf.reset();
+    m_sceneKeepRt.reset();
+    m_sceneKeepRp.reset();
     m_materialShaders.clear();
     m_meshes.clear();
     m_entities.clear();
@@ -1200,6 +1240,14 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
     m_stats.particles = m_particles.particleCount();
     m_stats.particleSteps = m_particles.stepsLastFrame();
     m_stats.drawCalls += m_stats.emitters;
+    const bool particlePass = m_stats.emitters > 0;
+    const bool distancePass = particlePass && m_distancePipe;
+    if (distancePass) {
+        const float planes[4] = { camera.nearPlane, camera.farPlane, 0.0f, 0.0f };
+        rub->updateDynamicBuffer(m_distanceUbuf.get(), 0, 16, planes);
+        m_stats.drawCalls += 1;
+    }
+    m_stats.renderPasses += (particlePass ? 1 : 0) + (distancePass ? 1 : 0);
     m_shadows.render(cb, rub, casters);
 
     // 1. Scene (HDR, linear): environment and grid as background (no depth), opaque meshes,
@@ -1216,7 +1264,6 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
     if (!wireOnly) {
         for (const SurfaceDraw &s : surfaces)
             drawMesh(s.pipe, s.srb, s.mesh, s.firstIndex, s.indexCount);
-        m_particles.draw(cb, fullViewport);
     }
     QRhiGraphicsPipeline *wirePipe = wireOnly ? m_wirePipe.get() : m_view.wireOverlay ? m_wireOverPipe.get() : nullptr;
     if (wirePipe) {
@@ -1228,6 +1275,19 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
             drawMesh(m_outlinePipe.get(), d.outlineSrb, d.mesh, 0, d.mesh->indexCount);
     }
     cb->endPass();
+
+    //    Particles: the scene's view depth first (soft particles read it), then the scene
+    //    again without clearing it, the particles depth tested against the meshes.
+    if (particlePass) {
+        if (distancePass) {
+            cb->beginPass(m_distanceRt.get(), black, { 1.0f, 0 });
+            fullscreen(m_distancePipe.get(), m_distanceSrb.get(), m_pixelSize);
+            cb->endPass();
+        }
+        cb->beginPass(m_sceneKeepRt.get(), black, { 1.0f, 0 });
+        m_particles.draw(cb, fullViewport);
+        cb->endPass();
+    }
 
     //    Post: HDR effects (depth of field, bloom) on the scene
     QRhiTexture *hdr = post ? m_post.renderHdr(cb, m_sceneTex.get()) : m_sceneTex.get();

@@ -71,6 +71,9 @@ public:
                      const QVector3D &eye, const QSize &viewportPixels, float seconds);
     // Draws every emitter, inside the scene pass (depth tested, not written).
     void draw(QRhiCommandBuffer *cb, const QRhiViewport &viewport);
+    // The scene's view depth per pixel (Renderer's distance pass), sampled by particle.frag for
+    // soft particles; null where the depth can't be sampled (a stand-in is bound, DrawBuf.soft.x = 0).
+    void setSceneDistance(QRhiTexture *texture);
 
     // Some emitter still has steps to simulate (a long jump): render another frame.
     bool pending() const { return m_pending; }
@@ -110,11 +113,15 @@ private:
         int forceCapacity = 0;
         std::unique_ptr<QRhiBuffer> simUniforms;
         std::unique_ptr<QRhiShaderResourceBindings> simSrb;
+        std::unique_ptr<QRhiBuffer> drawUniforms;  // DrawBuf: the camera, and this emitter's softness
+        std::unique_ptr<QRhiShaderResourceBindings> drawSrb;
+        float softness = 0.0f;
         int stepsDone = -1;          // steps already in the buffer (-1: must clear it first)
         double born = 0.0;           // particles born by the end of the last step
         bool seen = false;           // in this frame's scene
     };
     void rebuildBindings(Emitter &e);
+    void rebuildDrawBindings(Emitter &e);
     // Keeps a replaced GPU resource alive until two frames later, so nothing recorded for
     // the frame (or still in flight) can see it destroyed.
     void retire(std::unique_ptr<QRhiBuffer> &buffer);
@@ -140,8 +147,12 @@ private:
     std::unique_ptr<QRhiComputePipeline> m_simPipe;
     std::unique_ptr<QRhiShaderResourceBindings> m_simLayout;
     std::unique_ptr<QRhiBuffer> m_layoutUniforms, m_layoutStorage; // for the layout SRB only
-    std::unique_ptr<QRhiBuffer> m_drawUniforms;
-    std::unique_ptr<QRhiShaderResourceBindings> m_drawSrb;
+    std::unique_ptr<QRhiBuffer> m_drawUniforms;            // for the layout SRB only
+    std::unique_ptr<QRhiShaderResourceBindings> m_drawSrb; // layout of the emitters' draw SRBs
+    QRhiTexture *m_sceneDistance = nullptr;                // not owned; null: m_distanceStandIn
+    std::unique_ptr<QRhiTexture> m_distanceStandIn;
+    std::unique_ptr<QRhiSampler> m_nearest;
+    QRhiResourceUpdateBatch *m_pendingUpload = nullptr;    // the stand-in's pixel
     std::unique_ptr<QRhiGraphicsPipeline> m_additivePipe, m_alphaPipe;
     std::unordered_map<EntityId, Emitter> m_emitters;
     std::vector<std::unique_ptr<QRhiResource>> m_retired, m_retiredBefore; // this frame's, the last one's

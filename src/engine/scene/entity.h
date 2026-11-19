@@ -158,6 +158,7 @@ struct ParticleEmitter
     float startSize = 0.08f;          // world units
     float endSize = 0.02f;
     Blend blend = Additive;
+    float softness = 0.2f;            // world units: particles fade out this close to the surfaces behind them
     // What acts on the particles (engine/material/particlegraph.h). No nodes: every Force
     // component of the scene, like the default graph.
     NodeGraph graph;
