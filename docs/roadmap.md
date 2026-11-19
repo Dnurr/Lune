@@ -101,7 +101,8 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 - [x] Specular anti-aliasing in `mesh.frag` (normal variance added to the GGX roughness) (Author)
 - [ ] Depth of field (Author)
 - [x] Vignette, chromatic aberration, film grain (Author)
-- [ ] Temporal anti-aliasing or FXAA (Author)
+- [x] FXAA, the first display effect: edge search along the luma gradient, subpixel blend (Author)
+- [ ] Temporal anti-aliasing (Author)
 
 ## 4. Timeline
 
