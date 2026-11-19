@@ -7,6 +7,11 @@
 // params0   x = focus distance (world units), y = f-stop, z = max blur radius in pixels
 //           (already scaled to this image's height), w = focal length in mm (from the
 //           vertical field of view, for a 24 mm tall sensor)
+//
+// Runs at half size (inputSize and params0.z are the half size's; texA and depthTex are
+// full size, sampled by uv). post_dof_composite.frag then mixes the result with the sharp
+// scene, by each full-size pixel's own circle of confusion and the alpha written here: the
+// blur nearer objects spread onto the pixel.
 
 layout(location = 0) in vec2 v_uv;  // 0..1 over the target, (0,0) = top left on every backend
 layout(location = 1) in vec2 v_ndc;
@@ -62,6 +67,7 @@ void main()
     float radScale = max(RAD_SCALE, params0.z / 16.0);
     float radius   = radScale;
     float tot      = 1.0;
+    float bleed    = 0.0; // largest circle of confusion spreading onto this pixel from in front
     for (float ang = 0.0; radius < params0.z; ang += GOLDEN_ANGLE)
     {
         vec2 uv           = v_uv + vec2(cos(ang), sin(ang)) * inputSize.zw * radius;
@@ -70,10 +76,12 @@ void main()
         float sampleCoC   = CoC(sampleDepth);
         if (sampleDepth > centerDepth) sampleCoC = clamp(sampleCoC, 0.0, centerCoC * 2.0);
         float m = smoothstep(radius - 0.5, radius + 0.5, sampleCoC);
+        if (sampleDepth < centerDepth) bleed = max(bleed, m * sampleCoC);
         col    += mix(col / tot, sampleCol, m);
         tot    += 1.0;
         radius += radScale / radius;
     }
 
-    fragColor = vec4(col / tot, 1.0);
+    // alpha: blur that nearer objects spread onto this pixel, for post_dof_composite.frag
+    fragColor = vec4(col / tot, bleed);
 }
