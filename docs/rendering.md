@@ -329,6 +329,13 @@ Entities with a **Particle Emitter** component (`ParticleEmitter` in `entity.h`)
   replacing whatever was there, and is born at a time spread evenly inside its step, then
   simulated for the rest of that step: streams stay smooth at any rate. `random(index,
   channel)` gives each particle its own repeatable random numbers (with the emitter's seed).
+- **Forces.** Entities with a **Force** component (`ParticleForce` in `entity.h`: gravity,
+  wind, turbulence, attractor, vortex) act on every emitter. Any entity can carry one, so a
+  force on a mesh or an emitter follows it; its axis is the entity's local +Y. Each step
+  lists the forces as they are at that frame in a forces buffer (`Force` in
+  `particles.comp`: transform, type and settings), and `Step.forces` gives its range; editing
+  a force simulates again like editing the emitter. What each type does is
+  `forceAcceleration()`, the author's.
 - **Shaders.** `particles.comp`'s `main()` is the driver (which particle a slot gets, aging,
   dead slots); `emitParticle()` and `updateParticle()` are the author's, and start as stubs
   (every particle standing still at the emitter). `particle.vert` / `particle.frag` start

@@ -30,6 +30,11 @@ class Scene;
 // Emission: the number of particles born by the end of step k is the sum of rate x dt over the
 // steps (kept as a double on the CPU), particle n (counted from the start) lives in slot
 // n % maxParticles, and is born at a time spread evenly inside its step.
+//
+// Forces: every enabled Force component of the scene acts on every emitter. Each step lists
+// its forces (as they are at that step: animated, moving with their entity) in a forces
+// buffer; Step.forces says which records are its. Editing a force simulates again, like
+// editing the emitter.
 class ParticleSystem
 {
 public:
@@ -64,10 +69,13 @@ private:
     struct Emitter
     {
         Entity reference;            // the entity at the first frame: a change means simulating again
+        std::vector<Entity> forceReference; // the same for the scene's forces
         ParticleEmitter::Blend blend = ParticleEmitter::Additive;
         int capacity = 0;
         std::unique_ptr<QRhiBuffer> particles;     // capacity * ParticleSize
         std::unique_ptr<QRhiBuffer> steps;         // MaxStepsPerFrame steps, made once
+        std::unique_ptr<QRhiBuffer> forces;        // forceCapacity force records, grows when needed
+        int forceCapacity = 0;
         std::unique_ptr<QRhiBuffer> simUniforms;
         std::unique_ptr<QRhiShaderResourceBindings> simSrb;
         int stepsDone = -1;          // steps already in the buffer (-1: must clear it first)

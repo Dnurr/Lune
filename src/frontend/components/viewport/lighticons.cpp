@@ -78,6 +78,59 @@ void append(const Scene &scene, const OrbitCamera &camera, const QSizeF &viewSiz
         }
     }
     for (const Entity &e : scene.entities()) {
+        if (!e.force)
+            continue;
+        bool inFront = false;
+        const QPointF c = camera.project(e.transform.position, viewSize, &inFront);
+        if (!inFront)
+            continue;
+        QColor ring = e.id == selected ? kRingSelected : kRing;
+        QColor mark(0x8F, 0xB0, 0xF2);
+        if (!e.force->enabled) {
+            ring = dimmed(ring);
+            mark = dimmed(mark);
+        }
+        const ParticleForce::Type type = e.force->type;
+        // An arrow along the axis where the force has a direction: down it for gravity, up it
+        // for wind and the vortex (whose axis it is).
+        if (type == ParticleForce::Gravity || type == ParticleForce::Wind || type == ParticleForce::Vortex) {
+            QVector3D axis = e.transform.matrix().mapVector(QVector3D(0.0f, 1.0f, 0.0f)).normalized();
+            if (type == ParticleForce::Gravity)
+                axis = -axis;
+            bool tipInFront = false;
+            const QPointF far = camera.project(e.transform.position + axis, viewSize, &tipInFront);
+            QPointF d = far - c;
+            const double len = std::hypot(d.x(), d.y());
+            if (tipInFront && len > 1e-3) {
+                d /= len;
+                const QPointF end = c + d * kDirectionPixels;
+                segment(out, c + d * (kRingRadius + 3.0), end, kLine, ring);
+                const QPointF n(-d.y(), d.x());
+                triangle(out, end + d * 7.0, end + n * 4.0, end - n * 4.0, ring);
+            }
+        }
+        OverlayDraw::ring(out, c, kRingRadius, kLine, ring);
+        if (type == ParticleForce::Attractor) { // ticks pointing in
+            for (int i = 0; i < 4; ++i) {
+                const double a = M_PI * 0.5 * i + M_PI * 0.25;
+                const QPointF r(std::cos(a), std::sin(a));
+                segment(out, c + r * (kRingRadius + 7.0), c + r * (kRingRadius + 2.0), kLine, ring);
+            }
+        } else if (type == ParticleForce::Vortex || type == ParticleForce::Turbulence) { // a swirl inside
+            const int turns = type == ParticleForce::Vortex ? 1 : 2;
+            QPointF last = c;
+            for (int i = 1; i <= 12; ++i) {
+                const double t = i / 12.0;
+                const double a = t * M_PI * 2.0 * turns;
+                const QPointF p = c + QPointF(std::cos(a), std::sin(a)) * (kRingRadius * 0.75 * t);
+                segment(out, last, p, kLine, mark);
+                last = p;
+            }
+        } else {
+            disc(out, c, kDisc * 0.6, mark);
+        }
+    }
+    for (const Entity &e : scene.entities()) {
         if (!e.emitter)
             continue;
         bool inFront = false;
@@ -170,7 +223,7 @@ EntityId hitTest(const Scene &scene, const OrbitCamera &camera, const QSizeF &vi
         }
     }
     for (const Entity &e : scene.entities()) {
-        if (!e.light && !e.emitter)
+        if (!e.light && !e.emitter && !e.force)
             continue;
         bool inFront = false;
         const QPointF c = camera.project(e.transform.position, viewSize, &inFront);

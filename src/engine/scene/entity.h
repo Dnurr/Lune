@@ -161,6 +161,46 @@ struct ParticleEmitter
     bool operator==(const ParticleEmitter &) const = default;
 };
 
+// A force on the scene's particles (engine/render/particles.h). Where it is and which way
+// it points come from the entity's transform: its axis is local +Y. Any entity can carry one
+// (an empty, a mesh, an emitter), so a force follows what it's on.
+//
+//   Gravity     acceleration `strength` along -axis (down, unrotated)
+//   Wind        particles are dragged toward a velocity of `strength` along +axis, by `drag`
+//   Turbulence  swirling noise of `strength` (curl noise: `frequency`, changing at `speed`)
+//   Attractor   acceleration `strength` toward the position (negative: pushes away)
+//   Vortex      spin of `strength` around the axis line through the position, `pull`
+//               toward the axis, `lift` along it, plus local swirls of `noise` (the noise
+//               settings): hurricanes, smoke columns, whirlpools
+//
+// `radius` limits the reach (from the position; for the vortex, from its axis), 0 = everywhere;
+// `falloff` is the outer part of the radius where it fades out.
+struct ParticleForce
+{
+    enum Type
+    {
+        Gravity = 0,
+        Wind = 1,
+        Turbulence = 2,
+        Attractor = 3,
+        Vortex = 4,
+    };
+
+    bool enabled = true;
+    Type type = Gravity;
+    float strength = 9.81f;
+    float radius = 0.0f;   // world units, 0 = no limit
+    float falloff = 0.5f;  // 0..1 of the radius
+    float drag = 1.0f;     // wind: per second
+    float frequency = 1.0f; // noise: features per world unit
+    float speed = 0.5f;    // noise: change per second
+    float noise = 0.0f;    // vortex: strength of its local swirls
+    float pull = 0.0f;     // vortex: toward the axis (negative: outward), units / s^2
+    float lift = 0.0f;     // vortex: along the axis, units / s^2
+
+    bool operator==(const ParticleForce &) const = default;
+};
+
 struct Entity
 {
     EntityId id = InvalidEntity;
@@ -201,6 +241,7 @@ struct Entity
     std::optional<Camera> camera;           // set = this entity is a camera
     std::optional<PostProcess> postProcess; // effects of the image rendered by this entity's camera
     std::optional<ParticleEmitter> emitter; // set = this entity emits particles
+    std::optional<ParticleForce> force;     // set = this entity pushes particles around
 
     // Keyframes of its properties (engine/scene/animation.h), one track per animated property.
     std::vector<AnimationTrack> animation;

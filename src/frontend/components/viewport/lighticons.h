@@ -20,6 +20,8 @@ class Scene;
 //                       triangle on top showing which way is up
 //   particle emitter:   ring with three sparks in its start color, and a line showing
 //                       where the particles go (local +Y)
+//   force:              ring with a mark of its type (dot, swirl, inward ticks), and an
+//                       arrow along its axis for gravity, wind and the vortex
 namespace LightIcons
 {
 // Click distance from the icon center (or a camera's lines), in pixels.

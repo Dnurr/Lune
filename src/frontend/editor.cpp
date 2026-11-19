@@ -344,6 +344,45 @@ void Editor::createMenus()
         e.emitter = ParticleEmitter {};
         m_undo->push(new AddEntityCommand(m_scene, m_selection, e));
     });
+    QMenu *forces = m_addMenu->addMenu("Force");
+    auto addForce = [this](const QString &name, ParticleForce force, QVector3D rotation = {}) {
+        Entity e;
+        e.name = m_scene->uniqueName(name);
+        e.transform.rotation = rotation;
+        e.force = force;
+        m_undo->push(new AddEntityCommand(m_scene, m_selection, e));
+    };
+    forces->addAction("Gravity", this, [addForce] { addForce(QStringLiteral("Gravity"), ParticleForce {}); });
+    forces->addAction("Wind", this, [addForce] {
+        ParticleForce f;
+        f.type = ParticleForce::Wind;
+        f.strength = 3.0f;
+        addForce(QStringLiteral("Wind"), f, QVector3D(0.0f, 0.0f, -90.0f)); // blowing along +X
+    });
+    forces->addAction("Turbulence", this, [addForce] {
+        ParticleForce f;
+        f.type = ParticleForce::Turbulence;
+        f.strength = 2.0f;
+        f.frequency = 0.5f;
+        addForce(QStringLiteral("Turbulence"), f);
+    });
+    forces->addAction("Attractor", this, [addForce] {
+        ParticleForce f;
+        f.type = ParticleForce::Attractor;
+        f.strength = 5.0f;
+        f.radius = 3.0f;
+        addForce(QStringLiteral("Attractor"), f);
+    });
+    forces->addAction("Vortex", this, [addForce] {
+        ParticleForce f;
+        f.type = ParticleForce::Vortex;
+        f.strength = 3.0f;
+        f.radius = 3.0f;
+        f.pull = 1.0f;
+        f.lift = 1.0f;
+        f.noise = 0.5f;
+        addForce(QStringLiteral("Vortex"), f);
+    });
     m_addMenu->addSeparator();
     m_addMenu->addAction(importAction);
 

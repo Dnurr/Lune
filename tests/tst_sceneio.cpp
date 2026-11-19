@@ -201,6 +201,36 @@ private slots:
         QCOMPARE(loaded.entities()[0].emitter, e.emitter);
     }
 
+    void forceRoundTrip()
+    {
+        QTemporaryDir dir;
+        const QString path = dir.filePath("force.lune");
+
+        Scene scene;
+        Entity e;
+        e.name = QStringLiteral("Hurricane");
+        e.force = ParticleForce {};
+        e.force->type = ParticleForce::Vortex;
+        e.force->strength = 4.5f;
+        e.force->radius = 6.0f;
+        e.force->pull = -1.25f;
+        e.force->lift = 2.0f;
+        e.force->noise = 0.75f;
+        scene.createEntity(e);
+
+        QString error;
+        QVERIFY2(SceneIO::save(scene, path, {}, &error), qPrintable(error));
+        const QJsonObject json = readJson(path)["entities"].toArray()[0].toObject()["components"].toObject()["Force"].toObject();
+        QCOMPARE(json["type"].toString(), QStringLiteral("vortex"));
+        QCOMPARE(json["vortex.pull"].toDouble(), -1.25);
+
+        Scene loaded;
+        QStringList warnings;
+        QVERIFY2(SceneIO::load(loaded, path, nullptr, &warnings, &error), qPrintable(error));
+        QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join('\n')));
+        QCOMPARE(loaded.entities()[0].force, e.force);
+    }
+
     void environmentRoundTripWithRelativeImage()
     {
         QTemporaryDir dir;

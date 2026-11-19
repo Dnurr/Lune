@@ -143,7 +143,7 @@ ComponentDesc lightComponent()
             e.light = Light {};
     };
     c.remove = [](Entity &e) { e.light.reset(); };
-    c.canAdd = [](const Entity &e) { return !e.light && !e.camera && !e.emitter; };
+    c.canAdd = [](const Entity &e) { return !e.light && !e.camera && !e.emitter && !e.force; };
     return c;
 }
 ComponentDesc environmentComponent()
@@ -198,7 +198,7 @@ ComponentDesc environmentComponent()
             e.environment = Environment {};
     };
     c.remove = [](Entity &e) { e.environment.reset(); };
-    c.canAdd = [](const Entity &e) { return !e.environment && !e.camera && !e.emitter; };
+    c.canAdd = [](const Entity &e) { return !e.environment && !e.camera && !e.emitter && !e.force; };
     return c;
 }
 ComponentDesc cameraComponent()
@@ -240,7 +240,7 @@ ComponentDesc cameraComponent()
         e.camera.reset();
         e.postProcess.reset(); // only means something on a camera
     };
-    c.canAdd = [](const Entity &e) { return !e.mesh && !e.light && !e.environment && !e.emitter; };
+    c.canAdd = [](const Entity &e) { return !e.mesh && !e.light && !e.environment && !e.emitter && !e.force; };
     return c;
 }
 
@@ -418,12 +418,87 @@ ComponentDesc emitterComponent()
     c.canAdd = [](const Entity &e) { return !e.mesh && !e.light && !e.environment && !e.camera; };
     return c;
 }
+ComponentDesc forceComponent()
+{
+    auto prop = [](const char *name, const char *group, PropertyType type, double step = 0.01, double lo = -1e6,
+                   double hi = 1e6) {
+        PropertyDesc d { QString::fromLatin1(name), type, step, lo, hi };
+        d.group = QString::fromLatin1(group);
+        return d;
+    };
+    PropertyDesc type = prop("type", "", PropertyType::Enum);
+    type.options = { QStringLiteral("gravity"), QStringLiteral("wind"), QStringLiteral("turbulence"),
+                     QStringLiteral("attractor"), QStringLiteral("vortex") };
+
+    ComponentDesc c;
+    c.name = QStringLiteral("Force");
+    c.properties = {
+        prop("enabled", "", PropertyType::Bool),
+        type,
+        prop("strength", "", PropertyType::Float, 0.02, -1e5, 1e5),
+        prop("radius", "reach", PropertyType::Float, 0.02, 0.0, 1e5),
+        prop("falloff", "reach", PropertyType::Float, 0.005, 0.0, 1.0),
+        prop("drag", "wind", PropertyType::Float, 0.01, 0.0, 100.0),
+        prop("frequency", "noise", PropertyType::Float, 0.01, 0.0, 100.0),
+        prop("speed", "noise", PropertyType::Float, 0.01, 0.0, 100.0),
+        prop("amount", "vortex", PropertyType::Float, 0.02, 0.0, 1e5),
+        prop("pull", "vortex", PropertyType::Float, 0.02, -1e5, 1e5),
+        prop("lift", "vortex", PropertyType::Float, 0.02, -1e5, 1e5),
+    };
+    c.present = [](const Entity &e) { return e.force.has_value(); };
+    c.get = [](const Entity &e, int i) -> QVariant {
+        if (!e.force)
+            return {};
+        const ParticleForce &f = *e.force;
+        switch (i) {
+        case 0: return f.enabled;
+        case 1: return int(f.type);
+        case 2: return double(f.strength);
+        case 3: return double(f.radius);
+        case 4: return double(f.falloff);
+        case 5: return double(f.drag);
+        case 6: return double(f.frequency);
+        case 7: return double(f.speed);
+        case 8: return double(f.noise);
+        case 9: return double(f.pull);
+        case 10: return double(f.lift);
+        }
+        return {};
+    };
+    c.set = [](Entity &e, int i, const QVariant &v) {
+        if (!e.force)
+            return;
+        ParticleForce &f = *e.force;
+        const double x = v.toDouble();
+        auto clamp = [x](double lo, double hi) { return float(qBound(lo, x, hi)); };
+        switch (i) {
+        case 0: f.enabled = v.toBool(); break;
+        case 1: f.type = ParticleForce::Type(qBound(0, v.toInt(), 4)); break;
+        case 2: f.strength = clamp(-1e5, 1e5); break;
+        case 3: f.radius = clamp(0.0, 1e5); break;
+        case 4: f.falloff = clamp(0.0, 1.0); break;
+        case 5: f.drag = clamp(0.0, 100.0); break;
+        case 6: f.frequency = clamp(0.0, 100.0); break;
+        case 7: f.speed = clamp(0.0, 100.0); break;
+        case 8: f.noise = clamp(0.0, 1e5); break;
+        case 9: f.pull = clamp(-1e5, 1e5); break;
+        case 10: f.lift = clamp(-1e5, 1e5); break;
+        }
+    };
+    c.add = [](Entity &e) {
+        if (!e.force)
+            e.force = ParticleForce {};
+    };
+    c.remove = [](Entity &e) { e.force.reset(); };
+    c.canAdd = [](const Entity &e) { return !e.light && !e.environment && !e.camera; };
+    return c;
+}
 } // namespace
 
 const std::vector<ComponentDesc> &components()
 {
     static const std::vector<ComponentDesc> all = { transformComponent(), meshComponent(), materialComponent(), lightComponent(),
                                                     environmentComponent(), cameraComponent(), postProcessComponent(),
-                                                    emitterComponent() };
+                                                    emitterComponent(), forceComponent() };
     return all;
 }

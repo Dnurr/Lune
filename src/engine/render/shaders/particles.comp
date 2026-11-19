@@ -11,6 +11,7 @@
 //   emitParticle()    a new particle (Author): where it starts, how fast, how long it lives.
 //   updateParticle()  one step of a live particle (Author): motion, forces, color and size
 //                     over its life.
+//   forceAcceleration()  what one Force component does to a particle (Author).
 //
 // A particle is dead when its age reaches its lifetime (position.w >= velocity.w). Slots
 // start zeroed: dead.
@@ -39,8 +40,24 @@ struct Step
     vec4  life;       // x = lifetime, y = lifetime variation (0..1), z = start size, w = end size
     vec4  startColor; // rgb = linear color x intensity, a = opacity, at birth
     vec4  endColor;   // the same at death
+    uvec4 forces;     // this step's records in forces[]: x = first, y = count
 };
 layout(std430, binding = 2) readonly buffer Steps { Step steps[]; };
+
+// A Force component during one step (ParticleForce in engine/scene/entity.h). Its axis is
+// the entity's local +Y: normalize(mat3(transform) * vec3(0, 1, 0)); its position is
+// transform[3].xyz. Every enabled force of the scene acts on every emitter. For each step:
+//     for (uint i = s.forces.x; i < s.forces.x + s.forces.y; ++i)
+//         acceleration += forceAcceleration(forces[i], p, time);
+struct Force
+{
+    mat4 transform; // local -> world of the entity carrying it
+    vec4 params0;   // x = type (0 gravity, 1 wind, 2 turbulence, 3 attractor, 4 vortex),
+                    // y = strength, z = radius (0: everywhere), w = falloff (0..1 of the radius)
+    vec4 params1;   // x = drag (wind), y = frequency, z = speed (noise), w = noise (vortex swirls)
+    vec4 params2;   // x = pull (vortex, toward the axis), y = lift (vortex, along the axis)
+};
+layout(std430, binding = 3) readonly buffer Forces { Force forces[]; };
 
 layout(std140, binding = 0) uniform SimBuf {
     uvec4 counts; // x = slots (max particles), y = steps in this dispatch, z = seed
@@ -119,6 +136,17 @@ void emitParticle(inout Particle p, Step s, uint index, float time)
 
     p.velocity.xyz = dir * s.velocity.x * (1.0 - s.velocity.y * random(index, 3u));
     p.velocity.w = s.life.x * (1.0 - s.life.y * random(index, 4u));
+}
+
+// The acceleration (units / s^2) force `f` gives particle `p` at `time`. The stub gives none.
+vec3 forceAcceleration(Force f, Particle p, float time)
+{
+    // TODO (Author): by f.params0.x: gravity along -axis; wind toward a velocity of strength
+    // along +axis (drag x (wind velocity - particle velocity)); turbulence as curl noise;
+    // attractor toward the position; vortex: spin around the axis line, pull toward it, lift
+    // along it, plus local swirls. Then the reach: fade out over the outer `falloff` part of
+    // `radius` (from the position, or from the axis for the vortex).
+    return vec3(0.0);
 }
 
 // One step of `dt` seconds for a live particle, ending at `time`. The driver adds dt to the

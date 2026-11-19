@@ -11,8 +11,10 @@
 namespace
 {
 // Step in particles.comp (std430): mat4 emitter, vec4 time, uvec4 spawn, vec4 shape,
-// vec4 velocity, vec4 life, vec4 startColor, vec4 endColor.
-constexpr int kStepSize = 64 + 7 * 16;
+// vec4 velocity, vec4 life, vec4 startColor, vec4 endColor, uvec4 forces.
+constexpr int kStepSize = 64 + 8 * 16;
+// Force in particles.comp (std430): mat4 transform, vec4 params0, params1, params2.
+constexpr int kForceSize = 64 + 3 * 16;
 // SimBuf: uvec4 counts, vec4 params.
 constexpr int kSimUbufSize = 32;
 // DrawBuf: mat4 viewProj, vec4 cameraRight, cameraUp, cameraPos, params.
@@ -56,6 +58,35 @@ bool sameSimulation(const Entity &a, const Entity &b)
 {
     return a.emitter == b.emitter && a.transform == b.transform && a.animation == b.animation;
 }
+
+bool sameForces(const std::vector<Entity> &a, const std::vector<Entity> &b)
+{
+    if (a.size() != b.size())
+        return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (a[i].id != b[i].id || a[i].force != b[i].force || a[i].transform != b[i].transform
+            || a[i].animation != b[i].animation)
+            return false;
+    }
+    return true;
+}
+
+// One Force record (see kForceSize).
+void putForce(float *v, const Entity &e)
+{
+    const ParticleForce &f = *e.force;
+    std::memcpy(v, e.transform.matrix().constData(), 64);
+    v[16] = float(f.type); // params0: type, strength, radius, falloff
+    v[17] = f.strength;
+    v[18] = f.radius;
+    v[19] = f.falloff;
+    v[20] = f.drag;        // params1: drag, frequency, speed, noise
+    v[21] = f.frequency;
+    v[22] = f.speed;
+    v[23] = f.noise;
+    v[24] = f.pull;        // params2: pull, lift
+    v[25] = f.lift;
+}
 } // namespace
 
 void ParticleSystem::initialize(QRhi *rhi)
@@ -74,12 +105,13 @@ void ParticleSystem::initialize(QRhi *rhi)
 
     m_layoutUniforms.reset(m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, kSimUbufSize));
     m_layoutUniforms->create();
-    m_layoutStorage.reset(m_rhi->newBuffer(QRhiBuffer::Static, QRhiBuffer::StorageBuffer, kStepSize));
+    m_layoutStorage.reset(m_rhi->newBuffer(QRhiBuffer::Static, QRhiBuffer::StorageBuffer, kStepSize + kForceSize));
     m_layoutStorage->create();
     m_simLayout.reset(m_rhi->newShaderResourceBindings());
     m_simLayout->setBindings({ B::uniformBuffer(0, B::ComputeStage, m_layoutUniforms.get()),
                                B::bufferLoadStore(1, B::ComputeStage, m_layoutStorage.get()),
-                               B::bufferLoad(2, B::ComputeStage, m_layoutStorage.get()) });
+                               B::bufferLoad(2, B::ComputeStage, m_layoutStorage.get()),
+                               B::bufferLoad(3, B::ComputeStage, m_layoutStorage.get()) });
     m_simLayout->create();
     m_simPipe.reset(m_rhi->newComputePipeline());
     m_simPipe->setShaderStage({ QRhiShaderStage::Compute, loadShader(QStringLiteral("particles.comp")) });
@@ -166,6 +198,7 @@ void ParticleSystem::retire(Emitter &e)
     retire(e.simSrb);
     retire(e.particles);
     retire(e.steps);
+    retire(e.forces);
     retire(e.simUniforms);
 }
 
@@ -176,7 +209,8 @@ void ParticleSystem::rebuildBindings(Emitter &e)
     e.simSrb.reset(m_rhi->newShaderResourceBindings());
     e.simSrb->setBindings({ B::uniformBuffer(0, B::ComputeStage, e.simUniforms.get()),
                             B::bufferLoadStore(1, B::ComputeStage, e.particles.get()),
-                            B::bufferLoad(2, B::ComputeStage, e.steps.get()) });
+                            B::bufferLoad(2, B::ComputeStage, e.steps.get()),
+                            B::bufferLoad(3, B::ComputeStage, e.forces.get()) });
     e.simSrb->create();
 }
 
@@ -203,6 +237,16 @@ void ParticleSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float s
 
     for (auto &[id, e] : m_emitters)
         e.seen = false;
+
+    // The scene's forces, and how they are at the first frame (for spotting edits).
+    std::vector<const Entity *> forceEntities;
+    std::vector<Entity> forceReference;
+    for (const Entity &entity : scene->entities()) {
+        if (entity.force) {
+            forceEntities.push_back(&entity);
+            forceReference.push_back(at(entity, timeline.start));
+        }
+    }
 
     QRhiResourceUpdateBatch *rub = m_rhi->nextResourceUpdateBatch();
     struct Dispatch
@@ -237,10 +281,18 @@ void ParticleSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float s
                                            quint32(MaxStepsPerFrame) * kStepSize));
             e.steps->create();
         }
+        if (!e.forces) {
+            e.forceCapacity = 64;
+            e.forces.reset(m_rhi->newBuffer(QRhiBuffer::Static, QRhiBuffer::StorageBuffer,
+                                            quint32(e.forceCapacity) * kForceSize));
+            e.forces->create();
+        }
         if (!e.simSrb)
             rebuildBindings(e);
-        if (!sameSimulation(reference, e.reference) || target < e.stepsDone) {
+        if (!sameSimulation(reference, e.reference) || !sameForces(forceReference, e.forceReference)
+            || target < e.stepsDone) {
             e.reference = reference;
+            e.forceReference = forceReference;
             e.stepsDone = -1;
         }
         e.blend = entity.emitter->blend;
@@ -257,9 +309,20 @@ void ParticleSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float s
                 m_pending = true;
 
             QByteArray steps(qsizetype(count) * kStepSize, '\0');
+            QByteArray forces;
+            int forceCount = 0; // records in `forces`
             for (int i = 0; i < count; ++i) {
                 const int k = e.stepsDone + i;
                 const Entity s = at(entity, timeline.start + k); // the emitter during this step
+                const quint32 firstForce = quint32(forceCount);
+                for (const Entity *fe : forceEntities) { // the forces during this step
+                    const Entity f = at(*fe, timeline.start + k);
+                    if (!f.force->enabled)
+                        continue;
+                    forces.resize(qsizetype(forceCount + 1) * kForceSize, '\0');
+                    putForce(reinterpret_cast<float *>(forces.data() + qsizetype(forceCount) * kForceSize), f);
+                    ++forceCount;
+                }
                 const ParticleEmitter &p = *s.emitter;
                 const double born0 = e.born;
                 e.born += double(p.rate) * dt;
@@ -284,8 +347,20 @@ void ParticleSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float s
                 v[35] = p.endSize;
                 putColor(v + 36, p.startColor, p.intensity, p.startOpacity);
                 putColor(v + 40, p.endColor, p.intensity, p.endOpacity);
+                const quint32 forceRange[4] = { firstForce, quint32(forceCount) - firstForce, 0, 0 };
+                std::memcpy(v + 44, forceRange, sizeof(forceRange));
             }
             rub->uploadStaticBuffer(e.steps.get(), 0, quint32(steps.size()), steps.constData());
+            if (forceCount > e.forceCapacity) {
+                retire(e.forces);
+                e.forceCapacity = qMax(forceCount, e.forceCapacity * 2);
+                e.forces.reset(m_rhi->newBuffer(QRhiBuffer::Static, QRhiBuffer::StorageBuffer,
+                                                quint32(e.forceCapacity) * kForceSize));
+                e.forces->create();
+                rebuildBindings(e);
+            }
+            if (forceCount > 0)
+                rub->uploadStaticBuffer(e.forces.get(), 0, quint32(forces.size()), forces.constData());
 
             const quint32 counts[4] = { quint32(capacity), quint32(count), quint32(entity.emitter->seed), 0 };
             float sim[kSimUbufSize / 4] = {};
