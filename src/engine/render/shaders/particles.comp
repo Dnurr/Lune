@@ -147,6 +147,60 @@ void emitParticle(inout Particle p, Step s, uint index, float time)
     p.velocity.w = s.life.x * (1.0 - s.life.y * random(index, 4u));
 }
 
+// A random number 0..1 for each integer point of space (the corners of the noise cells).
+float cornerValue(ivec3 c)
+{
+    uvec3 u = uvec3(c); // negative coordinates keep their bits: they get their own values
+    return float(hash(u.x ^ hash(u.y ^ hash(u.z)))) / 4294967295.0;
+}
+
+// Value noise: smooth random values over space, 0..1, changing about once per unit.
+float valueNoise(vec3 x)
+{
+    ivec3 c = ivec3(floor(x));        // the cell's corner
+    vec3  f = fract(x);               // where x is inside the cell, 0..1 on each axis
+    vec3  w = f * f * (3.0 - 2.0 * f); // smoothstep weights: no creases between cells
+
+    // The cell's 8 corners.
+    float c000 = cornerValue(c);
+    float c100 = cornerValue(c + ivec3(1, 0, 0));
+    float c010 = cornerValue(c + ivec3(0, 1, 0));
+    float c110 = cornerValue(c + ivec3(1, 1, 0));
+    float c001 = cornerValue(c + ivec3(0, 0, 1));
+    float c101 = cornerValue(c + ivec3(1, 0, 1));
+    float c011 = cornerValue(c + ivec3(0, 1, 1));
+    float c111 = cornerValue(c + ivec3(1, 1, 1));
+
+    // Blend them: along x (four edges), then y (two), then z (one).
+    float x00 = mix(c000, c100, w.x);
+    float x10 = mix(c010, c110, w.x);
+    float x01 = mix(c001, c101, w.x);
+    float x11 = mix(c011, c111, w.x);
+    float y0  = mix(x00, x10, w.y);
+    float y1  = mix(x01, x11, w.y);
+    return mix(y0, y1, w.z);
+}
+
+vec3 potential(vec3 x)
+{
+    return vec3(valueNoise(x), valueNoise(x + vec3(31.4, 47.2, 12.9)), valueNoise(x + vec3(-19.1, 83.7, 55.3)));
+}
+
+vec3 curlNoise(vec3 x)
+{
+    const float e = 0.01;
+    vec3 dx  = vec3(e, 0.0, 0.0), dy  = vec3(0.0, e, 0.0), dz  = vec3(0.0, 0.0, e);
+    vec3 px0 = potential(x - dx), px1 = potential(x + dx);
+    vec3 py0 = potential(x - dy), py1 = potential(x + dy);
+    vec3 pz0 = potential(x - dz), pz1 = potential(x + dz);
+
+    float dzdy = py1.z - py0.z, dydz = pz1.y - pz0.y;
+    float dxdz = pz1.x - pz0.x, dzdx = px1.z - px0.z;
+    float dydx = px1.y - px0.y, dxdy = py1.x - py0.x;
+
+    return vec3(dzdy - dydz, dxdz - dzdx, dydx - dzdx) / (2.0 * e);
+}
+
 // The acceleration (units / s^2) force `f` gives particle `p` at `time`. The stub gives none.
 vec3 forceAcceleration(Force f, Particle p, float time)
 {
@@ -155,6 +209,48 @@ vec3 forceAcceleration(Force f, Particle p, float time)
     // attractor toward the position; vortex: spin around the axis line, pull toward it, lift
     // along it, plus local swirls. Then the reach: fade out over the outer `falloff` part of
     // `radius` (from the position, or from the axis for the vortex).
+    vec3 axis   = normalize(mat3(f.transform) * vec3(0.0, 1.0, 0.0));
+    vec3 center = f.transform[3].xyz;
+    vec3 q = p.position.xyz * f.params1.y
+           + vec3(0.0, time * f.params1.z, 0.0);
+
+    switch (int(f.params0.x)) {
+        case 0: {
+            return -axis * f.params0.y;
+        }
+        case 1: {
+            vec3 windVel = axis * f.params0.y;
+            return f.params1.x * (windVel - p.velocity.xyz);
+        }
+        case 2: {
+            vec3 acc = curlNoise(q) * f.params0.y;
+            return acc;
+        }
+        case 3: {
+            vec3 toCenter = center - p.position.xyz;
+            return toCenter / max(length(toCenter), 1e-4) * f.params0.y;
+        }
+        case 4: {
+            vec3 rel    = p.position.xyz - center;
+            float along = dot(rel, axis);
+            vec3 radial = rel - axis * along;
+            float dist  = length(radial);
+            vec3 outDir = radial / max(dist, 1e-4);
+
+            vec3 tangent = cross(axis, outDir);
+
+            vec3 acc = tangent * f.params0.y
+                     - outDir  * f.params2.x
+                     + axis    * f.params2.y;
+
+            acc += curlNoise(q) * f.params1.w;
+            
+            return acc;
+        }
+        default:
+            break;
+    }
+    
     return vec3(0.0);
 }
 
@@ -162,7 +258,10 @@ vec3 forceAcceleration(Force f, Particle p, float time)
 // age afterwards.
 void updateParticle(inout Particle p, Step s, float dt, float time)
 {
-    p.velocity.y   -= 9.81 * dt;
+    for (uint i = s.forces.x; i < s.forces.x + s.forces.y; i++)
+    {
+        p.velocity.xyz += forceAcceleration(forces[i], p, time) * dt;
+    }
     p.position.xyz += p.velocity.xyz * dt;
 
     float t   = clamp(p.position.w / p.velocity.w, 0.0, 1.0);
