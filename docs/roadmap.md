@@ -99,7 +99,7 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 - [x] Inspector scrolling: long components (Post Process) in short windows (Claude)
 - [x] Bloom: 13-tap downsample with Karis average and threshold, tent upsample (Author)
 - [x] Specular anti-aliasing in `mesh.frag` (normal variance added to the GGX roughness) (Author)
-- [ ] Depth of field (Author)
+- [x] Depth of field: thin-lens circle of confusion, golden-angle gather (Author); half size with a depth-aware composite (Claude)
 - [x] Vignette, chromatic aberration, film grain (Author)
 - [x] FXAA, the first display effect: edge search along the luma gradient, subpixel blend (Author)
 - [ ] Temporal anti-aliasing (Author)
