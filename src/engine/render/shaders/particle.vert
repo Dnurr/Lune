@@ -1,9 +1,7 @@
 #version 440
 
 // Particles: one instance per particle slot (ParticleSystem in engine/render/particles.h),
-// six vertices each (two triangles of a quad). Author: to be written.
-//
-// Until then: a dot of a few pixels at each live particle, in its color.
+// six vertices each (two triangles of a quad).
 
 // The Particle of particles.comp, straight from the simulation's buffer.
 layout(location = 0) in vec4 position; // xyz = world position, w = age (seconds)
@@ -26,6 +24,7 @@ void main()
 {
     const vec2 corners[6] = vec2[](vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(1.0, 1.0),
                                    vec2(-1.0, -1.0), vec2(1.0, 1.0), vec2(-1.0, 1.0));
+    
     vec2 corner = corners[gl_VertexIndex];
     v_corner = corner;
     v_color = color;
@@ -33,9 +32,9 @@ void main()
         gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
         return;
     }
-    // TODO (Author): a quad facing the camera, extra.x wide in world units (cameraRight,
-    // cameraUp), turned by extra.y; or stretched along the velocity.
-    vec4 clip = viewProj * vec4(position.xyz, 1.0);
-    clip.xy += corner * 3.0 / params.xy * clip.w; // stub: 3 pixels around the particle
-    gl_Position = clip;
+    corner = vec2(corner.x * cos(extra.y) - corner.y * sin(extra.y), corner.x * sin(extra.y) + corner.y * cos(extra.y));
+    float halfSize = 0.5 * extra.x;
+    vec3 worldPos = position.xyz + (cameraRight.xyz * corner.x + cameraUp.xyz * corner.y) * halfSize;
+    
+    gl_Position = viewProj * vec4(worldPos, 1.0);
 }
