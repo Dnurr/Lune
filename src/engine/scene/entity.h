@@ -206,6 +206,47 @@ struct ParticleForce
     bool operator==(const ParticleForce &) const = default;
 };
 
+// A box of gas simulated on a grid (engine/render/fluids.h): smoke, fire, dust. The box is
+// centered on the entity and `size` world units along its local axes (it turns with the
+// entity; the entity's scale is ignored). The grid has `resolution` voxels along the box's
+// longest side, cubic voxels.
+struct FluidVolume
+{
+    bool enabled = true;
+    QVector3D size { 4.0f, 4.0f, 4.0f };
+    int resolution = 64;
+
+    // Solver (the author's passes read these; see fluid_*.comp)
+    float dissipation = 0.05f;  // fraction of the smoke lost per second
+    float cooling = 0.5f;       // fraction of the heat lost per second
+    float buoyancy = 2.0f;      // upward acceleration (units / s^2) per unit of temperature
+    float weight = 0.2f;        // downward acceleration per unit of smoke
+    float vorticity = 0.3f;     // vorticity confinement: how strongly small swirls are kept
+    int pressureIterations = 20; // Jacobi iterations of the pressure solve, per step
+
+    // Look (fluid_volume.frag)
+    QColor color { 0xD0, 0xD0, 0xD8 };          // the smoke's scattering color (sRGB)
+    float density = 4.0f;                        // extinction per unit of smoke per world unit
+    QColor emissionColor { 0xFF, 0x78, 0x28 };  // fire: the color of hot gas (sRGB)
+    float emission = 0.0f;                       // fire: brightness per unit of temperature
+    int samples = 96;                            // ray marching steps across the box
+
+    bool operator==(const FluidVolume &) const = default;
+};
+
+// Where gas comes from: a sphere around the entity's position adding smoke, heat and velocity
+// to every Fluid Volume it overlaps.
+struct FluidSource
+{
+    bool enabled = true;
+    float radius = 0.4f;                 // world units
+    float density = 1.0f;                // smoke added per second, at the center
+    float temperature = 1.0f;            // heat added per second, at the center
+    QVector3D velocity { 0.0f, 0.0f, 0.0f }; // world units / s, given to the gas inside
+
+    bool operator==(const FluidSource &) const = default;
+};
+
 struct Entity
 {
     EntityId id = InvalidEntity;
@@ -247,6 +288,8 @@ struct Entity
     std::optional<PostProcess> postProcess; // effects of the image rendered by this entity's camera
     std::optional<ParticleEmitter> emitter; // set = this entity emits particles
     std::optional<ParticleForce> force;     // set = this entity pushes particles around
+    std::optional<FluidVolume> fluid;       // set = this entity is a box of simulated gas
+    std::optional<FluidSource> fluidSource; // set = this entity adds gas to the volumes it's in
 
     // Keyframes of its properties (engine/scene/animation.h), one track per animated property.
     std::vector<AnimationTrack> animation;

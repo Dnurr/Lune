@@ -1,0 +1,25 @@
+#version 440
+
+// Fluid fields set to zero: the start of a simulation (FluidSystem: first step, or simulating
+// again after an edit). Run for each set of ping-pong textures.
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in;
+
+layout(std140, binding = 0) uniform FluidBuf {
+    uvec4 grid; // xyz = voxels
+};
+layout(binding = 1, rgba16f) uniform writeonly image3D velocity;
+layout(binding = 2, rgba16f) uniform writeonly image3D density;
+layout(binding = 3, r32f) uniform writeonly image3D pressure;
+layout(binding = 4, r32f) uniform writeonly image3D divergence;
+
+void main()
+{
+    ivec3 cell = ivec3(gl_GlobalInvocationID);
+    if (any(greaterThanEqual(uvec3(cell), grid.xyz)))
+        return;
+    imageStore(velocity, cell, vec4(0.0));
+    imageStore(density, cell, vec4(0.0));
+    imageStore(pressure, cell, vec4(0.0));
+    imageStore(divergence, cell, vec4(0.0));
+}

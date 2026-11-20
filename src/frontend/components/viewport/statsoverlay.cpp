@@ -58,11 +58,16 @@ void StatsOverlay::frameRendered(double cpuMs, const FrameStats &stats, const ch
                 .arg(stats.meshes)
                 .arg(entities)
                 .arg(stats.textures)
-                .arg(stats.emitters == 0 ? QString()
-                                         : QStringLiteral("\n%1 particles  %2 emitters  %3 steps")
-                                               .arg(c.toString(qulonglong(stats.particles)))
-                                               .arg(stats.emitters)
-                                               .arg(stats.particleSteps)));
+                .arg((stats.emitters == 0 ? QString()
+                                          : QStringLiteral("\n%1 particles  %2 emitters  %3 steps")
+                                                .arg(c.toString(qulonglong(stats.particles)))
+                                                .arg(stats.emitters)
+                                                .arg(stats.particleSteps))
+                     + (stats.fluids == 0 ? QString()
+                                          : QStringLiteral("\n%1 voxels  %2 fluids  %3 steps")
+                                                .arg(c.toString(qulonglong(stats.voxels)))
+                                                .arg(stats.fluids)
+                                                .arg(stats.fluidSteps))));
     reposition();
 
     m_window.restart();

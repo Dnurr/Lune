@@ -38,6 +38,7 @@ add_library(lune_engine STATIC
     src/engine/render/imagerender.cpp
     src/engine/render/postprocess.cpp
     src/engine/render/particles.cpp
+    src/engine/render/fluids.cpp
 )
 # Includes are relative to src/: "engine/scene/scene.h", "frontend/core/selection.h"
 target_include_directories(lune_engine PUBLIC src)
@@ -148,6 +149,8 @@ qt6_add_shaders(Lune "shaders"
         src/engine/render/shaders/particle.vert
         src/engine/render/shaders/particle.frag
         src/engine/render/shaders/scene_distance.frag
+        src/engine/render/shaders/fluid_volume.vert
+        src/engine/render/shaders/fluid_volume.frag
 )
 # Compute shaders need GLSL ES 3.1 / GLSL 4.3 where the backend is OpenGL.
 qt6_add_shaders(Lune "compute_shaders"
@@ -159,6 +162,13 @@ qt6_add_shaders(Lune "compute_shaders"
     FILES
         src/engine/render/shaders/particles.comp
         src/engine/render/shaders/particle_sort.comp
+        src/engine/render/shaders/fluid_clear.comp
+        src/engine/render/shaders/fluid_source.comp
+        src/engine/render/shaders/fluid_advect.comp
+        src/engine/render/shaders/fluid_forces.comp
+        src/engine/render/shaders/fluid_divergence.comp
+        src/engine/render/shaders/fluid_pressure.comp
+        src/engine/render/shaders/fluid_project.comp
 )
 
 if(WIN32)

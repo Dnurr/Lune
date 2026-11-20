@@ -12,6 +12,7 @@
 
 #include "engine/material/materialcompiler.h"
 #include "engine/scene/entity.h"
+#include "fluids.h"
 #include "iblmaps.h"
 #include "particles.h"
 #include "postprocess.h"
@@ -53,6 +54,9 @@ struct FrameStats
     int emitters = 0;       // particle emitters drawn
     quint64 particles = 0;  // particles alive (estimated, see ParticleSystem)
     int particleSteps = 0;  // simulation steps run this frame
+    int fluids = 0;         // fluid volumes drawn
+    quint64 voxels = 0;     // their voxels
+    int fluidSteps = 0;     // fluid steps run this frame
 };
 
 // How meshes are shaded (the viewport's shading menu, and each pass of an image render).
@@ -99,7 +103,8 @@ struct ViewSettings
 //                 selection outline                                         [HDR, linear]
 //      distance-> with particles: the scene's depth as view depth (scene_distance.frag), for
 //                 soft particles
-//      particles-> the scene again, kept (not cleared): the particles, depth tested
+//      particles-> the scene again, kept (not cleared): fluid volumes (ray marched), then the
+//                 particles, depth tested
 //      post    -> HDR effects of the scene camera's Post Process: depth of field, bloom
 //                 (PostProcessor; Rendered shading with ViewSettings::post only)
 //   2. display -> scene converted for the screen (exposure, tonemapping), then the display
@@ -172,7 +177,7 @@ public:
     QString textureError(const QString &image) const { return m_textures.error(image); }
     // Something the last frame drew is still loading (textures): render again soon.
     // Also while particles catch up with a long jump in time (ParticleSystem::pending()).
-    bool needsAnotherFrame() const { return m_textures.loading() || m_particles.pending(); }
+    bool needsAnotherFrame() const { return m_textures.loading() || m_particles.pending() || m_fluids.pending(); }
 
 private:
     struct GpuMesh
@@ -292,6 +297,7 @@ private:
 
     PostProcessor m_post; // post-processing targets and passes
     ParticleSystem m_particles; // emitters' buffers, simulation and draws
+    FluidSystem m_fluids;       // fluid volumes' grids, solver passes and draws
 
     // Offscreen targets:
     //   scene   full size, HDR (RGBA16F) + depth, linear values

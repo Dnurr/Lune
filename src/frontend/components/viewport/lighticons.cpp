@@ -25,6 +25,29 @@ QColor dimmed(const QColor &c)
     return d;
 }
 
+// A Fluid Volume's box as screen segments (its 12 edges), leaving out those with an end
+// behind the viewer.
+std::vector<std::pair<QPointF, QPointF>> boxSegments(const Entity &e, const OrbitCamera &viewer, const QSizeF &viewSize)
+{
+    Transform frame = e.transform;
+    frame.scale = QVector3D(1.0f, 1.0f, 1.0f);
+    const QMatrix4x4 m = frame.matrix();
+    const QVector3D h = e.fluid->size * 0.5f;
+    QVector3D c[8];
+    for (int i = 0; i < 8; ++i)
+        c[i] = m.map(QVector3D(i & 1 ? h.x() : -h.x(), i & 2 ? h.y() : -h.y(), i & 4 ? h.z() : -h.z()));
+    static const int edges[12][2] = { { 0, 1 }, { 2, 3 }, { 4, 5 }, { 6, 7 }, { 0, 2 }, { 1, 3 },
+                                      { 4, 6 }, { 5, 7 }, { 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 } };
+    std::vector<std::pair<QPointF, QPointF>> out;
+    for (const auto &edge : edges) {
+        bool fa = false, fb = false;
+        const QPointF a = viewer.project(c[edge[0]], viewSize, &fa), b = viewer.project(c[edge[1]], viewSize, &fb);
+        if (fa && fb)
+            out.emplace_back(a, b);
+    }
+    return out;
+}
+
 // A camera's frustum as screen segments: eye to the four corners, the frame, and the up
 // triangle. Segments with an end behind the viewer are left out.
 std::vector<std::pair<QPointF, QPointF>> cameraSegments(const Entity &e, const OrbitCamera &viewer, const QSizeF &viewSize,
@@ -76,6 +99,35 @@ void append(const Scene &scene, const OrbitCamera &camera, const QSizeF &viewSiz
             for (const auto &[a, b] : cameraSegments(e, camera, viewSize, cameraAspect))
                 segment(out, a, b, kLine, col);
         }
+    }
+    for (const Entity &e : scene.entities()) {
+        if (!e.fluid)
+            continue;
+        QColor col = e.id == selected ? kRingSelected : kRing;
+        col.setAlphaF(e.id == selected ? 0.9f : 0.5f);
+        if (!e.fluid->enabled)
+            col = dimmed(col);
+        for (const auto &[a, b] : boxSegments(e, camera, viewSize))
+            segment(out, a, b, kLine, col);
+    }
+    for (const Entity &e : scene.entities()) {
+        if (!e.fluidSource)
+            continue;
+        bool inFront = false;
+        const QPointF c = camera.project(e.transform.position, viewSize, &inFront);
+        if (!inFront)
+            continue;
+        QColor ring = e.id == selected ? kRingSelected : kRing;
+        QColor puff(0xB8, 0xBC, 0xC8);
+        if (!e.fluidSource->enabled) {
+            ring = dimmed(ring);
+            puff = dimmed(puff);
+        }
+        OverlayDraw::ring(out, c, kRingRadius, kLine, ring);
+        // A small cloud: three overlapping puffs.
+        disc(out, c + QPointF(-2.5, 1.0), kDisc * 0.55, puff);
+        disc(out, c + QPointF(2.5, 1.0), kDisc * 0.55, puff);
+        disc(out, c + QPointF(0.0, -1.5), kDisc * 0.65, puff);
     }
     for (const Entity &e : scene.entities()) {
         if (!e.force)
@@ -212,6 +264,17 @@ EntityId hitTest(const Scene &scene, const OrbitCamera &camera, const QSizeF &vi
     EntityId best = InvalidEntity;
     double bestDistance = HitRadius;
     for (const Entity &e : scene.entities()) {
+        if (!e.fluid)
+            continue;
+        for (const auto &[a, b] : boxSegments(e, camera, viewSize)) {
+            const double d = OverlayDraw::distanceToSegment(point, a, b) + 4.0; // icons win when both are close
+            if (d <= bestDistance) {
+                best = e.id;
+                bestDistance = d;
+            }
+        }
+    }
+    for (const Entity &e : scene.entities()) {
         if (!e.camera || e.id == hiddenCamera)
             continue;
         for (const auto &[a, b] : cameraSegments(e, camera, viewSize, cameraAspect)) {
@@ -223,7 +286,7 @@ EntityId hitTest(const Scene &scene, const OrbitCamera &camera, const QSizeF &vi
         }
     }
     for (const Entity &e : scene.entities()) {
-        if (!e.light && !e.emitter && !e.force)
+        if (!e.light && !e.emitter && !e.force && !e.fluidSource)
             continue;
         bool inFront = false;
         const QPointF c = camera.project(e.transform.position, viewSize, &inFront);

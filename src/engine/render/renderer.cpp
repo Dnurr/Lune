@@ -158,6 +158,7 @@ void Renderer::initialize(QRhi *rhi, QRhiRenderTarget *target)
         m_ibl.initialize(m_rhi);
         m_post.initialize(m_rhi);
         m_particles.initialize(m_rhi);
+        m_fluids.initialize(m_rhi);
         m_shadows.initialize(m_rhi);
         m_textures.initialize(m_rhi);
 
@@ -265,6 +266,7 @@ void Renderer::createSizeDependentResources()
         m_distanceSrb->create();
     }
     m_particles.setSceneDistance(m_distanceTex.get());
+    m_fluids.setSceneDistance(m_distanceTex.get());
 
     // Display and blur targets have the same format: one render pass descriptor for all three.
     auto ldrTarget = [this](QRhiTexture *t) {
@@ -413,6 +415,7 @@ void Renderer::createPipelines(QRhiRenderTarget *target)
     m_displayPipe = pipeline(fullscreen, QStringLiteral("display.frag"), m_displaySrb.get(), m_ldrRp.get(), 1);
     m_post.createPipelines(fullscreen);
     m_particles.createPipelines(m_sceneKeepRp.get(), 1);
+    m_fluids.createPipelines(m_sceneKeepRp.get(), 1);
     m_distancePipe.reset();
     if (m_distanceSrb)
         m_distancePipe = pipeline(fullscreen, QStringLiteral("scene_distance.frag"), m_distanceSrb.get(), m_distanceRp.get(), 1);
@@ -429,6 +432,7 @@ void Renderer::createPipelines(QRhiRenderTarget *target)
 void Renderer::release()
 {
     m_particles.release();
+    m_fluids.release();
     m_distancePipe.reset();
     m_distanceSrb.reset();
     m_distanceRt.reset();
@@ -1244,7 +1248,38 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
     m_stats.particles = m_particles.particleCount();
     m_stats.particleSteps = m_particles.stepsLastFrame();
     m_stats.drawCalls += m_stats.emitters;
-    const bool particlePass = m_stats.emitters > 0;
+
+    // Fluids up to the scene time (compute), lit by the main light: the first directional one.
+    m_fluids.simulate(cb, particles ? scene : nullptr, m_seconds);
+    {
+        // The scene's first directional light; with no lights at all, the default sun (as for
+        // the meshes); point lights only: no main light.
+        QVector3D lightDir = QVector3D(-0.45f, -0.8f, -0.35f).normalized(), lightColor(3.0f, 3.0f, 3.0f);
+        bool hasLight = sceneLights;
+        bool anyLight = false;
+        bool sun = false;
+        for (const Entity &e : scene ? scene->entities() : std::vector<Entity>()) {
+            if (!e.light || !e.light->enabled)
+                continue;
+            anyLight = true;
+            if (!sun && e.light->type == Light::Directional) {
+                lightDir = Light::direction(e.transform);
+                float c[4];
+                putLinearColor(c, e.light->color, 1.0f);
+                lightColor = QVector3D(c[0], c[1], c[2]) * e.light->intensity;
+                sun = true;
+            }
+        }
+        if (anyLight && !sun)
+            hasLight = false;
+        m_fluids.prepareDraw(rub, m_rhi->clipSpaceCorrMatrix() * viewProj, eye, lightDir.normalized(), lightColor, hasLight,
+                             m_pixelSize, m_seconds);
+    }
+    m_stats.fluids = m_fluids.volumeCount();
+    m_stats.voxels = m_fluids.voxelCount();
+    m_stats.fluidSteps = m_fluids.stepsLastFrame();
+    m_stats.drawCalls += m_stats.fluids;
+    const bool particlePass = m_stats.emitters > 0 || m_stats.fluids > 0;
     const bool distancePass = particlePass && m_distancePipe;
     if (distancePass) {
         const float planes[4] = { camera.nearPlane, camera.farPlane, 0.0f, 0.0f };
@@ -1289,6 +1324,7 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
             cb->endPass();
         }
         cb->beginPass(m_sceneKeepRt.get(), black, { 1.0f, 0 });
+        m_fluids.draw(cb, fullViewport);
         m_particles.draw(cb, fullViewport);
         cb->endPass();
     }

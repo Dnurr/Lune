@@ -344,6 +344,20 @@ void Editor::createMenus()
         e.emitter = ParticleEmitter {};
         m_undo->push(new AddEntityCommand(m_scene, m_selection, e));
     });
+    m_addMenu->addAction("Fluid Volume", this, [this] {
+        Entity e;
+        e.name = m_scene->uniqueName(QStringLiteral("Fluid"));
+        e.fluid = FluidVolume {};
+        e.transform.position = QVector3D(0.0f, e.fluid->size.y() * 0.5f, 0.0f); // standing on the ground
+        m_undo->push(new AddEntityCommand(m_scene, m_selection, e));
+    });
+    m_addMenu->addAction("Fluid Source", this, [this] {
+        Entity e;
+        e.name = m_scene->uniqueName(QStringLiteral("Fluid Source"));
+        e.fluidSource = FluidSource {};
+        e.transform.position = QVector3D(0.0f, 0.5f, 0.0f);
+        m_undo->push(new AddEntityCommand(m_scene, m_selection, e));
+    });
     QMenu *forces = m_addMenu->addMenu("Force");
     auto addForce = [this](const QString &name, ParticleForce force, QVector3D rotation = {}) {
         Entity e;

@@ -1,0 +1,42 @@
+#version 440
+
+// Fluid solver: pressure (one Jacobi iteration; FluidVolume::pressureIterations per step). Author: to be written.
+//
+// The pressure that cancels the divergence: each iteration, a voxel takes the average of its
+// neighbors' pressure minus its divergence. The pressure is kept from the last step (a good
+// start for the next solve).
+//
+// Until then: the pressure copied as it is.
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in; // FluidSystem::GroupSize
+
+#define MAX_FLUID_SOURCES 8 // FluidSystem::MaxSources
+
+// The step being simulated (FluidSystem in engine/render/fluids.h); the same for every pass of
+// a step. Grid coordinates are in voxels: voxel (i, j, k) covers [i, i + 1) x [j, j + 1) x
+// [k, k + 1), its center at +0.5; texture coordinates are grid coordinates / grid.xyz.
+// Velocities are in voxels per second, along the grid's axes (the box's local axes).
+layout(std140, binding = 0) uniform FluidBuf {
+    uvec4 grid;    // xyz = voxels along each axis, w = sources this step
+    vec4  step;    // x = dt (seconds), y = time at the step's end (seconds), z = voxel size (world units)
+    vec4  solver;  // x = dissipation, y = cooling (fractions per second), z = buoyancy, w = weight
+                   // (accelerations in world units / s^2: divide by step.z for voxels / s^2)
+    vec4  solver2; // x = vorticity (confinement strength)
+    vec4  up;      // xyz = world up in grid axes (unit length): buoyancy goes along it, weight against it
+    // Per source, 3 vec4: center (voxels) and radius (voxels); density and temperature added per
+    // second at the center; velocity (voxels / s). Sources are already in grid space.
+    vec4  sources[MAX_FLUID_SOURCES * 3];
+};
+
+layout(binding = 3) uniform sampler3D pressureIn;   // x = pressure; linear, clamped
+layout(binding = 4) uniform sampler3D divergenceIn; // x = divergence of the velocity; linear, clamped
+layout(binding = 5, r32f) uniform writeonly image3D pressureOut;
+
+void main()
+{
+    ivec3 cell = ivec3(gl_GlobalInvocationID);
+    if (any(greaterThanEqual(uvec3(cell), grid.xyz)))
+        return;
+    // TODO (Author): one Jacobi iteration of the pressure from pressureIn and divergenceIn.
+    imageStore(pressureOut, cell, texelFetch(pressureIn, cell, 0));
+}

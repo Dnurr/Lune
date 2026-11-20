@@ -201,6 +201,40 @@ private slots:
         QCOMPARE(loaded.entities()[0].emitter, e.emitter);
     }
 
+    void fluidRoundTrip()
+    {
+        QTemporaryDir dir;
+        const QString path = dir.filePath("fluid.lune");
+        Scene scene;
+        Entity box;
+        box.name = QStringLiteral("Smoke");
+        box.fluid = FluidVolume {};
+        box.fluid->size = QVector3D(2.0f, 5.0f, 3.0f);
+        box.fluid->resolution = 96;
+        box.fluid->vorticity = 0.75f;
+        box.fluid->pressureIterations = 40;
+        box.fluid->emissionColor = QColor(255, 90, 10);
+        scene.createEntity(box);
+        Entity source;
+        source.name = QStringLiteral("Vent");
+        source.fluidSource = FluidSource {};
+        source.fluidSource->radius = 0.25f;
+        source.fluidSource->temperature = 3.0f;
+        source.fluidSource->velocity = QVector3D(0.0f, 2.0f, 0.0f);
+        scene.createEntity(source);
+
+        QString error;
+        QVERIFY2(SceneIO::save(scene, path, {}, &error), qPrintable(error));
+        const QJsonObject json = readJson(path)["entities"].toArray()[0].toObject()["components"].toObject()["Fluid Volume"].toObject();
+        QCOMPARE(json["solver.pressure iterations"].toDouble(), 40.0);
+        Scene loaded;
+        QStringList warnings;
+        QVERIFY2(SceneIO::load(loaded, path, nullptr, &warnings, &error), qPrintable(error));
+        QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join('\n')));
+        QCOMPARE(loaded.entities()[0].fluid, box.fluid);
+        QCOMPARE(loaded.entities()[1].fluidSource, source.fluidSource);
+    }
+
     void forceRoundTrip()
     {
         QTemporaryDir dir;

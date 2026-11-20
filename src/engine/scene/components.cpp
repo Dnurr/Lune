@@ -143,7 +143,7 @@ ComponentDesc lightComponent()
             e.light = Light {};
     };
     c.remove = [](Entity &e) { e.light.reset(); };
-    c.canAdd = [](const Entity &e) { return !e.light && !e.camera && !e.emitter && !e.force; };
+    c.canAdd = [](const Entity &e) { return !e.light && !e.camera && !e.emitter && !e.force && !e.fluid && !e.fluidSource; };
     return c;
 }
 ComponentDesc environmentComponent()
@@ -198,7 +198,7 @@ ComponentDesc environmentComponent()
             e.environment = Environment {};
     };
     c.remove = [](Entity &e) { e.environment.reset(); };
-    c.canAdd = [](const Entity &e) { return !e.environment && !e.camera && !e.emitter && !e.force; };
+    c.canAdd = [](const Entity &e) { return !e.environment && !e.camera && !e.emitter && !e.force && !e.fluid && !e.fluidSource; };
     return c;
 }
 ComponentDesc cameraComponent()
@@ -240,7 +240,7 @@ ComponentDesc cameraComponent()
         e.camera.reset();
         e.postProcess.reset(); // only means something on a camera
     };
-    c.canAdd = [](const Entity &e) { return !e.mesh && !e.light && !e.environment && !e.emitter && !e.force; };
+    c.canAdd = [](const Entity &e) { return !e.mesh && !e.light && !e.environment && !e.emitter && !e.force && !e.fluid && !e.fluidSource; };
     return c;
 }
 
@@ -418,7 +418,7 @@ ComponentDesc emitterComponent()
             e.emitter = ParticleEmitter {};
     };
     c.remove = [](Entity &e) { e.emitter.reset(); };
-    c.canAdd = [](const Entity &e) { return !e.mesh && !e.light && !e.environment && !e.camera; };
+    c.canAdd = [](const Entity &e) { return !e.mesh && !e.light && !e.environment && !e.camera && !e.fluid; };
     return c;
 }
 ComponentDesc forceComponent()
@@ -496,12 +496,144 @@ ComponentDesc forceComponent()
     c.canAdd = [](const Entity &e) { return !e.light && !e.environment && !e.camera; };
     return c;
 }
+ComponentDesc fluidVolumeComponent()
+{
+    auto prop = [](const char *name, const char *group, PropertyType type, double step = 0.01, double lo = -1e6,
+                   double hi = 1e6) {
+        PropertyDesc d { QString::fromLatin1(name), type, step, lo, hi };
+        d.group = QString::fromLatin1(group);
+        return d;
+    };
+    ComponentDesc c;
+    c.name = QStringLiteral("Fluid Volume");
+    c.properties = {
+        prop("enabled", "", PropertyType::Bool),
+        prop("size", "grid", PropertyType::Vector3, 0.02),
+        prop("resolution", "grid", PropertyType::Float, 0.5, 8.0, 256.0),
+        prop("dissipation", "solver", PropertyType::Float, 0.002, 0.0, 10.0),
+        prop("cooling", "solver", PropertyType::Float, 0.005, 0.0, 10.0),
+        prop("buoyancy", "solver", PropertyType::Float, 0.02, -1e3, 1e3),
+        prop("weight", "solver", PropertyType::Float, 0.01, -1e3, 1e3),
+        prop("vorticity", "solver", PropertyType::Float, 0.005, 0.0, 100.0),
+        prop("pressure iterations", "solver", PropertyType::Float, 0.2, 1.0, 200.0),
+        prop("color", "look", PropertyType::Color),
+        prop("density", "look", PropertyType::Float, 0.02, 0.0, 1e4),
+        prop("emission color", "look", PropertyType::Color),
+        prop("emission", "look", PropertyType::Float, 0.02, 0.0, 1e4),
+        prop("samples", "look", PropertyType::Float, 0.5, 8.0, 512.0),
+    };
+    c.present = [](const Entity &e) { return e.fluid.has_value(); };
+    c.get = [](const Entity &e, int i) -> QVariant {
+        if (!e.fluid)
+            return {};
+        const FluidVolume &f = *e.fluid;
+        switch (i) {
+        case 0: return f.enabled;
+        case 1: return QVariant::fromValue(f.size);
+        case 2: return double(f.resolution);
+        case 3: return double(f.dissipation);
+        case 4: return double(f.cooling);
+        case 5: return double(f.buoyancy);
+        case 6: return double(f.weight);
+        case 7: return double(f.vorticity);
+        case 8: return double(f.pressureIterations);
+        case 9: return f.color;
+        case 10: return double(f.density);
+        case 11: return f.emissionColor;
+        case 12: return double(f.emission);
+        case 13: return double(f.samples);
+        }
+        return {};
+    };
+    c.set = [](Entity &e, int i, const QVariant &v) {
+        if (!e.fluid)
+            return;
+        FluidVolume &f = *e.fluid;
+        const double x = v.toDouble();
+        auto clamp = [x](double lo, double hi) { return float(qBound(lo, x, hi)); };
+        switch (i) {
+        case 0: f.enabled = v.toBool(); break;
+        case 1: {
+            const QVector3D s = v.value<QVector3D>();
+            f.size = QVector3D(qMax(0.01f, s.x()), qMax(0.01f, s.y()), qMax(0.01f, s.z()));
+            break;
+        }
+        case 2: f.resolution = int(std::lround(qBound(8.0, x, 256.0))); break;
+        case 3: f.dissipation = clamp(0.0, 10.0); break;
+        case 4: f.cooling = clamp(0.0, 10.0); break;
+        case 5: f.buoyancy = clamp(-1e3, 1e3); break;
+        case 6: f.weight = clamp(-1e3, 1e3); break;
+        case 7: f.vorticity = clamp(0.0, 100.0); break;
+        case 8: f.pressureIterations = int(std::lround(qBound(1.0, x, 200.0))); break;
+        case 9: f.color = v.value<QColor>(); break;
+        case 10: f.density = clamp(0.0, 1e4); break;
+        case 11: f.emissionColor = v.value<QColor>(); break;
+        case 12: f.emission = clamp(0.0, 1e4); break;
+        case 13: f.samples = int(std::lround(qBound(8.0, x, 512.0))); break;
+        }
+    };
+    c.add = [](Entity &e) {
+        if (!e.fluid)
+            e.fluid = FluidVolume {};
+    };
+    c.remove = [](Entity &e) { e.fluid.reset(); };
+    c.canAdd = [](const Entity &e) { return !e.mesh && !e.light && !e.environment && !e.camera && !e.emitter; };
+    return c;
+}
+
+ComponentDesc fluidSourceComponent()
+{
+    ComponentDesc c;
+    c.name = QStringLiteral("Fluid Source");
+    c.properties = {
+        { QStringLiteral("enabled"), PropertyType::Bool },
+        { QStringLiteral("radius"), PropertyType::Float, 0.005, 0.0, 1e4 },
+        { QStringLiteral("density"), PropertyType::Float, 0.01, 0.0, 1e4 },
+        { QStringLiteral("temperature"), PropertyType::Float, 0.01, -1e4, 1e4 },
+        { QStringLiteral("velocity"), PropertyType::Vector3, 0.02 },
+    };
+    c.present = [](const Entity &e) { return e.fluidSource.has_value(); };
+    c.get = [](const Entity &e, int i) -> QVariant {
+        if (!e.fluidSource)
+            return {};
+        const FluidSource &s = *e.fluidSource;
+        switch (i) {
+        case 0: return s.enabled;
+        case 1: return double(s.radius);
+        case 2: return double(s.density);
+        case 3: return double(s.temperature);
+        case 4: return QVariant::fromValue(s.velocity);
+        }
+        return {};
+    };
+    c.set = [](Entity &e, int i, const QVariant &v) {
+        if (!e.fluidSource)
+            return;
+        FluidSource &s = *e.fluidSource;
+        const double x = v.toDouble();
+        switch (i) {
+        case 0: s.enabled = v.toBool(); break;
+        case 1: s.radius = float(qBound(0.0, x, 1e4)); break;
+        case 2: s.density = float(qBound(0.0, x, 1e4)); break;
+        case 3: s.temperature = float(qBound(-1e4, x, 1e4)); break;
+        case 4: s.velocity = v.value<QVector3D>(); break;
+        }
+    };
+    c.add = [](Entity &e) {
+        if (!e.fluidSource)
+            e.fluidSource = FluidSource {};
+    };
+    c.remove = [](Entity &e) { e.fluidSource.reset(); };
+    c.canAdd = [](const Entity &e) { return !e.light && !e.environment && !e.camera; };
+    return c;
+}
 } // namespace
 
 const std::vector<ComponentDesc> &components()
 {
     static const std::vector<ComponentDesc> all = { transformComponent(), meshComponent(), materialComponent(), lightComponent(),
                                                     environmentComponent(), cameraComponent(), postProcessComponent(),
-                                                    emitterComponent(), forceComponent() };
+                                                    emitterComponent(), forceComponent(), fluidVolumeComponent(),
+                                                    fluidSourceComponent() };
     return all;
 }

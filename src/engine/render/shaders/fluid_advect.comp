@@ -1,0 +1,44 @@
+#version 440
+
+// Fluid solver: advection. Author: to be written.
+//
+// The fluid carries itself and what is in it: each voxel takes the value found where its
+// content was dt ago (semi-Lagrangian: trace back along the velocity, sample there). The
+// smoke dissipates and the heat cools here too.
+//
+// Until then: the fields copied as they are.
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in; // FluidSystem::GroupSize
+
+#define MAX_FLUID_SOURCES 8 // FluidSystem::MaxSources
+
+// The step being simulated (FluidSystem in engine/render/fluids.h); the same for every pass of
+// a step. Grid coordinates are in voxels: voxel (i, j, k) covers [i, i + 1) x [j, j + 1) x
+// [k, k + 1), its center at +0.5; texture coordinates are grid coordinates / grid.xyz.
+// Velocities are in voxels per second, along the grid's axes (the box's local axes).
+layout(std140, binding = 0) uniform FluidBuf {
+    uvec4 grid;    // xyz = voxels along each axis, w = sources this step
+    vec4  step;    // x = dt (seconds), y = time at the step's end (seconds), z = voxel size (world units)
+    vec4  solver;  // x = dissipation, y = cooling (fractions per second), z = buoyancy, w = weight
+                   // (accelerations in world units / s^2: divide by step.z for voxels / s^2)
+    vec4  solver2; // x = vorticity (confinement strength)
+    vec4  up;      // xyz = world up in grid axes (unit length): buoyancy goes along it, weight against it
+    // Per source, 3 vec4: center (voxels) and radius (voxels); density and temperature added per
+    // second at the center; velocity (voxels / s). Sources are already in grid space.
+    vec4  sources[MAX_FLUID_SOURCES * 3];
+};
+
+layout(binding = 1) uniform sampler3D velocityIn;   // xyz = velocity (voxels / s); linear filtering, clamped
+layout(binding = 2) uniform sampler3D densityIn;    // x = smoke, y = temperature; linear, clamped
+layout(binding = 5, rgba16f) uniform writeonly image3D velocityOut;
+layout(binding = 6, rgba16f) uniform writeonly image3D densityOut;
+
+void main()
+{
+    ivec3 cell = ivec3(gl_GlobalInvocationID);
+    if (any(greaterThanEqual(uvec3(cell), grid.xyz)))
+        return;
+    // TODO (Author): trace back from the voxel center, sample velocity and density there; dissipation, cooling.
+    imageStore(velocityOut, cell, texelFetch(velocityIn, cell, 0));
+    imageStore(densityOut, cell, texelFetch(densityIn, cell, 0));
+}

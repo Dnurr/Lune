@@ -54,6 +54,7 @@ flowchart LR
 | Grid | scene | `fullscreen.vert` + `grid.frag` | Fullscreen triangle; each pixel intersects its view ray with y = 0. No depth write: it's the background. Premultiplied alpha: opaque with its own sky, or only the lines over an environment background. Colors converted to linear on the CPU. |
 | Meshes | scene | `mesh.vert` + `mesh.frag` | Depth tested, two-sided, Cook-Torrance (GGX) shading with the scene lights and the environment maps. One draw per submesh, each with its material slot's pipeline (node material or default) and binding set. Writes linear values (can exceed 1). Blend materials last, sorted far to near by entity, with premultiplied-alpha blending and no depth writes; closed meshes in two draws, back faces then front faces, so a glass cube's far side never blends over its near side. |
 | Scene distance | R32F, scene size | `fullscreen.vert` + `scene_distance.frag` | With particles: the depth as view depth, for soft particles. |
+| Fluid volumes | scene (kept) | `fluid_volume.vert` + `fluid_volume.frag`, after `fluid_*.comp` | One draw per volume: its box, ray marched, premultiplied over the scene. See [Fluids](#fluids). |
 | Particles | scene (kept: not cleared) | `particle.vert` + `particle.frag`, after `particles.comp` | One instanced draw per emitter, six vertices per particle slot, read from the simulation's buffer; depth tested, no depth writes, additive or premultiplied-alpha blending. See [Particles](#particles). |
 | Outline | scene | `outline.vert` + `outline.frag` | Selected entity only. "Inverted hull": back faces pushed outwards in screen space, front faces culled. Its own binding set per entity (entity uniforms only): on Direct3D 11 a binding set's registers follow the first pipeline that used it, and `mesh.frag` puts the entity block in another register. |
 | Post (HDR) | two HDR targets, a half-size depth of field target, bloom pyramid | `fullscreen.vert` + `post_dof.frag`, `post_dof_composite.frag`, `post_bloom_down/up/composite.frag` | Only the effects that are on; see [Post-processing](#post-processing). |
@@ -368,6 +369,35 @@ Entities with a **Particle Emitter** component (`ParticleEmitter` in `entity.h`)
   sorted.
 - **Stats.** The overlay shows the particles alive (estimated from the emission: born within
   a lifetime, at most the buffer), the emitters and the steps simulated in the last frame.
+
+## Fluids
+
+Entities with a **Fluid Volume** component (`FluidVolume` in `entity.h`) hold a box of gas
+simulated on a grid, fed by entities with a **Fluid Source** (`FluidSource`); `FluidSystem`
+(`engine/render/fluids.h`) runs them in Rendered, Preview, Clay and Unlit shading.
+
+- **Grid.** Cubic voxels, `resolution` of them along the box's longest side. The fields are 3D
+  textures: velocity (voxels / s, along the box's axes) and density (x = smoke, y =
+  temperature) as RGBA16F pairs, pressure as an R32F pair, divergence as one R32F. Each pass
+  reads its inputs as sampled textures (linear filtering) and writes the other texture of a
+  pair as a storage image; then the pair swaps.
+- **A step** (one timeline frame) runs `fluid_source`, `fluid_advect`, `fluid_forces`,
+  `fluid_divergence`, `fluid_pressure` (x pressure iterations) and `fluid_project`, all
+  reading the step's `FluidBuf` (dt, time, solver settings, world up and up to 8 sources in
+  grid space, as they are at that frame) through a dynamic offset. Like the particles, frame
+  `start + k` shows the fields after `k` steps from cleared fields (`fluid_clear.comp`), edits
+  simulate again, and catching up is spread over frames within a budget of voxel passes.
+- **Direct3D 11.** Each dispatch is a compute pass of its own: QRhi unbinds the storage images
+  only when a pass begins, and a texture still bound for writing can't be read (the runtime
+  drops the read, which returns zeros). Qt 6.8 also makes a 3D texture's storage view with a
+  depth range of zero slices; `FluidSystem` makes that view itself, over every slice, where
+  QRhi looks for it first.
+- **Drawing.** The box (`fluid_volume.vert`, 36 vertices, front faces culled so the inside
+  shows when the camera is in it), over the scene with premultiplied alpha in the particles'
+  pass, before them, without depth testing: `fluid_volume.frag` marches through the density
+  and stops at the scene's view depth. It gets the main light (the first directional one).
+- **Shaders.** The solver passes and the march are the author's; they start as copies (the
+  fields don't change) and a transparent march.
 
 ## Scene cameras
 

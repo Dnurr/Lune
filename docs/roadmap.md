@@ -137,13 +137,17 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 
 Smoke, fire, dust and other gas simulations on a 3D grid (Eulerian), rendered by ray marching.
 
-- [ ] Volume container component: a box in the scene with a grid resolution, voxel size, saved settings (Claude)
-- [ ] 3D textures for the fields (density, temperature, velocity, pressure, divergence), ping-pong, compute dispatch per field pass (Claude)
-- [ ] Simulation on the timeline: fixed steps, re-simulation on edits, a cache of grid snapshots for scrubbing (Claude)
-- [ ] Sources: emitters, meshes and particles that add density, temperature and velocity (Claude: sampling and buffers, Author: the injection)
+- [x] Fluid Volume component: a box with a grid resolution (cubic voxels), solver and look settings; Add menu, box drawn in the viewport (Claude)
+- [x] 3D textures for the fields (velocity, smoke and temperature, pressure, divergence), ping-pong, a compute dispatch per pass and step; workarounds for Qt 6.8's Direct3D 11 3D storage views (Claude)
+- [x] Simulation on the timeline: fixed steps, re-simulation on edits, catching up within a frame budget (Claude)
+- [ ] A cache of grid snapshots for scrubbing (Claude)
+- [x] Fluid Source component: spheres adding smoke, heat and velocity, in grid space per step (Claude)
+- [ ] Sources from meshes and particles (Claude: sampling and buffers, Author: the injection)
+- [ ] `fluid_source.comp`: the sources' injection (Author)
 - [ ] Solver passes: advection (semi-Lagrangian, then MacCormack), buoyancy, vorticity confinement, divergence, pressure (Jacobi, later multigrid), projection (Author)
 - [ ] Forces of the particle graph applied to the velocity field: wind, turbulence, vortices (both)
-- [ ] Volume rendering: ray marching through the box, absorption and scattering, shadows from the lights, emission for fire (Author: shader, Claude: box draw, depth and jitter)
+- [x] Volume drawing: the box (36 vertices, front faces culled) over the scene before the particles, the main light, the scene's view depth (Claude)
+- [ ] `fluid_volume.frag`: ray marching, absorption and scattering, the self-shadow toward the light, emission for fire, stopping at the scene (Author)
 - [ ] Particles advected by the fluid's velocity field (both)
 - [ ] VDB export of the fields (Claude, with OpenVDB as an optional dependency)
 - [ ] Atmospheric fog and light shafts: froxel grid fitted to the camera, the same scattering code (later)

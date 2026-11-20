@@ -119,6 +119,8 @@ the sphere's subsurface scattering lets light bleed around its terminator.</sub>
   have its own node graph of forces, compiled into its simulation shader at runtime, with
   nodes that follow other entities. **Forces** on any entity, so they follow
   it: gravity, wind, turbulence, attractors and vortices (spin around an axis, pull, lift).
+- **Fluid volumes**: smoke and fire simulated on 3D grids on the GPU (sources, advection,
+  forces, a pressure solve) on the timeline, drawn by ray marching.
 - **Scene files** (`.lune`, JSON, paths relative to the scene), a **stats overlay** (F12)
   and **automated tests** for the scene model, undo, file formats, importers, picking,
   gizmo and material compiler.
