@@ -34,10 +34,59 @@ layout(std140, binding = 0) uniform VolumeBuf {
     vec4 grid;           // xyz = voxels, w = voxel size (world units)
     vec4 params;         // xy = viewport size in pixels, z = scene time (seconds)
     vec4 extinction;     // rgb: extinction per channel, relative to look.x (linear; white = grey)
+    vec4 shadowLight;    // x = the main light's index in shadowBuf.lightShadow (-1: no shadows)
 };
 layout(binding = 1) uniform sampler3D density;        // x = smoke, y = temperature; linear, clamped
 layout(binding = 2) uniform sampler2D sceneDistance;  // view depth of the scene per pixel, like
                                                       // particle.frag's (texelFetch at gl_FragCoord)
+
+// The meshes' shadows (ShadowMaps): mesh.frag's shadow block, of which sunShadow() below reads
+// the directional cascades, and the directional atlas through the comparison sampler.
+#define MAX_LIGHTS 8
+#define MAX_DIR_SHADOWS 4
+#define SHADOW_CASCADES 4
+#define MAX_POINT_SHADOWS 4
+layout(std140, binding = 3) uniform shadowBuf {
+    vec4 lightShadow[MAX_LIGHTS];                            // per light: x slot (-1 = no shadows)
+    mat4 dirShadowMatrix[MAX_DIR_SHADOWS * SHADOW_CASCADES]; // world -> (atlas uv, depth), per cascade
+    vec4 dirShadowTile[MAX_DIR_SHADOWS * SHADOW_CASCADES];   // uv rectangle of each cascade's tile
+    vec4 dirShadowRange[MAX_DIR_SHADOWS * SHADOW_CASCADES];
+    mat4 pointShadowMatrix[MAX_POINT_SHADOWS * 6];
+    vec4 pointShadowTile[MAX_POINT_SHADOWS * 6];
+    vec4 pointShadowRange[MAX_POINT_SHADOWS];
+    vec4 shadowAtlas;
+    vec4 cascadeSplits;                                      // far distance of cascades 0..3 along the camera's view
+    vec4 cameraForward;                                      // xyz: the camera's view direction (unit)
+    vec4 translucencyDir;
+    vec4 translucencyPoint;
+    vec4 frontDepthDir;
+    vec4 frontDepthPoint;
+};
+layout(binding = 4) uniform sampler2DShadow dirShadowMap;
+
+// How much of the main light reaches a point in the world past the meshes: 1 = lit, 0 = in a
+// mesh's shadow (filtered over the 4 nearest texels). The cascade from the distance along the
+// camera's view, as in mesh.frag; past the last cascade, or without a shadowed main light: 1.
+// textureLod, not texture: fine inside the march (no derivatives needed).
+float sunShadow(vec3 world)
+{
+    int i = int(shadowLight.x);
+    if (i < 0)
+        return 1.0;
+    int slot = int(lightShadow[i].x);
+    if (slot < 0)
+        return 1.0;
+    float camDepth = dot(world - eye.xyz, cameraForward.xyz);
+    if (camDepth > cascadeSplits.w)
+        return 1.0;
+    int cascade = int(camDepth > cascadeSplits.x) + int(camDepth > cascadeSplits.y) + int(camDepth > cascadeSplits.z);
+    int t = slot * SHADOW_CASCADES + cascade;
+    vec3 p = (dirShadowMatrix[t] * vec4(world, 1.0)).xyz;
+    vec4 tile = dirShadowTile[t];
+    if (any(lessThan(p.xy, tile.xy)) || any(greaterThan(p.xy, tile.zw)))
+        return 1.0;
+    return textureLod(dirShadowMap, p, 0.0);
+}
 
 void main()
 {

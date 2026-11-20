@@ -582,6 +582,13 @@ void ShadowMaps::prepare(QRhiResourceUpdateBatch *rub, const std::vector<Light> 
     }
 }
 
+QList<QRhiShaderResourceBinding> ShadowMaps::directionalBindings(int uniformBinding, int mapBinding) const
+{
+    using B = QRhiShaderResourceBinding;
+    return { B::uniformBuffer(uniformBinding, B::FragmentStage, m_uniforms.get()),
+             B::sampledTexture(mapBinding, B::FragmentStage, m_directional.get(), m_compareSampler.get()) };
+}
+
 std::vector<ShadowMaps::TranslucentView> ShadowMaps::translucentViews() const
 {
     std::vector<TranslucentView> out;

@@ -22,6 +22,7 @@ layout(std140, binding = 0) uniform VolumeBuf {
     vec4 grid;           // xyz = voxels, w = voxel size (world units)
     vec4 params;         // xy = viewport size in pixels, z = scene time (seconds)
     vec4 extinction;     // rgb: extinction per channel, relative to look.x (linear; white = grey)
+    vec4 shadowLight;    // x = the main light's index in shadowBuf.lightShadow (-1: no shadows)
 };
 
 void main()

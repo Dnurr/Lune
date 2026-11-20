@@ -66,15 +66,19 @@ public:
     bool supported() const { return m_supported; }
     // The scene's view depth per pixel (see ParticleSystem::setSceneDistance()); null: a stand-in.
     void setSceneDistance(QRhiTexture *texture);
+    // The shadow maps the volumes test the main light's shadows in (fluid_volume.frag's
+    // shadowBuf, dirShadowMap). Set before drawing.
+    void setShadowMaps(const ShadowMaps *shadows);
 
     // Brings every enabled volume of `scene` to scene time `seconds`: a compute pass. Outside any
     // render pass, before the scene pass.
     void simulate(QRhiCommandBuffer *cb, const Scene *scene, float seconds);
     // The volumes' draw uniforms. `lightDirection`: where the main light shines (unit, world);
-    // `lightColor`: its radiance, linear; `hasLight` false: none.
+    // `lightColor`: its radiance, linear; `hasLight` false: none. `shadowLight`: its index in
+    // mesh.frag's lights[] (for its shadows), -1 for none.
     void prepareDraw(QRhiResourceUpdateBatch *rub, const QMatrix4x4 &clipViewProj, const QVector3D &eye,
-                     const QVector3D &lightDirection, const QVector3D &lightColor, bool hasLight, const QSize &viewportPixels,
-                     float seconds);
+                     const QVector3D &lightDirection, const QVector3D &lightColor, bool hasLight, int shadowLight,
+                     const QSize &viewportPixels, float seconds);
     // Draws every volume, inside the scene's kept pass.
     void draw(QRhiCommandBuffer *cb, const QRhiViewport &viewport);
 
@@ -142,6 +146,7 @@ private:
     std::unique_ptr<QRhiTexture> m_layoutVolume;    // 1x1x1, for the layouts and unused inputs
     std::unique_ptr<QRhiTexture> m_distanceStandIn; // 1x1
     QRhiTexture *m_sceneDistance = nullptr;         // not owned
+    const ShadowMaps *m_shadowMaps = nullptr;       // not owned
     std::unique_ptr<QRhiSampler> m_linear, m_nearest;
     std::unique_ptr<QRhiGraphicsPipeline> m_drawPipe;
     // OpenGL: Qt's backend has no dual-source blend factors, so each volume is drawn twice

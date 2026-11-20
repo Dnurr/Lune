@@ -52,8 +52,8 @@ void fixVolumeStorageView(QRhi *rhi, QRhiTexture *texture)
 
 // FluidBuf in fluid_*.comp: uvec4 grid, vec4 step, solver, solver2, up, vec4 sources[MaxSources * 3].
 constexpr int kFluidUbufSize = 5 * 16 + FluidSystem::MaxSources * 3 * 16;
-// VolumeBuf in fluid_volume.vert/.frag: mat4 viewProj, model, worldToBox, then 9 vec4.
-constexpr int kVolumeUbufSize = 3 * 64 + 9 * 16;
+// VolumeBuf in fluid_volume.vert/.frag: mat4 viewProj, model, worldToBox, then 10 vec4.
+constexpr int kVolumeUbufSize = 3 * 64 + 10 * 16;
 // ShadowBuf in fluid_shadow.vert/.frag: mat4 lightViewProj, model, worldToBox, then 4 vec4.
 constexpr int kShadowUbufSize = 3 * 64 + 4 * 16;
 
@@ -210,7 +210,10 @@ void FluidSystem::initialize(QRhi *rhi)
     m_drawLayout.reset(m_rhi->newShaderResourceBindings());
     m_drawLayout->setBindings({ B::uniformBuffer(0, B::VertexStage | B::FragmentStage, m_layoutUniforms.get()),
                                 B::sampledTexture(1, B::FragmentStage, t, m_linear.get()),
-                                B::sampledTexture(2, B::FragmentStage, m_distanceStandIn.get(), m_nearest.get()) });
+                                B::sampledTexture(2, B::FragmentStage, m_distanceStandIn.get(), m_nearest.get()),
+                                // the shadow block and the directional atlas (setShadowMaps())
+                                B::uniformBuffer(3, B::FragmentStage, m_layoutUniforms.get()),
+                                B::sampledTexture(4, B::FragmentStage, m_distanceStandIn.get(), m_nearest.get()) });
     m_drawLayout->create();
     m_shadowLayout.reset(m_rhi->newShaderResourceBindings());
     m_shadowLayout->setBindings({ B::uniformBufferWithDynamicOffset(0, B::VertexStage | B::FragmentStage, m_layoutUniforms.get(),
@@ -335,6 +338,16 @@ void FluidSystem::setSceneDistance(QRhiTexture *texture)
     if (texture == m_sceneDistance)
         return;
     m_sceneDistance = texture;
+    for (auto &[id, v] : m_volumes)
+        for (auto &s : v.drawSrbs)
+            retire(s);
+}
+
+void FluidSystem::setShadowMaps(const ShadowMaps *shadows)
+{
+    if (shadows == m_shadowMaps)
+        return;
+    m_shadowMaps = shadows;
     for (auto &[id, v] : m_volumes)
         for (auto &s : v.drawSrbs)
             retire(s);
@@ -636,7 +649,7 @@ void FluidSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float seco
 
 void FluidSystem::prepareDraw(QRhiResourceUpdateBatch *rub, const QMatrix4x4 &clipViewProj, const QVector3D &eye,
                               const QVector3D &lightDirection, const QVector3D &lightColor, bool hasLight,
-                              const QSize &viewportPixels, float seconds)
+                              int shadowLight, const QSize &viewportPixels, float seconds)
 {
     if (!m_supported)
         return;
@@ -662,13 +675,14 @@ void FluidSystem::prepareDraw(QRhiResourceUpdateBatch *rub, const QMatrix4x4 &cl
         x[29] = float(viewportPixels.height());
         x[30] = seconds;
         putColor(x + 32, v.settings.extinction);
+        x[36] = m_shadowMaps && hasLight ? float(shadowLight) : -1.0f; // shadow
         rub->updateDynamicBuffer(v.drawUniforms.get(), 0, kVolumeUbufSize, data);
     }
 }
 
 void FluidSystem::draw(QRhiCommandBuffer *cb, const QRhiViewport &viewport)
 {
-    if (!m_supported || !m_drawPipe)
+    if (!m_supported || !m_drawPipe || !m_shadowMaps)
         return;
     for (auto &[id, v] : m_volumes) {
         if (!v.drawUniforms || v.stepsDone < 0)
@@ -677,10 +691,13 @@ void FluidSystem::draw(QRhiCommandBuffer *cb, const QRhiViewport &viewport)
         if (!srb) {
             using B = QRhiShaderResourceBinding;
             srb.reset(m_rhi->newShaderResourceBindings());
-            srb->setBindings({ B::uniformBuffer(0, B::VertexStage | B::FragmentStage, v.drawUniforms.get()),
-                               B::sampledTexture(1, B::FragmentStage, v.density[size_t(v.d)].get(), m_linear.get()),
-                               B::sampledTexture(2, B::FragmentStage, m_sceneDistance ? m_sceneDistance : m_distanceStandIn.get(),
-                                                 m_nearest.get()) });
+            QList<QRhiShaderResourceBinding> bindings = {
+                B::uniformBuffer(0, B::VertexStage | B::FragmentStage, v.drawUniforms.get()),
+                B::sampledTexture(1, B::FragmentStage, v.density[size_t(v.d)].get(), m_linear.get()),
+                B::sampledTexture(2, B::FragmentStage, m_sceneDistance ? m_sceneDistance : m_distanceStandIn.get(), m_nearest.get())
+            };
+            bindings.append(m_shadowMaps->directionalBindings(3, 4));
+            srb->setBindings(bindings.cbegin(), bindings.cend());
             srb->create();
         }
         for (QRhiGraphicsPipeline *pipe : { m_drawPipe.get(), m_drawAddPipe.get() }) {

@@ -140,6 +140,10 @@ public:
     // Bindings of a caster's SRB in the shadow passes: its entity uniforms (binding 0, only
     // `model` is read) and the view matrix (binding 1, dynamic offset per tile).
     QList<QRhiShaderResourceBinding> casterBindings(QRhiBuffer *entityUniforms) const;
+    // For other fragment shaders that test the directional shadows (fluid_volume.frag): the
+    // shadow block (mesh.frag's shadowBuf) at `uniformBinding`, the directional atlas through the
+    // comparison sampler (dirShadowMap) at `mapBinding`.
+    QList<QRhiShaderResourceBinding> directionalBindings(int uniformBinding, int mapBinding) const;
     // The view of material casters (MaterialViewBinding, dynamic offset per tile).
     QRhiShaderResourceBinding materialViewBinding() const;
     // A pipeline for a material's shadow fragment shader (mesh.frag's declarations + the

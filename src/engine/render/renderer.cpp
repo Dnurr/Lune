@@ -161,6 +161,7 @@ void Renderer::initialize(QRhi *rhi, QRhiRenderTarget *target)
         m_particles.initialize(m_rhi);
         m_fluids.initialize(m_rhi);
         m_shadows.initialize(m_rhi);
+        m_fluids.setShadowMaps(&m_shadows);
         m_textures.initialize(m_rhi);
 
         using B = QRhiShaderResourceBinding;
@@ -1293,8 +1294,16 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         }
         if (anyLight && !sun)
             hasLight = false;
+        // Its index in the lights buffer, for its shadows: the first directional one there too.
+        int shadowLight = -1;
+        for (const ShadowMaps::Light &l : shadowLights) {
+            if (!l.point) {
+                shadowLight = l.lightIndex;
+                break;
+            }
+        }
         m_fluids.prepareDraw(rub, m_rhi->clipSpaceCorrMatrix() * viewProj, eye, lightDir.normalized(), lightColor, hasLight,
-                             m_pixelSize, m_seconds);
+                             shadowLight, m_pixelSize, m_seconds);
     }
     // Their shadows, in every tile of the translucency map (drawn by m_shadows.render() below).
     m_fluids.prepareShadows(rub, m_shadows.translucentViews());
