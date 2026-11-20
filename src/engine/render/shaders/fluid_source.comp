@@ -38,6 +38,25 @@ void main()
     if (any(greaterThanEqual(uvec3(cell), grid.xyz)))
         return;
     // TODO (Author): for each of grid.w sources: smoke, heat and velocity added within its radius.
-    imageStore(velocityOut, cell, texelFetch(velocityIn, cell, 0));
-    imageStore(densityOut, cell, texelFetch(densityIn, cell, 0));
+    vec3 p = vec3(cell) + 0.5;
+    vec4 den = texelFetch(densityIn, cell, 0);
+    vec4 vel = texelFetch(velocityIn, cell, 0);
+    
+    for (uint i = 0; i < grid.w; i++)
+    {
+        float dt     = step.x;
+        vec3 center  = sources[i * 3].xyz;
+        float radius = sources[i * 3].w;
+        float smoke  = sources[i * 3 + 1].x;
+        float heat   = sources[i * 3 + 1].y;
+        vec3 srcVel  = sources[i * 3 + 2].xyz;
+        float d      = distance(p, center);
+        float w      = 1.0 - smoothstep(0.0, radius, d);
+        den.x        += smoke * w * dt;
+        den.y        += heat  * w * dt;
+        vel.xyz      = mix(vel.xyz, srcVel, w);
+    }
+    
+    imageStore(velocityOut, cell, vel);
+    imageStore(densityOut, cell, den);
 }

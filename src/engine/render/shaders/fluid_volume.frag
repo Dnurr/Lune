@@ -41,10 +41,70 @@ layout(binding = 2) uniform sampler2D sceneDistance;  // view depth of the scene
 
 void main()
 {
-    // TODO (Author): the ray from eye.xyz toward v_world, in box space (worldToBox); where it
-    // enters and leaves the box; march look.y steps, sampling density at box position + 0.5:
-    // extinction (look.x), light scattered (color, lightColor, a march toward the light for the
-    // self-shadow), emission (emissionColor x temperature x look.z); stop at the scene.
-    fragColor = vec4(0.0);
-    transmittance = vec4(1.0);
+    vec3 o = (worldToBox * vec4(eye.xyz, 1.0)).xyz;
+    vec3 e = (worldToBox * vec4(v_world, 1.0)).xyz;
+
+    vec3 dir = e - o;
+
+    vec3 t0      = (vec3(-0.5) - o) / dir;
+    vec3 t1      = (vec3( 0.5) - o) / dir;
+    vec3 tmin    = min(t0, t1);
+    float tEnter = max(max(tmin.x, tmin.y), max(tmin.z, 0.0));
+    float tExit  = 1.0;
+        
+    if (look.w > 0.5)
+    {
+        float sceneDepth = texelFetch(sceneDistance, ivec2(gl_FragCoord.xy), 0).r;
+        float exitDepth  = 1.0 / gl_FragCoord.w;
+        tExit            = min(tExit, sceneDepth / exitDepth);
+    }
+    
+    if (tExit <= tEnter) discard;
+
+    int n    = int(look.y);
+    float dt = (tExit - tEnter) / float(n);
+    float ds = length(v_world - eye.xyz) * dt;
+    
+    vec3 L              = vec3(0.0);
+    vec3 T              = vec3(1.0);
+    vec3 scatteredLight = color.rgb * lightColor.rgb * lightDir.w;
+
+    const int LIGHT_STEPS = 6;
+    vec3 toLight = mat3(worldToBox) * (-lightDir.xyz);
+
+    for (int i = 0; i < n; i++)
+    {
+        vec3 p = o + dir * (tEnter + (float(i) + 0.5) * dt);
+        vec2 s      = textureLod(density, p + 0.5, 0.0).xy;
+        vec3 sigma = s.x * look.x * extinction.rgb;
+        vec3 stepT = exp(-sigma * ds);
+
+        float smoke  = 0.0;
+        float dl     = 0.0;
+
+        if (max(sigma.r, max(sigma.g, sigma.b)) > 1e-4)
+        {
+            vec3 l0     = (vec3(-0.5) - p) / toLight;
+            vec3 l1     = (vec3( 0.5) - p) / toLight;
+            vec3 lmax   = max(l0, l1);
+            float lExit = min(min(lmax.x, lmax.y), lmax.z);
+            dl          = lExit / float(LIGHT_STEPS);
+
+            for (int j = 0; j < LIGHT_STEPS; j++)
+            {
+                vec3 q = p + toLight * ((float(j) + 0.5) * dl);
+                smoke += textureLod(density, q + 0.5, 0.0).x;
+            }
+        }
+
+        vec3 shadow = exp(-smoke * look.x * extinction.rgb * dl);
+
+        if (max(T.r, max(T.g, T.b)) < 0.01) break;
+        L += T * (1.0 - stepT) * scatteredLight * shadow;
+        L += T * emissionColor.rgb * s.y * look.z * ds;
+        T *= stepT;
+    }
+
+    transmittance = vec4(T, 1.0);
+    fragColor = vec4(L, 1.0 - dot(T, vec3(1.0 / 3.0)));
 }
