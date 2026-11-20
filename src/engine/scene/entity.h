@@ -226,6 +226,9 @@ struct FluidVolume
 
     // Look (fluid_volume.frag)
     QColor color { 0xD0, 0xD0, 0xD8 };          // the smoke's scattering color (sRGB)
+    QColor extinction { 0xFF, 0xFF, 0xFF };     // extinction per channel, relative to `density`
+                                                 // (white: grey smoke; less red: the light that
+                                                 // gets through, and the shadows, turn red)
     float density = 4.0f;                        // extinction per unit of smoke per world unit
     QColor emissionColor { 0xFF, 0x78, 0x28 };  // fire: the color of hot gas (sRGB)
     float emission = 0.0f;                       // fire: brightness per unit of temperature

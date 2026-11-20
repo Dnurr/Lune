@@ -21,6 +21,7 @@ layout(std140, binding = 0) uniform VolumeBuf {
     vec4 emissionColor;  // rgb: fire color (linear)
     vec4 grid;           // xyz = voxels, w = voxel size (world units)
     vec4 params;         // xy = viewport size in pixels, z = scene time (seconds)
+    vec4 extinction;     // rgb: extinction per channel, relative to look.x (linear; white = grey)
 };
 
 void main()

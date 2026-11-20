@@ -517,6 +517,7 @@ ComponentDesc fluidVolumeComponent()
         prop("vorticity", "solver", PropertyType::Float, 0.005, 0.0, 100.0),
         prop("pressure iterations", "solver", PropertyType::Float, 0.2, 1.0, 200.0),
         prop("color", "look", PropertyType::Color),
+        prop("extinction", "look", PropertyType::Color),
         prop("density", "look", PropertyType::Float, 0.02, 0.0, 1e4),
         prop("emission color", "look", PropertyType::Color),
         prop("emission", "look", PropertyType::Float, 0.02, 0.0, 1e4),
@@ -538,10 +539,11 @@ ComponentDesc fluidVolumeComponent()
         case 7: return double(f.vorticity);
         case 8: return double(f.pressureIterations);
         case 9: return f.color;
-        case 10: return double(f.density);
-        case 11: return f.emissionColor;
-        case 12: return double(f.emission);
-        case 13: return double(f.samples);
+        case 10: return f.extinction;
+        case 11: return double(f.density);
+        case 12: return f.emissionColor;
+        case 13: return double(f.emission);
+        case 14: return double(f.samples);
         }
         return {};
     };
@@ -566,10 +568,11 @@ ComponentDesc fluidVolumeComponent()
         case 7: f.vorticity = clamp(0.0, 100.0); break;
         case 8: f.pressureIterations = int(std::lround(qBound(1.0, x, 200.0))); break;
         case 9: f.color = v.value<QColor>(); break;
-        case 10: f.density = clamp(0.0, 1e4); break;
-        case 11: f.emissionColor = v.value<QColor>(); break;
-        case 12: f.emission = clamp(0.0, 1e4); break;
-        case 13: f.samples = int(std::lround(qBound(8.0, x, 512.0))); break;
+        case 10: f.extinction = v.value<QColor>(); break;
+        case 11: f.density = clamp(0.0, 1e4); break;
+        case 12: f.emissionColor = v.value<QColor>(); break;
+        case 13: f.emission = clamp(0.0, 1e4); break;
+        case 14: f.samples = int(std::lround(qBound(8.0, x, 512.0))); break;
         }
     };
     c.add = [](Entity &e) {

@@ -4,14 +4,19 @@
 // the box) to where it leaves it, or to the scene's surface if that's nearer. Author: to be
 // written.
 //
-// Drawn over the scene (premultiplied alpha: rgb = light scattered and emitted toward the
-// camera, a = how much of what's behind is hidden), into the HDR target, after the meshes and
+// Drawn over the scene (dual-source blending: rgb = light scattered and emitted toward the
+// camera, plus `transmittance` = how much of what's behind gets through, per channel; a = how
+// much is hidden, on average), into the HDR target, after the meshes and
 // before the particles, without depth testing: the march stops at sceneDistance itself.
 //
 // Until then: nothing (fully transparent).
 
 layout(location = 0) in vec3 v_world; // where the ray leaves the box (a back face), world space
 layout(location = 0) out vec4 fragColor;
+// Dual-source blending: the second output multiplies what's behind, channel by channel
+// (result = behind * transmittance.rgb + fragColor.rgb). Write T here (vec4(T, 1.0) or
+// vec4(vec3(T), 1.0)); fragColor.a is still 1 - T (an average if T is per channel).
+layout(location = 0, index = 1) out vec4 transmittance;
 
 // One per Fluid Volume (FluidSystem::prepareDraw()).
 layout(std140, binding = 0) uniform VolumeBuf {
@@ -28,6 +33,7 @@ layout(std140, binding = 0) uniform VolumeBuf {
     vec4 emissionColor;  // rgb: fire color (linear)
     vec4 grid;           // xyz = voxels, w = voxel size (world units)
     vec4 params;         // xy = viewport size in pixels, z = scene time (seconds)
+    vec4 extinction;     // rgb: extinction per channel, relative to look.x (linear; white = grey)
 };
 layout(binding = 1) uniform sampler3D density;        // x = smoke, y = temperature; linear, clamped
 layout(binding = 2) uniform sampler2D sceneDistance;  // view depth of the scene per pixel, like
@@ -40,4 +46,5 @@ void main()
     // extinction (look.x), light scattered (color, lightColor, a march toward the light for the
     // self-shadow), emission (emissionColor x temperature x look.z); stop at the scene.
     fragColor = vec4(0.0);
+    transmittance = vec4(1.0);
 }

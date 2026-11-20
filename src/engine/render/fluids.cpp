@@ -49,8 +49,8 @@ void fixVolumeStorageView(QRhi *rhi, QRhiTexture *texture)
 
 // FluidBuf in fluid_*.comp: uvec4 grid, vec4 step, solver, solver2, up, vec4 sources[MaxSources * 3].
 constexpr int kFluidUbufSize = 5 * 16 + FluidSystem::MaxSources * 3 * 16;
-// VolumeBuf in fluid_volume.vert/.frag: mat4 viewProj, model, worldToBox, then 8 vec4.
-constexpr int kVolumeUbufSize = 3 * 64 + 8 * 16;
+// VolumeBuf in fluid_volume.vert/.frag: mat4 viewProj, model, worldToBox, then 9 vec4.
+constexpr int kVolumeUbufSize = 3 * 64 + 9 * 16;
 
 QShader loadShader(const QString &name)
 {
@@ -194,10 +194,13 @@ void FluidSystem::createPipelines(QRhiRenderPassDescriptor *sceneRp, int sampleC
     m_drawPipe->setCullMode(QRhiGraphicsPipeline::Front); // back faces: the box from inside too
     m_drawPipe->setDepthTest(false);                       // the march stops at the scene itself
     m_drawPipe->setDepthWrite(false);
-    QRhiGraphicsPipeline::TargetBlend b; // premultiplied alpha
+    // Dual-source: the shader's second output (index 1) is the transmittance per channel, so
+    // what's behind is dimmed, and tinted, channel by channel: dst * T + L. Alpha stays
+    // premultiplied (a = how much is hidden, on average).
+    QRhiGraphicsPipeline::TargetBlend b;
     b.enable = true;
     b.srcColor = QRhiGraphicsPipeline::One;
-    b.dstColor = QRhiGraphicsPipeline::OneMinusSrcAlpha;
+    b.dstColor = QRhiGraphicsPipeline::Src1Color;
     b.srcAlpha = QRhiGraphicsPipeline::One;
     b.dstAlpha = QRhiGraphicsPipeline::OneMinusSrcAlpha;
     m_drawPipe->setTargetBlends({ b });
@@ -553,6 +556,7 @@ void FluidSystem::prepareDraw(QRhiResourceUpdateBatch *rub, const QMatrix4x4 &cl
         x[28] = float(viewportPixels.width());
         x[29] = float(viewportPixels.height());
         x[30] = seconds;
+        putColor(x + 32, v.settings.extinction);
         rub->updateDynamicBuffer(v.drawUniforms.get(), 0, kVolumeUbufSize, data);
     }
 }
