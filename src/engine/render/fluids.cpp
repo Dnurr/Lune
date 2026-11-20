@@ -473,6 +473,15 @@ void FluidSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float seco
             u[10] = bf.buoyancy;
             u[11] = bf.weight;
             u[12] = bf.vorticity;                   // solver2
+            // Stratified air: its temperature at a grid point p is solver2.y * dot(p, up) +
+            // solver2.z, 0 at the box's lowest corner, rising by ambientLapse per world unit.
+            float lowest = 0.0f;
+            for (int c = 0; c < 8; ++c) {
+                const QVector3D corner(c & 1 ? float(nx) : 0.0f, c & 2 ? float(ny) : 0.0f, c & 4 ? float(nz) : 0.0f);
+                lowest = qMin(lowest, QVector3D::dotProduct(corner, up));
+            }
+            u[13] = bf.ambientLapse * voxel;        // per voxel of height
+            u[14] = -u[13] * lowest;
             u[16] = up.x(); u[17] = up.y(); u[18] = up.z(); // up, in grid axes
 
             // The step's passes, swapping each pair after its output is written.

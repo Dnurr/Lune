@@ -213,6 +213,7 @@ private slots:
         box.fluid->resolution = 96;
         box.fluid->vorticity = 0.75f;
         box.fluid->pressureIterations = 40;
+        box.fluid->ambientLapse = 0.35f;
         box.fluid->emissionColor = QColor(255, 90, 10);
         box.fluid->extinction = QColor(180, 220, 255);
         scene.createEntity(box);

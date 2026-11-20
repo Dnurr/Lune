@@ -22,6 +22,9 @@ layout(std140, binding = 0) uniform FluidBuf {
     vec4  solver;  // x = dissipation, y = cooling (fractions per second), z = buoyancy, w = weight
                    // (accelerations in world units / s^2: divide by step.z for voxels / s^2)
     vec4  solver2; // x = vorticity (confinement strength)
+                   // y, z = stratified air: its temperature at grid point p is
+                   // y * dot(p, up.xyz) + z (0 at the box's lowest corner); buoyancy
+                   // pushes with the temperature above it
     vec4  up;      // xyz = world up in grid axes (unit length): buoyancy goes along it, weight against it
     // Per source, 3 vec4: center (voxels) and radius (voxels); density and temperature added per
     // second at the center; velocity (voxels / s). Sources are already in grid space.
@@ -52,11 +55,13 @@ void main()
     if (any(greaterThanEqual(uvec3(cell), grid.xyz)))
         return;
 
-    vec4 vel = texelFetch(velocityIn, cell, 0);
-    vec2 d   = texelFetch(densityIn,  cell, 0).xy;
+    vec4 vel  = texelFetch(velocityIn, cell, 0);
+    vec2 d    = texelFetch(densityIn,  cell, 0).xy;
+    vec3 p    = vec3(cell) + 0.5;
+    float air = solver2.y * dot(p, up.xyz) + solver2.z;
 
     // Buoyancy and weight
-    vec3 a  = up.xyz * (solver.z * d.y - solver.w * d.x) / step.z;
+    vec3 a  = up.xyz * (solver.z * (d.y - air) - solver.w * d.x) / step.z;
     vel.xyz += a * step.x;
 
     // Vorticity

@@ -223,6 +223,9 @@ struct FluidVolume
     float weight = 0.2f;        // downward acceleration per unit of smoke
     float vorticity = 0.3f;     // vorticity confinement: how strongly small swirls are kept
     int pressureIterations = 20; // Jacobi iterations of the pressure solve, per step
+    float ambientLapse = 0.0f;  // stratified air: how much warmer it gets per world unit of
+                                // height above the box's lowest point (0: the same everywhere);
+                                // hot gas rises until it's no warmer than the air around it
 
     // Look (fluid_volume.frag)
     QColor color { 0xD0, 0xD0, 0xD8 };          // the smoke's scattering color (sRGB)
