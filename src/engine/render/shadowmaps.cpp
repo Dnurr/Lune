@@ -1,4 +1,5 @@
 #include "shadowmaps.h"
+#include "shadernames.h"
 
 #include "engine/scene/mesh.h"
 
@@ -49,7 +50,7 @@ QShader loadShader(const QString &name)
         qWarning("ShadowMaps: missing shader %s", qPrintable(name));
         return {};
     }
-    return QShader::fromSerialized(f.readAll());
+    return withReflectedMemberNames(QShader::fromSerialized(f.readAll()));
 }
 
 void putMat4(float *dst, const QMatrix4x4 &m)

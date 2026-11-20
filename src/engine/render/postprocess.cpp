@@ -1,4 +1,5 @@
 #include "postprocess.h"
+#include "shadernames.h"
 
 #include <QFile>
 #include <QImage>
@@ -19,7 +20,7 @@ QShader loadPostShader(const QString &name)
         qWarning("PostProcessor: missing shader %s", qPrintable(name));
         return {};
     }
-    return QShader::fromSerialized(f.readAll());
+    return withReflectedMemberNames(QShader::fromSerialized(f.readAll()));
 }
 } // namespace
 

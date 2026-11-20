@@ -1,4 +1,5 @@
 #include "fluids.h"
+#include "shadernames.h"
 
 #include <QFile>
 #include <QImage>
@@ -53,42 +54,6 @@ void fixVolumeStorageView(QRhi *rhi, QRhiTexture *texture)
 constexpr int kFluidUbufSize = 5 * 16 + FluidSystem::MaxSources * 3 * 16;
 // VolumeBuf in fluid_volume.vert/.frag: mat4 viewProj, model, worldToBox, then 9 vec4.
 constexpr int kVolumeUbufSize = 3 * 64 + 9 * 16;
-
-// SPIRV-Cross renames uniform block members named like GLSL built-in functions in the GLSL it
-// writes (FluidBuf's `step` becomes `_step`), but the reflection keeps the original name. Qt's
-// OpenGL backend sets uniform blocks member by member, looking each one up by its reflected
-// name: a renamed member is never found and reads as 0 (dt = 0, voxel size = 0). Struct
-// members don't clash with functions, so the reflected names are put back in the GLSL.
-QShader withReflectedMemberNames(QShader shader)
-{
-    QList<QByteArray> names;
-    for (const QShaderDescription::UniformBlock &block : shader.description().uniformBlocks()) {
-        for (const QShaderDescription::BlockVariable &member : block.members)
-            names.append(member.name);
-    }
-    const QList<QShaderKey> keys = shader.availableShaders();
-    for (const QShaderKey &key : keys) {
-        if (key.source() != QShader::GlslShader)
-            continue;
-        QShaderCode code = shader.shader(key);
-        QString src = QString::fromUtf8(code.shader());
-        bool changed = false;
-        for (const QByteArray &name : names) {
-            const QString n = QRegularExpression::escape(QString::fromUtf8(name));
-            const QRegularExpression original(QStringLiteral("\\.") + n + QStringLiteral("\\b"));
-            const QRegularExpression renamed(QStringLiteral("\\b_") + n + QStringLiteral("\\b"));
-            if (!src.contains(original) && src.contains(renamed)) {
-                src.replace(renamed, QString::fromUtf8(name));
-                changed = true;
-            }
-        }
-        if (changed) {
-            code.setShader(src.toUtf8());
-            shader.setShader(key, code);
-        }
-    }
-    return shader;
-}
 
 QShader loadShader(const QString &name)
 {

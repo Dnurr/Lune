@@ -1,4 +1,5 @@
 #include "particles.h"
+#include "shadernames.h"
 
 #include <QFile>
 #include <QImage>
@@ -34,7 +35,7 @@ QShader loadShader(const QString &name)
         qWarning("ParticleSystem: missing shader %s", qPrintable(name));
         return {};
     }
-    return QShader::fromSerialized(f.readAll());
+    return withReflectedMemberNames(QShader::fromSerialized(f.readAll()));
 }
 
 float linear(float c)
@@ -269,7 +270,7 @@ QRhiComputePipeline *ParticleSystem::graphPipeline(const QString &code, QString 
             baker.setGeneratedShaders(targets);
             baker.setGeneratedShaderVariants({ QShader::StandardShader });
             baker.setSourceString(source.toUtf8(), QShader::ComputeStage, "particle graph");
-            const QShader shader = baker.bake();
+            const QShader shader = withReflectedMemberNames(baker.bake());
             if (!shader.isValid()) {
                 g.error = QStringLiteral("Shader error: ") + baker.errorMessage().trimmed();
             } else {

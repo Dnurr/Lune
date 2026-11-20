@@ -39,6 +39,7 @@ add_library(lune_engine STATIC
     src/engine/render/postprocess.cpp
     src/engine/render/particles.cpp
     src/engine/render/fluids.cpp
+    src/engine/render/shadernames.cpp
 )
 # Includes are relative to src/: "engine/scene/scene.h", "frontend/core/selection.h"
 target_include_directories(lune_engine PUBLIC src)

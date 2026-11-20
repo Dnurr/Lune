@@ -1,4 +1,5 @@
 #include "renderer.h"
+#include "shadernames.h"
 
 #include "camera.h"
 #include "engine/material/materialcompiler.h"
@@ -46,7 +47,7 @@ QShader loadShader(const QString &name)
         qWarning("Renderer: missing shader %s", qPrintable(name));
         return {};
     }
-    return QShader::fromSerialized(f.readAll());
+    return withReflectedMemberNames(QShader::fromSerialized(f.readAll()));
 }
 
 float *putVec4(float *dst, const QColor &c, float w)
@@ -648,7 +649,7 @@ QShader Renderer::compileFragment(const QString &source, const QString &name, QS
     QShader shader = baker.bake();
     if (!shader.isValid())
         *error = QStringLiteral("Shader error: ") + baker.errorMessage().trimmed();
-    return shader;
+    return withReflectedMemberNames(shader);
 }
 
 Renderer::MaterialShader &Renderer::materialShader(const QString &code)

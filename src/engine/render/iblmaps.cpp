@@ -1,4 +1,5 @@
 #include "iblmaps.h"
+#include "shadernames.h"
 
 #include <QFile>
 #include <QFloat16>
@@ -17,7 +18,7 @@ QShader loadShader(const QString &name)
         qWarning("IblMaps: missing shader %s", qPrintable(name));
         return {};
     }
-    return QShader::fromSerialized(f.readAll());
+    return withReflectedMemberNames(QShader::fromSerialized(f.readAll()));
 }
 
 float sRGBToLinear(float c)
