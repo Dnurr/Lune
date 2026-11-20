@@ -54,6 +54,8 @@ void fixVolumeStorageView(QRhi *rhi, QRhiTexture *texture)
 constexpr int kFluidUbufSize = 5 * 16 + FluidSystem::MaxSources * 3 * 16;
 // VolumeBuf in fluid_volume.vert/.frag: mat4 viewProj, model, worldToBox, then 9 vec4.
 constexpr int kVolumeUbufSize = 3 * 64 + 9 * 16;
+// ShadowBuf in fluid_shadow.vert/.frag: mat4 lightViewProj, model, worldToBox, then 4 vec4.
+constexpr int kShadowUbufSize = 3 * 64 + 4 * 16;
 
 QShader loadShader(const QString &name)
 {
@@ -210,6 +212,12 @@ void FluidSystem::initialize(QRhi *rhi)
                                 B::sampledTexture(1, B::FragmentStage, t, m_linear.get()),
                                 B::sampledTexture(2, B::FragmentStage, m_distanceStandIn.get(), m_nearest.get()) });
     m_drawLayout->create();
+    m_shadowLayout.reset(m_rhi->newShaderResourceBindings());
+    m_shadowLayout->setBindings({ B::uniformBufferWithDynamicOffset(0, B::VertexStage | B::FragmentStage, m_layoutUniforms.get(),
+                                                                    kShadowUbufSize),
+                                  B::sampledTexture(1, B::FragmentStage, t, m_linear.get()) });
+    m_shadowLayout->create();
+    m_shadowStride = quint32(m_rhi->ubufAligned(kShadowUbufSize));
 
     auto compute = [&](const char *name, QRhiShaderResourceBindings *layout) {
         std::unique_ptr<QRhiComputePipeline> p(m_rhi->newComputePipeline());
@@ -295,12 +303,15 @@ void FluidSystem::release()
     m_retiredBefore.clear();
     m_drawPipe.reset();
     m_drawAddPipe.reset();
+    m_shadowPipe.reset();
+    m_shadowViewports.clear();
     for (auto &p : m_pipes)
         p.reset();
     m_clearPipe.reset();
     m_passLayout.reset();
     m_clearLayout.reset();
     m_drawLayout.reset();
+    m_shadowLayout.reset();
     m_layoutUniforms.reset();
     m_layoutVolume.reset();
     if (m_pendingUpload) {
@@ -338,6 +349,9 @@ void FluidSystem::retire(Volume &v)
         retire(s);
     for (auto &s : v.drawSrbs)
         retire(s);
+    for (auto &s : v.shadowSrbs)
+        retire(s);
+    retire(v.shadowUniforms);
     for (auto *pair : { &v.velocity, &v.density, &v.pressure })
         for (auto &t : *pair)
             retire(t);
@@ -678,4 +692,116 @@ void FluidSystem::draw(QRhiCommandBuffer *cb, const QRhiViewport &viewport)
             cb->draw(36);
         }
     }
+}
+
+void FluidSystem::createShadowPipeline(QRhiRenderPassDescriptor *translucencyRp)
+{
+    m_shadowPipe.reset();
+    if (!m_supported || !translucencyRp)
+        return;
+    using G = QRhiGraphicsPipeline;
+    m_shadowPipe.reset(m_rhi->newGraphicsPipeline());
+    m_shadowPipe->setShaderStages({ { QRhiShaderStage::Vertex, loadShader(QStringLiteral("fluid_shadow.vert")) },
+                                    { QRhiShaderStage::Fragment, loadShader(QStringLiteral("fluid_shadow.frag")) } });
+    m_shadowPipe->setShaderResourceBindings(m_shadowLayout.get());
+    m_shadowPipe->setRenderPassDescriptor(translucencyRp);
+    // The faces toward the light: one fragment per texel, where the light enters the box (a
+    // point light inside the box casts no volume shadow).
+    m_shadowPipe->setCullMode(G::Back);
+    // Like a blend material's shadow (ShadowMaps::createMaterialPipeline): rgb multiplied by
+    // what gets through, a = the nearest linear depth.
+    G::TargetBlend b;
+    b.enable = true;
+    b.srcColor = G::DstColor;
+    b.dstColor = G::Zero;
+    b.srcAlpha = G::One;
+    b.dstAlpha = G::One;
+    b.opAlpha = G::Min;
+    m_shadowPipe->setTargetBlends({ b });
+    if (!m_shadowPipe->create()) {
+        qWarning("FluidSystem: the shadow pipeline can't be created");
+        m_shadowPipe.reset();
+    }
+}
+
+void FluidSystem::prepareShadows(QRhiResourceUpdateBatch *rub, const std::vector<ShadowMaps::TranslucentView> &views)
+{
+    m_shadowViewports.clear();
+    if (!m_supported || !m_shadowPipe)
+        return;
+    const int count = qMin(int(views.size()), ShadowMaps::ViewCount);
+    for (int i = 0; i < count; ++i)
+        m_shadowViewports.push_back(views[size_t(i)].viewport);
+    if (count == 0)
+        return;
+    for (auto &[id, v] : m_volumes) {
+        if (!v.drawUniforms)
+            continue;
+        if (!v.shadowUniforms) {
+            v.shadowUniforms.reset(m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer,
+                                                    quint32(ShadowMaps::ViewCount) * m_shadowStride));
+            v.shadowUniforms->create();
+        }
+        QByteArray data(qsizetype(count) * m_shadowStride, char(0));
+        const QMatrix4x4 worldToBox = v.model.inverted();
+        for (int i = 0; i < count; ++i) {
+            const ShadowMaps::TranslucentView &view = views[size_t(i)];
+            float *x = reinterpret_cast<float *>(data.data() + qsizetype(i) * m_shadowStride);
+            std::memcpy(x, view.clip.constData(), 64);
+            std::memcpy(x + 16, v.model.constData(), 64);
+            std::memcpy(x + 32, worldToBox.constData(), 64);
+            x[48] = view.light.x(); // light
+            x[49] = view.light.y();
+            x[50] = view.light.z();
+            x[51] = view.point ? 1.0f : 0.0f;
+            x[52] = view.point ? 1.0f : 0.0f; // view
+            x[53] = view.nearPlane;
+            x[54] = view.farPlane;
+            x[56] = v.settings.density; // look
+            x[57] = float(v.settings.samples);
+            putColor(x + 60, v.settings.extinction);
+        }
+        rub->updateDynamicBuffer(v.shadowUniforms.get(), 0, quint32(data.size()), data.constData());
+    }
+}
+
+void FluidSystem::drawShadows(QRhiCommandBuffer *cb)
+{
+    if (!m_supported || !m_shadowPipe || m_shadowViewports.empty())
+        return;
+    bool bound = false;
+    for (auto &[id, v] : m_volumes) {
+        if (!v.shadowUniforms || v.stepsDone < 0)
+            continue;
+        auto &srb = v.shadowSrbs[size_t(v.d)];
+        if (!srb) {
+            using B = QRhiShaderResourceBinding;
+            srb.reset(m_rhi->newShaderResourceBindings());
+            srb->setBindings({ B::uniformBufferWithDynamicOffset(0, B::VertexStage | B::FragmentStage, v.shadowUniforms.get(),
+                                                                 kShadowUbufSize),
+                               B::sampledTexture(1, B::FragmentStage, v.density[size_t(v.d)].get(), m_linear.get()) });
+            srb->create();
+        }
+        if (!bound) {
+            cb->setGraphicsPipeline(m_shadowPipe.get());
+            bound = true;
+        }
+        for (size_t i = 0; i < m_shadowViewports.size(); ++i) {
+            const QRectF &r = m_shadowViewports[i];
+            cb->setViewport({ float(r.x()), float(r.y()), float(r.width()), float(r.height()) });
+            const QRhiCommandBuffer::DynamicOffset offset(0, quint32(i) * m_shadowStride);
+            cb->setShaderResources(srb.get(), 1, &offset);
+            cb->draw(36);
+        }
+    }
+}
+
+int FluidSystem::shadowDrawCount() const
+{
+    if (!m_supported || !m_shadowPipe)
+        return 0;
+    int volumes = 0;
+    for (const auto &[id, v] : m_volumes)
+        volumes += v.shadowUniforms && v.stepsDone >= 0 ? 1 : 0;
+    return volumes * int(m_shadowViewports.size());
 }

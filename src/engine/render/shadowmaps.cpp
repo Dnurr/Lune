@@ -515,6 +515,7 @@ void ShadowMaps::prepare(QRhiResourceUpdateBatch *rub, const std::vector<Light> 
                 v.tile = tile;
                 v.clip = corr * projection * rotation;
                 v.viewport = viewport;
+                v.light = dir;
                 const QMatrix4x4 toTile = clipToTile(v.viewport, directionalAtlas);
                 putMat4(data + kDirMatrix + 16 * tile, toTile * v.clip);
                 const QVector3D ta = toTile.map(QVector3D(-1, -1, 0)), tb = toTile.map(QVector3D(1, 1, 0));
@@ -550,6 +551,7 @@ void ShadowMaps::prepare(QRhiResourceUpdateBatch *rub, const std::vector<Light> 
                 v.viewport = tileViewport(true, v.tile, directionalTotal);
                 v.nearPlane = kPointNear;
                 v.farPlane = far;
+                v.light = light.position;
                 const QMatrix4x4 toTile = clipToTile(v.viewport, pointAtlas);
                 putMat4(data + kPointMatrix + 16 * v.tile, toTile * v.clip);
                 const QVector3D a = toTile.map(QVector3D(-1, -1, 0)), b = toTile.map(QVector3D(1, 1, 0));
@@ -580,7 +582,17 @@ void ShadowMaps::prepare(QRhiResourceUpdateBatch *rub, const std::vector<Light> 
     }
 }
 
-void ShadowMaps::render(QRhiCommandBuffer *cb, QRhiResourceUpdateBatch *rub, const std::vector<Caster> &casters)
+std::vector<ShadowMaps::TranslucentView> ShadowMaps::translucentViews() const
+{
+    std::vector<TranslucentView> out;
+    out.reserve(m_views.size());
+    for (const View &v : m_views)
+        out.push_back({ v.clip, v.translucencyViewport, v.point, v.nearPlane, v.farPlane, v.light });
+    return out;
+}
+
+void ShadowMaps::render(QRhiCommandBuffer *cb, QRhiResourceUpdateBatch *rub, const std::vector<Caster> &casters,
+                        const std::function<void(QRhiCommandBuffer *)> &moreTranslucent)
 {
     auto viewOffset = [this](const View &v) {
         return quint32(v.point ? DirectionalViews + v.tile : v.tile) * m_viewStride;
@@ -681,5 +693,7 @@ void ShadowMaps::render(QRhiCommandBuffer *cb, QRhiResourceUpdateBatch *rub, con
             draw(c, MaterialViewBinding, viewOffset(v));
         }
     }
+    if (moreTranslucent)
+        moreTranslucent(cb);
     cb->endPass();
 }

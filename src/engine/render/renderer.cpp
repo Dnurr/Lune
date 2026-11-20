@@ -417,6 +417,7 @@ void Renderer::createPipelines(QRhiRenderTarget *target)
     m_post.createPipelines(fullscreen);
     m_particles.createPipelines(m_sceneKeepRp.get(), 1);
     m_fluids.createPipelines(m_sceneKeepRp.get(), 1);
+    m_fluids.createShadowPipeline(m_shadows.translucencyRenderPass());
     m_distancePipe.reset();
     if (m_distanceSrb)
         m_distancePipe = pipeline(fullscreen, QStringLiteral("scene_distance.frag"), m_distanceSrb.get(), m_distanceRp.get(), 1);
@@ -1113,7 +1114,25 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         m_materialErrorsChanged = true;
     }
 
-    // --- Shadow maps: views fitted to the meshes, uniforms ---
+    // --- Shadow maps: views fitted to the meshes (and the fluid volumes, which cast shadows
+    //     too), uniforms ---
+    if (scene && m_fluids.supported() && !wireOnly && !dataView) {
+        for (const Entity &e : scene->entities()) {
+            if (!e.fluid || !e.fluid->enabled)
+                continue;
+            Transform frame = e.transform; // the box turns with the entity, its scale is ignored
+            frame.scale = QVector3D(1.0f, 1.0f, 1.0f);
+            const QMatrix4x4 m = frame.matrix();
+            const QVector3D h = e.fluid->size * 0.5f;
+            for (int c = 0; c < 8; ++c) {
+                const QVector3D corner = m.map(QVector3D(c & 1 ? h.x() : -h.x(), c & 2 ? h.y() : -h.y(), c & 4 ? h.z() : -h.z()));
+                boundsMin = QVector3D(qMin(boundsMin.x(), corner.x()), qMin(boundsMin.y(), corner.y()),
+                                      qMin(boundsMin.z(), corner.z()));
+                boundsMax = QVector3D(qMax(boundsMax.x(), corner.x()), qMax(boundsMax.y(), corner.y()),
+                                      qMax(boundsMax.z(), corner.z()));
+            }
+        }
+    }
     {
         const QMatrix4x4 toWorld = camera.view().inverted();
         ShadowMaps::Camera shadowCamera;
@@ -1277,6 +1296,9 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         m_fluids.prepareDraw(rub, m_rhi->clipSpaceCorrMatrix() * viewProj, eye, lightDir.normalized(), lightColor, hasLight,
                              m_pixelSize, m_seconds);
     }
+    // Their shadows, in every tile of the translucency map (drawn by m_shadows.render() below).
+    m_fluids.prepareShadows(rub, m_shadows.translucentViews());
+    m_stats.drawCalls += m_fluids.shadowDrawCount();
     m_stats.fluids = m_fluids.volumeCount();
     m_stats.voxels = m_fluids.voxelCount();
     m_stats.fluidSteps = m_fluids.stepsLastFrame();
@@ -1289,7 +1311,7 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         m_stats.drawCalls += 1;
     }
     m_stats.renderPasses += (particlePass ? 1 : 0) + (distancePass ? 1 : 0);
-    m_shadows.render(cb, rub, casters);
+    m_shadows.render(cb, rub, casters, [this](QRhiCommandBuffer *c) { m_fluids.drawShadows(c); });
 
     // 1. Scene (HDR, linear): environment and grid as background (no depth), opaque meshes,
     //    see-through ones far to near, selection outline

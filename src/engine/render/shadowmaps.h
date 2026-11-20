@@ -6,6 +6,7 @@
 #include <QVector3D>
 #include <rhi/qshader.h>
 #include <array>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -48,7 +49,8 @@ class QRhiTextureRenderTarget;
 //   blend  not into the depth atlases but into the translucency map: one RGBA16F texture at
 //          1 / TranslucencyScale of the atlases' resolution, a region for each atlas with the
 //          same tiles. Cleared to 1; every translucent caster multiplies rgb by the light it
-//          lets through and keeps in alpha the smallest (nearest) linear depth.
+//          lets through and keeps in alpha the smallest (nearest) linear depth. Fluid volumes
+//          draw into it too, through render()'s `moreTranslucent` (FluidSystem::drawShadows()).
 //
 // The translucency map also holds the front depth, in two more regions at 1 / FrontDepthScale
 // (to the right of the translucency regions): the alpha of every texel is the linear depth
@@ -147,6 +149,20 @@ public:
                                                                  QRhiShaderResourceBindings *layout,
                                                                  bool translucent) const;
 
+    // A tile of the last prepare(), for drawing other translucent casters (fluid volumes) into
+    // the translucency map: a pipeline made for translucencyRenderPass(), the viewport set to
+    // `viewport`, blending like a blend material (rgb multiplied, a = min of linear depths).
+    struct TranslucentView
+    {
+        QMatrix4x4 clip;    // world -> the light's clip space, corrected for the backend
+        QRectF viewport;    // in the translucency map (QRhi convention)
+        bool point = false;
+        float nearPlane = 0.0f, farPlane = 0.0f; // point lights (linear depth = distance along the face's axis / far)
+        QVector3D light;    // directional: where it shines (unit); point: its position
+    };
+    std::vector<TranslucentView> translucentViews() const;
+    QRhiRenderPassDescriptor *translucencyRenderPass() const { return m_translucencyRp.get(); }
+
     // Picks the shadowed lights (up to MaxDirectional + MaxPoint, in order), fits their
     // views (directional: cascades of the camera's view, up to the farthest mesh; point:
     // the meshes' bounds) and writes the uniforms. Lights beyond the limits, or with
@@ -154,8 +170,11 @@ public:
     void prepare(QRhiResourceUpdateBatch *rub, const std::vector<Light> &lights, const Camera &camera,
                  const QVector3D &boundsMin, const QVector3D &boundsMax, bool hasMeshes);
     // Records both atlas passes and the translucency pass, with the front depth (always
-    // cleared, so they're valid to sample). `rub` goes with the first pass.
-    void render(QRhiCommandBuffer *cb, QRhiResourceUpdateBatch *rub, const std::vector<Caster> &casters);
+    // cleared, so they're valid to sample). `rub` goes with the first pass. `moreTranslucent`,
+    // if set, records more translucent casters at the end of the translucency pass (see
+    // translucentViews()).
+    void render(QRhiCommandBuffer *cb, QRhiResourceUpdateBatch *rub, const std::vector<Caster> &casters,
+                const std::function<void(QRhiCommandBuffer *)> &moreTranslucent = {});
 
     int passCount() const { return m_rawCopy ? 5 : 3; }
     int viewCount() const { return int(m_views.size()); } // tiles drawn in the last prepare()
@@ -170,6 +189,7 @@ private:
         QRectF translucencyViewport; // the same tile in the translucency map
         QRectF frontDepthViewport;   // and in its front-depth region
         float nearPlane = 0.0f, farPlane = 0.0f; // point lights
+        QVector3D light;             // directional: where it shines (unit); point: its position
     };
 
     enum Cull { CullNone, CullFront, CullBack, CullModes };

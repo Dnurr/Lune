@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "engine/scene/entity.h"
+#include "shadowmaps.h"
 
 class Scene;
 
@@ -42,6 +43,11 @@ class Scene;
 // Drawing: the box (fluid_volume.vert: 36 vertices, front faces culled) with fluid_volume.frag
 // marching through the density, over the scene with premultiplied alpha, before the particles;
 // it reads the scene's view depth (the Renderer's distance pass) to stop at surfaces.
+//
+// Shadows: each volume is also drawn into the shadow maps' translucency map, in every tile of
+// every shadowed light (fluid_shadow.vert: the box's faces toward the light; fluid_shadow.frag,
+// the author's: the light that gets through the volume, per channel, and the linear depth where
+// the light enters it). mesh.frag then dims, and tints, what lies behind the smoke.
 class FluidSystem
 {
 public:
@@ -71,6 +77,14 @@ public:
                      float seconds);
     // Draws every volume, inside the scene's kept pass.
     void draw(QRhiCommandBuffer *cb, const QRhiViewport &viewport);
+
+    // Shadows into the translucency map (see ShadowMaps::translucentViews()): the pipeline for
+    // its render pass, the uniforms for the tiles of this frame (after simulate()), and the
+    // draws, inside the translucency pass.
+    void createShadowPipeline(QRhiRenderPassDescriptor *translucencyRp);
+    void prepareShadows(QRhiResourceUpdateBatch *rub, const std::vector<ShadowMaps::TranslucentView> &views);
+    void drawShadows(QRhiCommandBuffer *cb);
+    int shadowDrawCount() const;
 
     bool pending() const { return m_pending; }
     int volumeCount() const { return m_drawn; }
@@ -104,6 +118,8 @@ private:
         std::array<std::unique_ptr<QRhiShaderResourceBindings>, 2> clearSrbs;
         std::unique_ptr<QRhiBuffer> drawUniforms;
         std::array<std::unique_ptr<QRhiShaderResourceBindings>, 2> drawSrbs; // by d
+        std::unique_ptr<QRhiBuffer> shadowUniforms; // ShadowMaps::ViewCount ShadowBufs (dynamic offsets)
+        std::array<std::unique_ptr<QRhiShaderResourceBindings>, 2> shadowSrbs; // by d
         int stepsDone = -1;               // steps in the fields (-1: clear first)
         bool seen = false;
         QMatrix4x4 model;                 // box space -> world, this frame
@@ -121,7 +137,7 @@ private:
     bool m_supported = false;
     std::array<std::unique_ptr<QRhiComputePipeline>, PassCount> m_pipes;
     std::unique_ptr<QRhiComputePipeline> m_clearPipe;
-    std::unique_ptr<QRhiShaderResourceBindings> m_passLayout, m_clearLayout, m_drawLayout;
+    std::unique_ptr<QRhiShaderResourceBindings> m_passLayout, m_clearLayout, m_drawLayout, m_shadowLayout;
     std::unique_ptr<QRhiBuffer> m_layoutUniforms;
     std::unique_ptr<QRhiTexture> m_layoutVolume;    // 1x1x1, for the layouts and unused inputs
     std::unique_ptr<QRhiTexture> m_distanceStandIn; // 1x1
@@ -132,6 +148,9 @@ private:
     // with single-output variants of fluid_volume.frag: m_drawPipe multiplies what's behind by
     // the transmittance, m_drawAddPipe adds the light (see createPipelines()).
     std::unique_ptr<QRhiGraphicsPipeline> m_drawAddPipe;
+    std::unique_ptr<QRhiGraphicsPipeline> m_shadowPipe;
+    std::vector<QRectF> m_shadowViewports; // the tiles of the last prepareShadows()
+    quint32 m_shadowStride = 0;
     std::unordered_map<EntityId, Volume> m_volumes;
     std::vector<std::unique_ptr<QRhiResource>> m_retired, m_retiredBefore;
     QRhiResourceUpdateBatch *m_pendingUpload = nullptr;
