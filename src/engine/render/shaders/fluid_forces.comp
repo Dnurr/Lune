@@ -32,11 +32,43 @@ layout(binding = 1) uniform sampler3D velocityIn;   // xyz = velocity (voxels / 
 layout(binding = 2) uniform sampler3D densityIn;    // x = smoke, y = temperature; linear, clamped
 layout(binding = 5, rgba16f) uniform writeonly image3D velocityOut;
 
+vec3 V(ivec3 c)
+{
+    return texelFetch(velocityIn, clamp(c, ivec3(0), ivec3(grid.xyz) - 1), 0).xyz;
+}
+
+vec3 curlAt(ivec3 c)
+{
+    vec3 dx = (V(c + ivec3(1, 0, 0)) - V(c - ivec3(1, 0, 0))) * 0.5;
+    vec3 dy = (V(c + ivec3(0, 1, 0)) - V(c - ivec3(0, 1, 0))) * 0.5;
+    vec3 dz = (V(c + ivec3(0, 0, 1)) - V(c - ivec3(0, 0, 1))) * 0.5;
+
+    return vec3(dy.z - dz.y, dz.x - dx.z, dx.y - dy.x);
+}
+
 void main()
 {
     ivec3 cell = ivec3(gl_GlobalInvocationID);
     if (any(greaterThanEqual(uvec3(cell), grid.xyz)))
         return;
-    // TODO (Author): buoyancy and weight along up.xyz, vorticity confinement, over dt.
-    imageStore(velocityOut, cell, texelFetch(velocityIn, cell, 0));
+
+    vec4 vel = texelFetch(velocityIn, cell, 0);
+    vec2 d   = texelFetch(densityIn,  cell, 0).xy;
+
+    // Buoyancy and weight
+    vec3 a  = up.xyz * (solver.z * d.y - solver.w * d.x) / step.z;
+    vel.xyz += a * step.x;
+
+    // Vorticity
+    vec3 eta = 0.5 * vec3(
+        length(curlAt(cell + ivec3(1, 0, 0))) - length(curlAt(cell - ivec3(1, 0, 0))),
+        length(curlAt(cell + ivec3(0, 1, 0))) - length(curlAt(cell - ivec3(0, 1, 0))),
+        length(curlAt(cell + ivec3(0, 0, 1))) - length(curlAt(cell - ivec3(0, 0, 1)))
+    );
+    vec3 N = eta / (length(eta) + 1e-5);
+
+    vec3 w  = curlAt(cell);
+    vel.xyz += solver2.x * cross(N, w) * step.x;
+
+    imageStore(velocityOut, cell, vel);
 }

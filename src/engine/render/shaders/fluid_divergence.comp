@@ -30,11 +30,23 @@ layout(std140, binding = 0) uniform FluidBuf {
 layout(binding = 1) uniform sampler3D velocityIn;   // xyz = velocity (voxels / s); linear filtering, clamped
 layout(binding = 5, r32f) uniform writeonly image3D divergenceOut;
 
+vec3 V(ivec3 c)
+{
+    if (any(lessThan(c, ivec3(0))) || any(greaterThanEqual(c, ivec3(grid.xyz)))) return vec3(0.0);
+    return texelFetch(velocityIn, c, 0).xyz;
+}
+
 void main()
 {
     ivec3 cell = ivec3(gl_GlobalInvocationID);
     if (any(greaterThanEqual(uvec3(cell), grid.xyz)))
         return;
-    // TODO (Author): the divergence of velocityIn at the cell.
-    imageStore(divergenceOut, cell, vec4(0.0));
+    
+    float div = 0.5 * (
+        (V(cell + ivec3(1, 0, 0)).x - V(cell - ivec3(1, 0, 0)).x) +
+        (V(cell + ivec3(0, 1, 0)).y - V(cell - ivec3(0, 1, 0)).y) +
+        (V(cell + ivec3(0, 0, 1)).z - V(cell - ivec3(0, 0, 1)).z)
+    );
+    
+    imageStore(divergenceOut, cell, vec4(div));
 }

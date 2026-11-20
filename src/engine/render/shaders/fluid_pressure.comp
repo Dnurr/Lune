@@ -32,11 +32,21 @@ layout(binding = 3) uniform sampler3D pressureIn;   // x = pressure; linear, cla
 layout(binding = 4) uniform sampler3D divergenceIn; // x = divergence of the velocity; linear, clamped
 layout(binding = 5, r32f) uniform writeonly image3D pressureOut;
 
+float P(ivec3 c)
+{
+    return texelFetch(pressureIn, clamp(c, ivec3(0), ivec3(grid.xyz) - 1), 0).x;
+}
+
 void main()
 {
     ivec3 cell = ivec3(gl_GlobalInvocationID);
     if (any(greaterThanEqual(uvec3(cell), grid.xyz)))
         return;
-    // TODO (Author): one Jacobi iteration of the pressure from pressureIn and divergenceIn.
-    imageStore(pressureOut, cell, texelFetch(pressureIn, cell, 0));
+
+    float sum = P(cell + ivec3(1, 0, 0)) + P(cell - ivec3(1, 0, 0))
+              + P(cell + ivec3(0, 1, 0)) + P(cell - ivec3(0, 1, 0))
+              + P(cell + ivec3(0, 0, 1)) + P(cell - ivec3(0, 0, 1));
+    float div = texelFetch(divergenceIn, cell, 0).x;
+
+    imageStore(pressureOut, cell, vec4((sum - div) / 6.0));
 }
