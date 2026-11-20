@@ -1,7 +1,7 @@
 #version 440
 
 // A Fluid Volume's shadow: the light that gets through the volume, seen from a light, into the
-// shadow maps' translucency map (FluidSystem::drawShadows()). Author: to be written.
+// shadow maps' translucency map (FluidSystem::drawShadows())
 //
 // One fragment per texel of the tile, where the light enters the box (v_world, on a face
 // toward the light). Output:
@@ -10,8 +10,6 @@
 //        march of fluid_volume.frag); multiplied by the blend with what's already there
 //   a    the linear depth of v_world (linearDepth() below); the blend keeps the nearest, and
 //        mesh.frag only dims receivers farther from the light than it
-//
-// Until then: vec4(1.0), all the light and no depth (the blend leaves the map as it is).
 
 layout(location = 0) in vec3 v_world; // where the light enters the box, world space
 
@@ -43,11 +41,28 @@ float linearDepth()
     return depth;
 }
 
+const int LIGHT_STEPS = 6;
+
 void main()
 {
-    // TODO (Author): the light's ray through the box (directional: along light.xyz; point:
-    // from light.xyz through v_world), in box space (worldToBox), from v_world to where it
-    // leaves the box; march look.y steps summing the smoke; fragColor = vec4(transmittance,
-    // linearDepth()).
-    fragColor = vec4(1.0);
+    vec3 dirW = light.w > 0.5 ? normalize(v_world - light.xyz) : light.xyz;
+    vec3 dir  = mat3(worldToBox) * dirW;
+    vec3 p    = (worldToBox * vec4(v_world, 1.0)).xyz;
+
+    vec3 l0     = (vec3(-0.5) - p) / dir;
+    vec3 l1     = (vec3( 0.5) - p) / dir;
+    vec3 lmax   = max(l0, l1);
+    float lExit = min(min(lmax.x, lmax.y), lmax.z);
+
+    int   n     = int(look.y);
+    float dl    = lExit / float(n);
+    float smoke = 0.0;
+    for (int j = 0; j < n; j++)
+    {
+        vec3 q = p + dir * ((float(j) + 0.5) * dl);
+        smoke += textureLod(density, q + 0.5, 0.0).x;
+    }
+
+    vec3 shadow = exp(-smoke * look.x * extinction.rgb * dl);
+    fragColor = vec4(shadow, linearDepth());
 }
