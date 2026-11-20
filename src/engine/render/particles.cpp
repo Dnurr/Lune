@@ -19,6 +19,8 @@ namespace
 constexpr int kStepSize = 64 + 9 * 16;
 // Force in particles.comp (std430): mat4 transform, vec4 params0, params1, params2.
 constexpr int kForceSize = 64 + 3 * 16;
+// SortBuf in particle_sort.comp: uvec4 pass, uvec4 sizes, vec4 eye, vec4 forward.
+constexpr int kSortUbufSize = 64;
 // SimBuf: uvec4 counts, vec4 params, vec4 graphParams[MAX_GRAPH_PARAMS].
 constexpr int kSimUbufSize = 32 + ParticleGraph::MaxParams * 16;
 // DrawBuf: mat4 viewProj, vec4 cameraRight, cameraUp, cameraPos, params, soft.
@@ -135,6 +137,23 @@ void ParticleSystem::initialize(QRhi *rhi)
         qWarning("ParticleSystem: the simulation pipeline can't be created");
         m_supported = false;
     }
+
+    // Sorting: SortBuf by dynamic offset, particles (read), keys (read/write), sorted (write).
+    m_sortLayoutUniforms.reset(m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, kSortUbufSize));
+    m_sortLayoutUniforms->create();
+    m_sortLayout.reset(m_rhi->newShaderResourceBindings());
+    m_sortLayout->setBindings({ B::uniformBufferWithDynamicOffset(0, B::ComputeStage, m_sortLayoutUniforms.get(), kSortUbufSize),
+                                B::bufferLoad(1, B::ComputeStage, m_layoutStorage.get()),
+                                B::bufferLoadStore(2, B::ComputeStage, m_layoutStorage.get()),
+                                B::bufferStore(3, B::ComputeStage, m_layoutStorage.get()) });
+    m_sortLayout->create();
+    m_sortPipe.reset(m_rhi->newComputePipeline());
+    m_sortPipe->setShaderStage({ QRhiShaderStage::Compute, loadShader(QStringLiteral("particle_sort.comp")) });
+    m_sortPipe->setShaderResourceBindings(m_sortLayout.get());
+    if (!m_sortPipe->create()) {
+        qWarning("ParticleSystem: the sort pipeline can't be created: alpha particles drawn unsorted");
+        m_sortPipe.reset();
+    }
 }
 
 void ParticleSystem::createPipelines(QRhiRenderPassDescriptor *sceneRp, int sampleCount)
@@ -186,6 +205,9 @@ void ParticleSystem::release()
     m_alphaPipe.reset();
     m_simPipe.reset();
     m_simLayout.reset();
+    m_sortPipe.reset();
+    m_sortLayout.reset();
+    m_sortLayoutUniforms.reset();
     m_layoutUniforms.reset();
     m_layoutStorage.reset();
     m_drawSrb.reset();
@@ -287,6 +309,10 @@ void ParticleSystem::retire(Emitter &e)
     retire(e.simUniforms);
     retire(e.drawSrb);
     retire(e.drawUniforms);
+    retire(e.sortSrb);
+    retire(e.keys);
+    retire(e.sorted);
+    retire(e.sortUniforms);
 }
 
 void ParticleSystem::setSceneDistance(QRhiTexture *texture)
@@ -412,6 +438,7 @@ void ParticleSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float s
             e.capacity = capacity;
             retire(e.particles);
             retire(e.simSrb);
+            retire(e.sortSrb); // it reads the particles
             e.particles.reset(m_rhi->newBuffer(QRhiBuffer::Static, QRhiBuffer::VertexBuffer | QRhiBuffer::StorageBuffer,
                                                quint32(capacity) * ParticleSize));
             e.particles->create();
@@ -613,6 +640,100 @@ void ParticleSystem::prepareDraw(QRhiResourceUpdateBatch *rub, const QMatrix4x4 
     }
 }
 
+void ParticleSystem::sort(QRhiCommandBuffer *cb, const QVector3D &eye, const QVector3D &forward)
+{
+    for (auto &[id, e] : m_emitters)
+        e.sortedValid = false;
+    if (!m_supported || !m_sortPipe)
+        return;
+    struct Pass
+    {
+        quint32 kind, j, k;
+    };
+    struct Job
+    {
+        Emitter *emitter;
+        std::vector<Pass> passes;
+    };
+    std::vector<Job> jobs;
+    QRhiResourceUpdateBatch *rub = m_rhi->nextResourceUpdateBatch();
+    const quint32 stride = quint32(m_rhi->ubufAligned(kSortUbufSize));
+    for (auto &[id, e] : m_emitters) {
+        if (e.blend != ParticleEmitter::Alpha || !e.particles || e.stepsDone <= 0)
+            continue;
+        int n = 1;
+        while (n < e.capacity)
+            n *= 2;
+        // The bitonic network: blocks of k = 2, 4 ... n, each merged with steps j = k/2 ... 1.
+        Job job { &e, { { 0, 0, 0 } } };
+        for (int k = 2; k <= n; k *= 2)
+            for (int j = k / 2; j >= 1; j /= 2)
+                job.passes.push_back({ 1, quint32(j), quint32(k) });
+        job.passes.push_back({ 2, 0, 0 });
+
+        // Buffers for this size (kept while the size stays).
+        if (!e.keys || e.sortKeys != n) {
+            retire(e.keys);
+            retire(e.sortSrb);
+            e.keys.reset(m_rhi->newBuffer(QRhiBuffer::Static, QRhiBuffer::StorageBuffer, quint32(n) * 8));
+            e.keys->create();
+            e.sortKeys = n;
+        }
+        if (!e.sorted || e.sorted->size() != e.particles->size()) {
+            retire(e.sorted);
+            retire(e.sortSrb);
+            e.sorted.reset(m_rhi->newBuffer(QRhiBuffer::Static, QRhiBuffer::VertexBuffer | QRhiBuffer::StorageBuffer,
+                                            e.particles->size()));
+            e.sorted->create();
+        }
+        if (!e.sortUniforms || e.sortPasses != int(job.passes.size())) {
+            retire(e.sortUniforms);
+            retire(e.sortSrb);
+            e.sortPasses = int(job.passes.size());
+            e.sortUniforms.reset(m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, quint32(e.sortPasses) * stride));
+            e.sortUniforms->create();
+        }
+        if (!e.sortSrb) {
+            using B = QRhiShaderResourceBinding;
+            e.sortSrb.reset(m_rhi->newShaderResourceBindings());
+            e.sortSrb->setBindings({ B::uniformBufferWithDynamicOffset(0, B::ComputeStage, e.sortUniforms.get(), kSortUbufSize),
+                                     B::bufferLoad(1, B::ComputeStage, e.particles.get()),
+                                     B::bufferLoadStore(2, B::ComputeStage, e.keys.get()),
+                                     B::bufferStore(3, B::ComputeStage, e.sorted.get()) });
+            e.sortSrb->create();
+        }
+        // The particle buffer may have been replaced (another size): the set follows it.
+        QByteArray data(qsizetype(e.sortPasses) * stride, '\0');
+        for (int i = 0; i < e.sortPasses; ++i) {
+            const Pass &p = job.passes[size_t(i)];
+            char *base = data.data() + qsizetype(i) * stride;
+            const quint32 u[8] = { p.kind, p.j, p.k, 0, quint32(e.capacity), quint32(n), 0, 0 };
+            std::memcpy(base, u, sizeof(u));
+            const float v[8] = { eye.x(), eye.y(), eye.z(), 1.0f, forward.x(), forward.y(), forward.z(), 0.0f };
+            std::memcpy(base + 32, v, sizeof(v));
+        }
+        rub->updateDynamicBuffer(e.sortUniforms.get(), 0, quint32(data.size()), data.constData());
+        jobs.push_back(std::move(job));
+    }
+    if (jobs.empty()) {
+        cb->resourceUpdate(rub);
+        return;
+    }
+    cb->beginComputePass(rub);
+    cb->setComputePipeline(m_sortPipe.get());
+    for (const Job &job : jobs) {
+        Emitter &e = *job.emitter;
+        for (size_t i = 0; i < job.passes.size(); ++i) {
+            const QRhiCommandBuffer::DynamicOffset offset(0, quint32(i) * stride);
+            cb->setShaderResources(e.sortSrb.get(), 1, &offset);
+            const int threads = job.passes[i].kind == 2 ? e.capacity : e.sortKeys;
+            cb->dispatch((threads + kWorkgroupSize - 1) / kWorkgroupSize, 1, 1);
+        }
+        e.sortedValid = true;
+    }
+    cb->endComputePass();
+}
+
 void ParticleSystem::draw(QRhiCommandBuffer *cb, const QRhiViewport &viewport)
 {
     if (!m_supported || !m_additivePipe)
@@ -623,7 +744,9 @@ void ParticleSystem::draw(QRhiCommandBuffer *cb, const QRhiViewport &viewport)
         cb->setGraphicsPipeline(e.blend == ParticleEmitter::Additive ? m_additivePipe.get() : m_alphaPipe.get());
         cb->setViewport(viewport);
         cb->setShaderResources(e.drawSrb.get());
-        const QRhiCommandBuffer::VertexInput vin(e.particles.get(), 0);
+        // Alpha blend: far to near, from the sorted copy (when sorting ran this frame).
+        QRhiBuffer *instances = e.blend == ParticleEmitter::Alpha && e.sortedValid ? e.sorted.get() : e.particles.get();
+        const QRhiCommandBuffer::VertexInput vin(instances, 0);
         cb->setVertexInput(0, 1, &vin);
         cb->draw(6, quint32(e.capacity)); // two triangles per particle; dead ones collapse
     }

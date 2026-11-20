@@ -69,6 +69,11 @@ public:
     // Uniforms of the draws: `clipViewProj` includes QRhi::clipSpaceCorrMatrix().
     void prepareDraw(QRhiResourceUpdateBatch *rub, const QMatrix4x4 &clipViewProj, const QMatrix4x4 &view,
                      const QVector3D &eye, const QSize &viewportPixels, float seconds);
+    // Alpha-blended emitters: their particles sorted far to near from `eye` along `forward`
+    // (particle_sort.comp: a bitonic sort by view depth, then a gather into a sorted copy the
+    // draw reads). A compute pass; after simulate(), outside any render pass. Additive emitters
+    // need no order and aren't sorted.
+    void sort(QRhiCommandBuffer *cb, const QVector3D &eye, const QVector3D &forward);
     // Draws every emitter, inside the scene pass (depth tested, not written).
     void draw(QRhiCommandBuffer *cb, const QRhiViewport &viewport);
     // The scene's view depth per pixel (Renderer's distance pass), sampled by particle.frag for
@@ -116,6 +121,13 @@ private:
         std::unique_ptr<QRhiBuffer> drawUniforms;  // DrawBuf: the camera, and this emitter's softness
         std::unique_ptr<QRhiShaderResourceBindings> drawSrb;
         float softness = 0.0f;
+        // Sorting (alpha blend only): keys for a power of two of slots, the sorted copy the draw
+        // reads, one SortBuf per dispatch (dynamic offsets).
+        int sortKeys = 0;            // the power of two
+        int sortPasses = 0;          // SortBuf entries: keys, the bitonic steps, gather
+        std::unique_ptr<QRhiBuffer> keys, sorted, sortUniforms;
+        std::unique_ptr<QRhiShaderResourceBindings> sortSrb;
+        bool sortedValid = false;    // `sorted` holds this frame's particles
         int stepsDone = -1;          // steps already in the buffer (-1: must clear it first)
         double born = 0.0;           // particles born by the end of the last step
         bool seen = false;           // in this frame's scene
@@ -145,6 +157,9 @@ private:
     QRhi *m_rhi = nullptr;
     bool m_supported = false;
     std::unique_ptr<QRhiComputePipeline> m_simPipe;
+    std::unique_ptr<QRhiComputePipeline> m_sortPipe;
+    std::unique_ptr<QRhiShaderResourceBindings> m_sortLayout;
+    std::unique_ptr<QRhiBuffer> m_sortLayoutUniforms;
     std::unique_ptr<QRhiShaderResourceBindings> m_simLayout;
     std::unique_ptr<QRhiBuffer> m_layoutUniforms, m_layoutStorage; // for the layout SRB only
     std::unique_ptr<QRhiBuffer> m_drawUniforms;            // for the layout SRB only

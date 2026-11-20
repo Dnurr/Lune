@@ -1235,6 +1235,10 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
     //    atlases (every mesh's depth from each shadowed light), translucency map
     const bool particles = !wireOnly && !dataView;
     m_particles.simulate(cb, particles ? scene : nullptr, m_seconds);
+    {
+        const QVector4D back = camera.view().row(2); // the view's +Z: from the scene toward the eye
+        m_particles.sort(cb, eye, -back.toVector3D().normalized());
+    }
     m_particles.prepareDraw(rub, m_rhi->clipSpaceCorrMatrix() * viewProj, camera.view(), eye, m_pixelSize, m_seconds);
     m_stats.emitters = m_particles.emitterCount();
     m_stats.particles = m_particles.particleCount();

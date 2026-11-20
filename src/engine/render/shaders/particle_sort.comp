@@ -1,0 +1,71 @@
+#version 440
+
+// Sorting an emitter's particles far to near, for alpha blending (ParticleSystem::sort()).
+// A bitonic sort over a power of two of keys (view depth, slot), then a gather into the buffer
+// the draw reads. One shader, three kinds of dispatch (SortBuf.pass.x):
+//
+//   0  keys     key i = (view depth of slot i, i); dead slots and the padding up to the power
+//               of two sort after every live particle
+//   1  step     one compare-and-swap step of the bitonic network (j = pass.y, block k = pass.z):
+//               each pair (i, i ^ j) ends ordered, far first where the block sorts down
+//   2  gather   sorted[i] = particles[keys[i].index]: the particles far to near
+//
+// Each dispatch gets its own SortBuf through a dynamic uniform offset.
+
+layout(local_size_x = 256) in;
+
+struct Particle
+{
+    vec4 position; // w = age
+    vec4 velocity; // w = lifetime
+    vec4 color;
+    vec4 extra;
+};
+struct Key
+{
+    float depth;
+    uint index;
+};
+
+layout(std140, binding = 0) uniform SortBuf {
+    uvec4 pass;    // x = kind (0 keys, 1 step, 2 gather), y = j, z = k
+    uvec4 sizes;   // x = slots (max particles), y = keys (the power of two)
+    vec4 eye;      // xyz: the camera
+    vec4 forward;  // xyz: its view direction
+};
+layout(std430, binding = 1) readonly buffer Particles { Particle particles[]; };
+layout(std430, binding = 2) buffer Keys { Key keys[]; };
+layout(std430, binding = 3) writeonly buffer Sorted { Particle sorted[]; };
+
+void main()
+{
+    uint i = gl_GlobalInvocationID.x;
+    if (pass.x == 0u) {
+        if (i >= sizes.y)
+            return;
+        float depth = -3.0e38; // padding: after everything
+        if (i < sizes.x) {
+            Particle p = particles[i];
+            depth = p.position.w < p.velocity.w ? dot(p.position.xyz - eye.xyz, forward.xyz) // live
+                                                : -1.0e38;                                    // dead
+        }
+        keys[i] = Key(depth, i);
+    } else if (pass.x == 1u) {
+        if (i >= sizes.y)
+            return;
+        uint l = i ^ pass.y;
+        if (l <= i)
+            return; // the pair is handled by its lower index
+        Key a = keys[i];
+        Key b = keys[l];
+        bool down = (i & pass.z) == 0u; // this block sorts far to near (the last block: all of it)
+        if (down ? a.depth < b.depth : a.depth > b.depth) {
+            keys[i] = b;
+            keys[l] = a;
+        }
+    } else {
+        if (i >= sizes.x)
+            return;
+        sorted[i] = particles[keys[i].index];
+    }
+}

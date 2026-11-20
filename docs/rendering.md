@@ -360,6 +360,12 @@ Entities with a **Particle Emitter** component (`ParticleEmitter` in `entity.h`)
   scene behind is, and `1.0 / gl_FragCoord.w` the particle's own view depth: the emitter's
   `softness` (DrawBuf.soft.y, one uniform buffer per emitter) says over what distance it fades
   out against surfaces. Where the depth can't be sampled, a stand-in is bound and soft.x is 0.
+- **Sorting.** Alpha-blended emitters are drawn far to near: after the simulation,
+  `particle_sort.comp` writes a key per slot (view depth; dead slots and the padding to a power
+  of two go last), sorts the keys with a bitonic network (one dispatch per step, each with its
+  own uniforms through a dynamic offset) and gathers the particles in that order into a copy,
+  which the draw reads as its instance buffer. Additive emitters need no order and aren't
+  sorted.
 - **Stats.** The overlay shows the particles alive (estimated from the emission: born within
   a lifetime, at most the buffer), the emitters and the steps simulated in the last frame.
 

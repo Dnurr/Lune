@@ -158,6 +158,7 @@ qt6_add_shaders(Lune "compute_shaders"
     MSL 12
     FILES
         src/engine/render/shaders/particles.comp
+        src/engine/render/shaders/particle_sort.comp
 )
 
 if(WIN32)

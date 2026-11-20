@@ -129,17 +129,24 @@ Legend: `[x]` done, `[ ]` to do, `[~]` in progress.
 - [x] `updateParticle()` takes the acceleration from `graphAcceleration()`; force node functions in `particle_nodes.glsl` (Author)
 - [ ] More graph outputs: color, size and opacity over life, emission (shape, velocity), kill and collision nodes (Claude: outputs and codegen, Author: nodes)
 - [x] Soft particles: the scene's view depth for `particle.frag` (split scene pass, distance pass), per-emitter softness (Claude)
-- [ ] Soft particles: the fade near surfaces in `particle.frag` (Author)
-- [ ] Sorting for alpha-blended particles (Claude: sort pass, Author: if a custom key is wanted)
+- [x] Soft particles: the fade near surfaces in `particle.frag` (Author)
+- [x] Sorting for alpha-blended particles: GPU bitonic sort by view depth, drawn far to near from a sorted copy (Claude)
 - [ ] Simulation cache: snapshots every N frames, so long scrubs don't start from the first frame (Claude)
 
-## 6. Volumetrics
+## 6. Volumes and fluid simulation
 
-- [ ] Fog Volume component: global or box, density, color, anisotropy, height falloff (Claude)
-- [ ] Froxel grid: 3D textures fitted to the camera frustum, compute passes (Claude, on the particles' compute support)
-- [ ] Light scattering into the froxels: every light with its shadow maps, phase function (Author)
-- [ ] Integration along each view ray, fog applied to meshes, background and particles (Author)
-- [ ] Temporal reprojection for stable noise (Claude: history volumes, Author: the blend)
+Smoke, fire, dust and other gas simulations on a 3D grid (Eulerian), rendered by ray marching.
+
+- [ ] Volume container component: a box in the scene with a grid resolution, voxel size, saved settings (Claude)
+- [ ] 3D textures for the fields (density, temperature, velocity, pressure, divergence), ping-pong, compute dispatch per field pass (Claude)
+- [ ] Simulation on the timeline: fixed steps, re-simulation on edits, a cache of grid snapshots for scrubbing (Claude)
+- [ ] Sources: emitters, meshes and particles that add density, temperature and velocity (Claude: sampling and buffers, Author: the injection)
+- [ ] Solver passes: advection (semi-Lagrangian, then MacCormack), buoyancy, vorticity confinement, divergence, pressure (Jacobi, later multigrid), projection (Author)
+- [ ] Forces of the particle graph applied to the velocity field: wind, turbulence, vortices (both)
+- [ ] Volume rendering: ray marching through the box, absorption and scattering, shadows from the lights, emission for fire (Author: shader, Claude: box draw, depth and jitter)
+- [ ] Particles advected by the fluid's velocity field (both)
+- [ ] VDB export of the fields (Claude, with OpenVDB as an optional dependency)
+- [ ] Atmospheric fog and light shafts: froxel grid fitted to the camera, the same scattering code (later)
 
 ## 7. Output
 
