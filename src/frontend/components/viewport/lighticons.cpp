@@ -27,6 +27,26 @@ QColor dimmed(const QColor &c)
 
 // A Fluid Volume's box as screen segments (its 12 edges), leaving out those with an end
 // behind the viewer.
+// Whether a Fluid Source's sphere reaches into any enabled Fluid Volume's box (otherwise it
+// adds nothing anywhere, and is drawn dimmed).
+bool feedsAFluid(const Scene &scene, const Entity &source)
+{
+    for (const Entity &box : scene.entities()) {
+        if (!box.fluid || !box.fluid->enabled)
+            continue;
+        Transform frame = box.transform;
+        frame.scale = QVector3D(1.0f, 1.0f, 1.0f);
+        const QVector3D local = frame.matrix().inverted().map(source.transform.position);
+        const QVector3D h = box.fluid->size * 0.5f;
+        // The box's point nearest to the sphere's center, then the distance to it.
+        const QVector3D nearest(qBound(-h.x(), local.x(), h.x()), qBound(-h.y(), local.y(), h.y()),
+                                qBound(-h.z(), local.z(), h.z()));
+        if ((local - nearest).length() < source.fluidSource->radius)
+            return true;
+    }
+    return false;
+}
+
 std::vector<std::pair<QPointF, QPointF>> boxSegments(const Entity &e, const OrbitCamera &viewer, const QSizeF &viewSize)
 {
     Transform frame = e.transform;
@@ -119,7 +139,7 @@ void append(const Scene &scene, const OrbitCamera &camera, const QSizeF &viewSiz
             continue;
         QColor ring = e.id == selected ? kRingSelected : kRing;
         QColor puff(0xB8, 0xBC, 0xC8);
-        if (!e.fluidSource->enabled) {
+        if (!e.fluidSource->enabled || !feedsAFluid(scene, e)) {
             ring = dimmed(ring);
             puff = dimmed(puff);
         }

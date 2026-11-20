@@ -356,6 +356,13 @@ void Editor::createMenus()
         e.name = m_scene->uniqueName(QStringLiteral("Fluid Source"));
         e.fluidSource = FluidSource {};
         e.transform.position = QVector3D(0.0f, 0.5f, 0.0f);
+        // Into the selected Fluid Volume, near its floor, where the gas has the whole box to rise.
+        if (const Entity *box = m_scene->entity(m_selection->current()); box && box->fluid) {
+            Transform frame = box->transform;
+            frame.scale = QVector3D(1.0f, 1.0f, 1.0f);
+            const float h = box->fluid->size.y() * 0.5f;
+            e.transform.position = frame.matrix().map(QVector3D(0.0f, -h + qMin(0.5f, h * 0.5f), 0.0f));
+        }
         m_undo->push(new AddEntityCommand(m_scene, m_selection, e));
     });
     QMenu *forces = m_addMenu->addMenu("Force");

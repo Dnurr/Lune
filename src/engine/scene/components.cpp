@@ -580,7 +580,9 @@ ComponentDesc fluidVolumeComponent()
             e.fluid = FluidVolume {};
     };
     c.remove = [](Entity &e) { e.fluid.reset(); };
-    c.canAdd = [](const Entity &e) { return !e.mesh && !e.light && !e.environment && !e.camera && !e.emitter; };
+    c.canAdd = [](const Entity &e) {
+        return !e.mesh && !e.light && !e.environment && !e.camera && !e.emitter && !e.fluidSource;
+    };
     return c;
 }
 
@@ -627,7 +629,8 @@ ComponentDesc fluidSourceComponent()
             e.fluidSource = FluidSource {};
     };
     c.remove = [](Entity &e) { e.fluidSource.reset(); };
-    c.canAdd = [](const Entity &e) { return !e.light && !e.environment && !e.camera; };
+    // Not on a Fluid Volume: the box holds the gas, sources are entities of their own.
+    c.canAdd = [](const Entity &e) { return !e.light && !e.environment && !e.camera && !e.fluid; };
     return c;
 }
 } // namespace

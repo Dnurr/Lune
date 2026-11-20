@@ -23,7 +23,7 @@ class Scene;
 //   force:              ring with a mark of its type (dot, swirl, inward ticks), and an
 //                       arrow along its axis for gravity, wind and the vortex
 //   fluid volume:       the edges of its box
-//   fluid source:       ring with a small cloud
+//   fluid source:       ring with a small cloud; dimmed when it reaches no Fluid Volume
 namespace LightIcons
 {
 // Click distance from the icon center (or a camera's lines), in pixels.
