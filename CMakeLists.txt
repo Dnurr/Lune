@@ -108,6 +108,7 @@ qt6_add_shaders(Lune "shaders"
     BASE "src/engine/render/shaders"
     GLSL "300es,330"
     HLSL 50
+    PRECOMPILE
     MSL 12
     FILES
         src/engine/render/shaders/fullscreen.vert
@@ -158,6 +159,7 @@ qt6_add_shaders(Lune "compute_shaders"
     BASE "src/engine/render/shaders"
     GLSL "310es,430"
     HLSL 50
+    PRECOMPILE
     MSL 12
     FILES
         src/engine/render/shaders/particles.comp
