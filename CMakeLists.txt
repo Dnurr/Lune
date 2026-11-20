@@ -108,7 +108,9 @@ endif()
 qt6_add_shaders(Lune "shaders"
     PREFIX "/shaders"
     BASE "src/engine/render/shaders"
-    GLSL "300es,330"
+    # GLSL 4.3 / ES 3.1 where the backend is OpenGL: the IBL shaders use bitfieldReverse
+    # (GLSL 4.0+), and Qt picks the newest variant the context supports.
+    GLSL "310es,430"
     HLSL 50
     PRECOMPILE
     MSL 12
@@ -138,6 +140,7 @@ qt6_add_shaders(Lune "shaders"
         src/engine/render/shaders/shadow_material.vert
         src/engine/render/shaders/shadow_front.vert
         src/engine/render/shaders/shadow_front.frag
+        src/engine/render/shaders/depth_copy.frag
         src/engine/render/shaders/wireframe.vert
         src/engine/render/shaders/wireframe.frag
         src/engine/render/shaders/post_dof.frag
@@ -205,7 +208,8 @@ qt6_add_resources(Lune "icons"
 # GLSL sources needed at runtime: node materials put generated code into mesh.frag and
 # compile it again (and, for their shadows, into shadow_material.glsl); the node types are
 # read from material_nodes.glsl. Particle graphs do the same with particles.comp and
-# particle_nodes.glsl.
+# particle_nodes.glsl. On OpenGL, fluid volumes rebuild fluid_volume.frag without dual-source
+# outputs (FluidSystem::createPipelines).
 qt6_add_resources(Lune "shadersrc"
     PREFIX "/shadersrc"
     BASE "src/engine/render/shaders"
@@ -215,4 +219,5 @@ qt6_add_resources(Lune "shadersrc"
         src/engine/render/shaders/shadow_material.glsl
         src/engine/render/shaders/particles.comp
         src/engine/render/shaders/particle_nodes.glsl
+        src/engine/render/shaders/fluid_volume.frag
 )

@@ -38,6 +38,9 @@ class QRhiTextureRenderTarget;
 // also keeps acne off lit surfaces. Open meshes (a plane) have no far side: both faces.
 // mesh.frag reads both atlases twice: through a comparison sampler (filtered shadow tests)
 // and as raw depth (for blocker searches, e.g. PCSS). See the shadow block in mesh.frag.
+// On OpenGL the comparison mode is state of the texture, not of the sampler, so one texture
+// can't be read both ways in the same draw: there each atlas is copied into an R32F texture
+// after its pass (depth_copy.frag), and the raw depth is read from the copy.
 //
 // Node materials whose alpha matters draw with their own pipelines (createMaterialPipeline),
 // whose fragment shader runs the material (shadow_material.glsl):
@@ -154,7 +157,7 @@ public:
     // cleared, so they're valid to sample). `rub` goes with the first pass.
     void render(QRhiCommandBuffer *cb, QRhiResourceUpdateBatch *rub, const std::vector<Caster> &casters);
 
-    int passCount() const { return 3; }
+    int passCount() const { return m_rawCopy ? 5 : 3; }
     int viewCount() const { return int(m_views.size()); } // tiles drawn in the last prepare()
 
 private:
@@ -189,6 +192,17 @@ private:
     std::unique_ptr<QRhiRenderPassDescriptor> m_translucencyRp;
     std::unique_ptr<QRhiSampler> m_translucencySampler;
     std::unique_ptr<QRhiTexture> m_dummyDepth, m_dummyColor; // meshBindings(true)
+    // OpenGL: R32F copies of the atlases, for the raw depth reads (see the top of the file).
+    struct RawCopy
+    {
+        std::unique_ptr<QRhiTexture> texture;
+        std::unique_ptr<QRhiTextureRenderTarget> target;
+        std::unique_ptr<QRhiShaderResourceBindings> srb;
+    };
+    bool m_rawCopy = false;
+    RawCopy m_directionalRaw, m_pointRaw;
+    std::unique_ptr<QRhiRenderPassDescriptor> m_rawRp;
+    std::unique_ptr<QRhiGraphicsPipeline> m_rawPipeline;
     QShader m_materialVs; // shadow_material.vert
     std::unique_ptr<QRhiSampler> m_compareSampler, m_depthSampler;
     std::unique_ptr<QRhiBuffer> m_uniforms; // the shadow block of mesh.frag

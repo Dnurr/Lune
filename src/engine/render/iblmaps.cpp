@@ -89,6 +89,10 @@ void IblMaps::initialize(QRhi *rhi)
     m_cubeSampler.reset(m_rhi->newSampler(QRhiSampler::Linear, QRhiSampler::Linear, QRhiSampler::Linear,
                                           QRhiSampler::ClampToEdge, QRhiSampler::ClampToEdge, QRhiSampler::ClampToEdge));
     m_cubeSampler->create();
+    m_irradianceSampler.reset(m_rhi->newSampler(QRhiSampler::Linear, QRhiSampler::Linear, QRhiSampler::None,
+                                                QRhiSampler::ClampToEdge, QRhiSampler::ClampToEdge,
+                                                QRhiSampler::ClampToEdge));
+    m_irradianceSampler->create();
     m_lutSampler.reset(m_rhi->newSampler(QRhiSampler::Linear, QRhiSampler::Linear, QRhiSampler::None,
                                          QRhiSampler::ClampToEdge, QRhiSampler::ClampToEdge));
     m_lutSampler->create();
@@ -181,6 +185,7 @@ void IblMaps::release()
     m_prefiltered.reset();
     m_lut.reset();
     m_cubeSampler.reset();
+    m_irradianceSampler.reset();
     m_lutSampler.reset();
     m_equirectSampler.reset();
     m_rhi = nullptr;

@@ -129,6 +129,33 @@ void ShadowMaps::initialize(QRhi *rhi)
                                            QRhiSampler::ClampToEdge, QRhiSampler::ClampToEdge));
     m_depthSampler->create();
 
+    // OpenGL: raw depth from R32F copies of the atlases (see shadowmaps.h).
+    m_rawCopy = m_rhi->backend() == QRhi::OpenGLES2
+                && m_rhi->isTextureFormatSupported(QRhiTexture::R32F, QRhiTexture::RenderTarget);
+    if (m_rawCopy) {
+        using B = QRhiShaderResourceBinding;
+        auto rawCopy = [this](RawCopy &copy, QRhiTexture *source) {
+            copy.texture.reset(m_rhi->newTexture(QRhiTexture::R32F, source->pixelSize(), 1, QRhiTexture::RenderTarget));
+            copy.texture->create();
+            copy.target.reset(m_rhi->newTextureRenderTarget({ QRhiColorAttachment(copy.texture.get()) }));
+            if (!m_rawRp)
+                m_rawRp.reset(copy.target->newCompatibleRenderPassDescriptor());
+            copy.target->setRenderPassDescriptor(m_rawRp.get());
+            copy.target->create();
+            copy.srb.reset(m_rhi->newShaderResourceBindings());
+            copy.srb->setBindings({ B::sampledTexture(0, B::FragmentStage, source, m_depthSampler.get()) });
+            copy.srb->create();
+        };
+        rawCopy(m_directionalRaw, m_directional.get());
+        rawCopy(m_pointRaw, m_point.get());
+        m_rawPipeline.reset(m_rhi->newGraphicsPipeline());
+        m_rawPipeline->setShaderStages({ { QRhiShaderStage::Vertex, loadShader(QStringLiteral("fullscreen.vert")) },
+                                         { QRhiShaderStage::Fragment, loadShader(QStringLiteral("depth_copy.frag")) } });
+        m_rawPipeline->setShaderResourceBindings(m_directionalRaw.srb.get());
+        m_rawPipeline->setRenderPassDescriptor(m_rawRp.get());
+        m_rawPipeline->create();
+    }
+
     auto ubuf = [this](quint32 size) {
         std::unique_ptr<QRhiBuffer> b(m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, size));
         b->create();
@@ -269,6 +296,14 @@ void ShadowMaps::release()
     m_translucencySampler.reset();
     m_dummyDepth.reset();
     m_dummyColor.reset();
+    m_rawPipeline.reset();
+    for (RawCopy *copy : { &m_directionalRaw, &m_pointRaw }) {
+        copy->srb.reset();
+        copy->target.reset();
+        copy->texture.reset();
+    }
+    m_rawRp.reset();
+    m_rawCopy = false;
     m_materialVs = {};
     m_views.clear();
     m_rhi = nullptr;
@@ -281,11 +316,14 @@ QList<QRhiShaderResourceBinding> ShadowMaps::meshBindings(bool forCasters) const
     QRhiTexture *directional = forCasters ? m_dummyDepth.get() : m_directional.get();
     QRhiTexture *point = forCasters ? m_dummyDepth.get() : m_point.get();
     QRhiTexture *translucency = forCasters ? m_dummyColor.get() : m_translucency.get();
+    // Raw depth: the atlases themselves, or their copies where they can't be read both ways.
+    QRhiTexture *directionalRaw = m_rawCopy && !forCasters ? m_directionalRaw.texture.get() : directional;
+    QRhiTexture *pointRaw = m_rawCopy && !forCasters ? m_pointRaw.texture.get() : point;
     return { B::uniformBuffer(6, fs, m_uniforms.get()),
              B::sampledTexture(7, fs, directional, m_compareSampler.get()),
-             B::sampledTexture(8, fs, directional, m_depthSampler.get()),
+             B::sampledTexture(8, fs, directionalRaw, m_depthSampler.get()),
              B::sampledTexture(9, fs, point, m_compareSampler.get()),
-             B::sampledTexture(10, fs, point, m_depthSampler.get()),
+             B::sampledTexture(10, fs, pointRaw, m_depthSampler.get()),
              B::sampledTexture(TranslucencyBinding, fs, translucency, m_translucencySampler.get()) };
 }
 
@@ -595,6 +633,19 @@ void ShadowMaps::render(QRhiCommandBuffer *cb, QRhiResourceUpdateBatch *rub, con
             }
         }
         cb->endPass();
+    }
+
+    // OpenGL: the raw depth copies (see shadowmaps.h).
+    if (m_rawCopy) {
+        for (const RawCopy *copy : { &m_directionalRaw, &m_pointRaw }) {
+            const QSize size = copy->texture->pixelSize();
+            cb->beginPass(copy->target.get(), black, { 1.0f, 0 });
+            cb->setGraphicsPipeline(m_rawPipeline.get());
+            cb->setViewport({ 0, 0, float(size.width()), float(size.height()) });
+            cb->setShaderResources(copy->srb.get());
+            cb->draw(3);
+            cb->endPass();
+        }
     }
 
     // Translucency map: cleared to "all the light, nothing in the way", then every

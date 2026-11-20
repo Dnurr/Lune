@@ -67,6 +67,9 @@ public:
     QRhiTexture *prefiltered() const { return m_prefiltered.get(); }
     QRhiTexture *brdfLut() const { return m_lut.get(); }
     QRhiSampler *cubeSampler() const { return m_cubeSampler.get(); } // trilinear, clamped
+    // Bilinear, clamped: for the irradiance map, which has no mips (on OpenGL a mipmapping
+    // filter on a texture without mips makes it incomplete, and it reads as black).
+    QRhiSampler *irradianceSampler() const { return m_irradianceSampler.get(); }
     QRhiSampler *lutSampler() const { return m_lutSampler.get(); }   // bilinear, clamped
 
     // The equirectangular image used for the source: the file, or the gradient when
@@ -93,7 +96,7 @@ private:
     bool m_uniformsReady = false;
     IblSource m_source;
 
-    std::unique_ptr<QRhiSampler> m_cubeSampler, m_lutSampler, m_equirectSampler;
+    std::unique_ptr<QRhiSampler> m_cubeSampler, m_irradianceSampler, m_lutSampler, m_equirectSampler;
     std::unique_ptr<QRhiTexture> m_equirect; // the source image, RGBA16F
     std::unique_ptr<QRhiTexture> m_environment, m_irradiance, m_prefiltered, m_lut;
     std::unique_ptr<QRhiRenderPassDescriptor> m_rp; // RGBA16F color only: every pass

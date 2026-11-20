@@ -37,8 +37,10 @@ void TextureCache::initialize(QRhi *rhi)
     m_sampler.reset(m_rhi->newSampler(QRhiSampler::Linear, QRhiSampler::Linear, QRhiSampler::Linear,
                                       QRhiSampler::Repeat, QRhiSampler::Repeat));
     m_sampler->create();
+    // MipMapped (one level at 1x1): m_sampler filters across mips, and on OpenGL a texture
+    // without mips read through a mipmapping filter is incomplete and reads as black.
     for (auto &t : m_fallbacks) {
-        t.reset(m_rhi->newTexture(QRhiTexture::RGBA8, QSize(1, 1)));
+        t.reset(m_rhi->newTexture(QRhiTexture::RGBA8, QSize(1, 1), 1, QRhiTexture::MipMapped));
         t->create();
     }
     m_fallbacksUploaded = false;

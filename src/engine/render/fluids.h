@@ -128,6 +128,10 @@ private:
     QRhiTexture *m_sceneDistance = nullptr;         // not owned
     std::unique_ptr<QRhiSampler> m_linear, m_nearest;
     std::unique_ptr<QRhiGraphicsPipeline> m_drawPipe;
+    // OpenGL: Qt's backend has no dual-source blend factors, so each volume is drawn twice
+    // with single-output variants of fluid_volume.frag: m_drawPipe multiplies what's behind by
+    // the transmittance, m_drawAddPipe adds the light (see createPipelines()).
+    std::unique_ptr<QRhiGraphicsPipeline> m_drawAddPipe;
     std::unordered_map<EntityId, Volume> m_volumes;
     std::vector<std::unique_ptr<QRhiResource>> m_retired, m_retiredBefore;
     QRhiResourceUpdateBatch *m_pendingUpload = nullptr;

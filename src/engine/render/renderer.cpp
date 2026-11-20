@@ -635,8 +635,9 @@ QShader Renderer::compileFragment(const QString &source, const QString &name, QS
         targets.append({ QShader::MslShader, QShaderVersion(12) });
         break;
     case QRhi::OpenGLES2:
-        targets.append({ QShader::GlslShader, QShaderVersion(330) });
-        targets.append({ QShader::GlslShader, QShaderVersion(300, QShaderVersion::GlslEs) });
+        // The same GLSL versions as the precompiled shaders (CMakeLists.txt).
+        targets.append({ QShader::GlslShader, QShaderVersion(430) });
+        targets.append({ QShader::GlslShader, QShaderVersion(310, QShaderVersion::GlslEs) });
         break;
     default:
         break;
@@ -722,7 +723,7 @@ QList<QRhiShaderResourceBinding> Renderer::meshBindings(QRhiBuffer *entityUnifor
     QList<QRhiShaderResourceBinding> b = { B::uniformBuffer(0, B::VertexStage | fs, entityUniforms),
                                            B::uniformBuffer(1, fs, m_lightsUbuf.get()),
                                            B::uniformBuffer(2, fs, m_envUbuf.get()),
-                                           B::sampledTexture(3, fs, m_ibl.irradiance(), m_ibl.cubeSampler()),
+                                           B::sampledTexture(3, fs, m_ibl.irradiance(), m_ibl.irradianceSampler()),
                                            B::sampledTexture(4, fs, m_ibl.prefiltered(), m_ibl.cubeSampler()),
                                            B::sampledTexture(5, fs, m_ibl.brdfLut(), m_ibl.lutSampler()) };
     b.append(m_shadows.meshBindings(forCasters)); // 6..10, 19

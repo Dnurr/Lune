@@ -50,7 +50,7 @@ std::vector<QRhi::Implementation> availableBackends()
 #if QT_CONFIG(vulkan) && __has_include(<vulkan/vulkan.h>)
     out.push_back(QRhi::Vulkan);
 #endif
-    // Not OpenGL yet: the renderer draws it wrong (meshes half black, no shadows).
+    out.push_back(QRhi::OpenGLES2);
     return out;
 }
 

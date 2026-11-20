@@ -2,7 +2,9 @@
 
 #include <QFile>
 #include <QImage>
+#include <QRegularExpression>
 #include <QtMath>
+#include <rhi/qshaderbaker.h>
 #include <cmath>
 #include <cstring>
 
@@ -52,6 +54,42 @@ constexpr int kFluidUbufSize = 5 * 16 + FluidSystem::MaxSources * 3 * 16;
 // VolumeBuf in fluid_volume.vert/.frag: mat4 viewProj, model, worldToBox, then 9 vec4.
 constexpr int kVolumeUbufSize = 3 * 64 + 9 * 16;
 
+// SPIRV-Cross renames uniform block members named like GLSL built-in functions in the GLSL it
+// writes (FluidBuf's `step` becomes `_step`), but the reflection keeps the original name. Qt's
+// OpenGL backend sets uniform blocks member by member, looking each one up by its reflected
+// name: a renamed member is never found and reads as 0 (dt = 0, voxel size = 0). Struct
+// members don't clash with functions, so the reflected names are put back in the GLSL.
+QShader withReflectedMemberNames(QShader shader)
+{
+    QList<QByteArray> names;
+    for (const QShaderDescription::UniformBlock &block : shader.description().uniformBlocks()) {
+        for (const QShaderDescription::BlockVariable &member : block.members)
+            names.append(member.name);
+    }
+    const QList<QShaderKey> keys = shader.availableShaders();
+    for (const QShaderKey &key : keys) {
+        if (key.source() != QShader::GlslShader)
+            continue;
+        QShaderCode code = shader.shader(key);
+        QString src = QString::fromUtf8(code.shader());
+        bool changed = false;
+        for (const QByteArray &name : names) {
+            const QString n = QRegularExpression::escape(QString::fromUtf8(name));
+            const QRegularExpression original(QStringLiteral("\\.") + n + QStringLiteral("\\b"));
+            const QRegularExpression renamed(QStringLiteral("\\b_") + n + QStringLiteral("\\b"));
+            if (!src.contains(original) && src.contains(renamed)) {
+                src.replace(renamed, QString::fromUtf8(name));
+                changed = true;
+            }
+        }
+        if (changed) {
+            code.setShader(src.toUtf8());
+            shader.setShader(key, code);
+        }
+    }
+    return shader;
+}
+
 QShader loadShader(const QString &name)
 {
     QFile f(QStringLiteral(":/shaders/") + name + QStringLiteral(".qsb"));
@@ -59,7 +97,49 @@ QShader loadShader(const QString &name)
         qWarning("FluidSystem: missing shader %s", qPrintable(name));
         return {};
     }
-    return QShader::fromSerialized(f.readAll());
+    return withReflectedMemberNames(QShader::fromSerialized(f.readAll()));
+}
+
+// OpenGL without dual-source blending (FluidSystem::createPipelines): fluid_volume.frag with
+// its two outputs turned into plain variables and a main() that writes one of them, as the
+// only output. `multiply`: vec4(transmittance.rgb, 1 - alpha), for dst * src (color and
+// alpha); otherwise fragColor, added on top. Together: dst * T + L and a + dst_a * (1 - a),
+// as the dual-source blend does. An invalid shader if the source doesn't declare the outputs
+// as documented in it.
+QShader volumeVariant(bool multiply, QString *error)
+{
+    QFile f(QStringLiteral(":/shadersrc/fluid_volume.frag"));
+    if (!f.open(QIODevice::ReadOnly)) {
+        *error = QStringLiteral("missing fluid_volume.frag source");
+        return {};
+    }
+    QString src = QString::fromUtf8(f.readAll());
+    const QRegularExpression color(QStringLiteral(R"(layout\s*\(\s*location\s*=\s*0\s*\)\s*out\s+vec4\s+fragColor\s*;)"));
+    const QRegularExpression second(
+        QStringLiteral(R"(layout\s*\(\s*location\s*=\s*0\s*,\s*index\s*=\s*1\s*\)\s*out\s+vec4\s+transmittance\s*;)"));
+    const QRegularExpression entry(QStringLiteral(R"(\bvoid\s+main\s*\(\s*\))"));
+    if (!src.contains(color) || !src.contains(second) || !src.contains(entry)) {
+        *error = QStringLiteral("fluid_volume.frag outputs not as expected");
+        return {};
+    }
+    src.replace(color, QStringLiteral("vec4 fragColor;\nlayout(location = 0) out vec4 luneOut;"));
+    src.replace(second, QStringLiteral("vec4 transmittance;"));
+    src.replace(entry, QStringLiteral("void luneVolumeMain()"));
+    src += multiply ? QStringLiteral("\nvoid main()\n{\n    luneVolumeMain();\n"
+                                     "    luneOut = vec4(transmittance.rgb, 1.0 - fragColor.a);\n}\n")
+                    : QStringLiteral("\nvoid main()\n{\n    luneVolumeMain();\n    luneOut = fragColor;\n}\n");
+
+    QShaderBaker baker;
+    baker.setGeneratedShaders({ { QShader::GlslShader, QShaderVersion(430) },
+                                { QShader::GlslShader, QShaderVersion(310, QShaderVersion::GlslEs) } });
+    baker.setGeneratedShaderVariants({ QShader::StandardShader });
+    baker.setSourceString(src.toUtf8(), QShader::FragmentStage, "fluid_volume.frag (OpenGL)");
+    const QShader shader = baker.bake();
+    if (!shader.isValid()) {
+        *error = baker.errorMessage().trimmed();
+        return shader;
+    }
+    return withReflectedMemberNames(shader);
 }
 
 float linear(float c)
@@ -188,28 +268,59 @@ void FluidSystem::initialize(QRhi *rhi)
 void FluidSystem::createPipelines(QRhiRenderPassDescriptor *sceneRp, int sampleCount)
 {
     m_drawPipe.reset();
+    m_drawAddPipe.reset();
     if (!m_supported)
         return;
-    m_drawPipe.reset(m_rhi->newGraphicsPipeline());
-    m_drawPipe->setShaderStages({ { QRhiShaderStage::Vertex, loadShader(QStringLiteral("fluid_volume.vert")) },
-                                  { QRhiShaderStage::Fragment, loadShader(QStringLiteral("fluid_volume.frag")) } });
-    m_drawPipe->setShaderResourceBindings(m_drawLayout.get());
-    m_drawPipe->setRenderPassDescriptor(sceneRp);
-    m_drawPipe->setSampleCount(sampleCount);
-    m_drawPipe->setCullMode(QRhiGraphicsPipeline::Front); // back faces: the box from inside too
-    m_drawPipe->setDepthTest(false);                       // the march stops at the scene itself
-    m_drawPipe->setDepthWrite(false);
-    // Dual-source: the shader's second output (index 1) is the transmittance per channel, so
-    // what's behind is dimmed, and tinted, channel by channel: dst * T + L. Alpha stays
-    // premultiplied (a = how much is hidden, on average).
-    QRhiGraphicsPipeline::TargetBlend b;
-    b.enable = true;
-    b.srcColor = QRhiGraphicsPipeline::One;
-    b.dstColor = QRhiGraphicsPipeline::Src1Color;
-    b.srcAlpha = QRhiGraphicsPipeline::One;
-    b.dstAlpha = QRhiGraphicsPipeline::OneMinusSrcAlpha;
-    m_drawPipe->setTargetBlends({ b });
-    m_drawPipe->create();
+    const QShader vs = loadShader(QStringLiteral("fluid_volume.vert"));
+    auto pipeline = [&](const QShader &fs, const QRhiGraphicsPipeline::TargetBlend &b) {
+        std::unique_ptr<QRhiGraphicsPipeline> p(m_rhi->newGraphicsPipeline());
+        p->setShaderStages({ { QRhiShaderStage::Vertex, vs }, { QRhiShaderStage::Fragment, fs } });
+        p->setShaderResourceBindings(m_drawLayout.get());
+        p->setRenderPassDescriptor(sceneRp);
+        p->setSampleCount(sampleCount);
+        p->setCullMode(QRhiGraphicsPipeline::Front); // back faces: the box from inside too
+        p->setDepthTest(false);                       // the march stops at the scene itself
+        p->setDepthWrite(false);
+        p->setTargetBlends({ b });
+        p->create();
+        return p;
+    };
+    using G = QRhiGraphicsPipeline;
+    if (m_rhi->backend() != QRhi::OpenGLES2) {
+        // Dual-source: the shader's second output (index 1) is the transmittance per channel,
+        // so what's behind is dimmed, and tinted, channel by channel: dst * T + L. Alpha stays
+        // premultiplied (a = how much is hidden, on average).
+        G::TargetBlend b;
+        b.enable = true;
+        b.srcColor = G::One;
+        b.dstColor = G::Src1Color;
+        b.srcAlpha = G::One;
+        b.dstAlpha = G::OneMinusSrcAlpha;
+        m_drawPipe = pipeline(loadShader(QStringLiteral("fluid_volume.frag")), b);
+        return;
+    }
+    // OpenGL: the same result in two draws (volumeVariant()): dst * (T, 1 - a), then + (L, a).
+    QString error;
+    const QShader multiplyFs = volumeVariant(true, &error);
+    const QShader addFs = multiplyFs.isValid() ? volumeVariant(false, &error) : QShader();
+    if (!addFs.isValid()) {
+        qWarning("FluidSystem: %s", qPrintable(error));
+        return; // no volumes drawn
+    }
+    G::TargetBlend multiply;
+    multiply.enable = true;
+    multiply.srcColor = G::Zero;
+    multiply.dstColor = G::SrcColor;
+    multiply.srcAlpha = G::Zero;
+    multiply.dstAlpha = G::SrcAlpha;
+    m_drawPipe = pipeline(multiplyFs, multiply);
+    G::TargetBlend add;
+    add.enable = true;
+    add.srcColor = G::One;
+    add.dstColor = G::One;
+    add.srcAlpha = G::One;
+    add.dstAlpha = G::One;
+    m_drawAddPipe = pipeline(addFs, add);
 }
 
 void FluidSystem::release()
@@ -218,6 +329,7 @@ void FluidSystem::release()
     m_retired.clear();
     m_retiredBefore.clear();
     m_drawPipe.reset();
+    m_drawAddPipe.reset();
     for (auto &p : m_pipes)
         p.reset();
     m_clearPipe.reset();
@@ -592,9 +704,13 @@ void FluidSystem::draw(QRhiCommandBuffer *cb, const QRhiViewport &viewport)
                                                  m_nearest.get()) });
             srb->create();
         }
-        cb->setGraphicsPipeline(m_drawPipe.get());
-        cb->setViewport(viewport);
-        cb->setShaderResources(srb.get());
-        cb->draw(36);
+        for (QRhiGraphicsPipeline *pipe : { m_drawPipe.get(), m_drawAddPipe.get() }) {
+            if (!pipe)
+                continue; // one pipeline (dual-source) except on OpenGL
+            cb->setGraphicsPipeline(pipe);
+            cb->setViewport(viewport);
+            cb->setShaderResources(srb.get());
+            cb->draw(36);
+        }
     }
 }
