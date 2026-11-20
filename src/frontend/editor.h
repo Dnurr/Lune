@@ -91,6 +91,7 @@ private:
     void addCamera();
     // Moves the scene camera to the viewport's view (one undo step); adds one if there's none.
     void alignCameraToView();
+    void showPreferences(); // Edit > Preferences
     // The viewport's passepartout and camera icons follow the render size.
     void updateRenderAspect();
     static Entity lightPrototype(Light::Type type); // name, transform and light of a new light

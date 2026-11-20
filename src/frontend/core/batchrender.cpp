@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 
+#include "appsettings.h"
 #include "displaysettings.h"
 #include "engine/io/sceneio.h"
 #include "engine/render/imagerender.h"
@@ -21,17 +22,6 @@ void print(FILE *to, const QString &text)
 {
     std::fputs(qPrintable(text + QLatin1Char('\n')), to);
     std::fflush(to);
-}
-
-QRhi::Implementation defaultBackend()
-{
-#if defined(Q_OS_WIN)
-    return QRhi::D3D11;
-#elif defined(Q_OS_MACOS)
-    return QRhi::Metal;
-#else
-    return QRhi::OpenGLES2;
-#endif
 }
 } // namespace
 
@@ -94,7 +84,7 @@ int renderFromCommandLine(const QStringList &args)
         out = QDir(folder).filePath(RenderSettings::fileName(QFileInfo(scenePath).completeBaseName(), frame));
     }
 
-    const std::vector<QImage> images = renderImages(defaultBackend(), nullptr, scene, camera, request, &error);
+    const std::vector<QImage> images = renderImages(AppSettings::backend(), nullptr, scene, camera, request, &error);
     if (images.size() != 1) {
         print(stderr, error.isEmpty() ? QStringLiteral("Rendering failed.") : error);
         return 1;

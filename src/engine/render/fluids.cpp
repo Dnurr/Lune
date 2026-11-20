@@ -114,6 +114,11 @@ void FluidSystem::initialize(QRhi *rhi)
     release();
     m_rhi = rhi;
     m_supported = m_rhi->isFeatureSupported(QRhi::Compute) && m_rhi->isFeatureSupported(QRhi::ThreeDimensionalTextures);
+    // Qt 6.8's Direct3D 12 backend loses the device on the first write to a 3D storage image (the
+    // views are made inside QRhi, so fixVolumeStorageView's Direct3D 11 workaround can't reach
+    // them): no fluids there rather than a lost device.
+    if (m_rhi->backend() == QRhi::D3D12)
+        m_supported = false;
 
     m_linear.reset(m_rhi->newSampler(QRhiSampler::Linear, QRhiSampler::Linear, QRhiSampler::None, QRhiSampler::ClampToEdge,
                                      QRhiSampler::ClampToEdge, QRhiSampler::ClampToEdge));

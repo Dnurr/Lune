@@ -35,6 +35,8 @@
 #include <QUndoStack>
 
 #include "components/palette/commandpalette.h"
+#include "components/preferences/preferencesdialog.h"
+#include "core/appsettings.h"
 #include "components/render/renderresultdialog.h"
 #include "components/render/rendersettingsdialog.h"
 #include "components/viewport/shadingmenu.h"
@@ -70,7 +72,14 @@ Editor::Editor(QWidget *parent)
 {
     resize(1280, 720);
 
-    // m_viewport->setApi(QRhiWidget::Api::Vulkan); // optional: pick a backend (default: Direct3D 11 on Windows)
+    // The graphics backend from the Preferences (before the viewport is shown: it can't change after).
+    switch (AppSettings::backend()) {
+    case QRhi::D3D12: m_viewport->setApi(QRhiWidget::Api::Direct3D12); break;
+    case QRhi::Vulkan: m_viewport->setApi(QRhiWidget::Api::Vulkan); break;
+    case QRhi::Metal: m_viewport->setApi(QRhiWidget::Api::Metal); break;
+    case QRhi::OpenGLES2: m_viewport->setApi(QRhiWidget::Api::OpenGL); break;
+    default: m_viewport->setApi(QRhiWidget::Api::Direct3D11); break;
+    }
     setCentralWidget(m_viewport);
 
     m_viewport->setEditorContext(m_scene, m_selection, m_undo);
@@ -178,6 +187,11 @@ void Editor::createMenus()
     palette->setProperty("paletteHidden", true);
     connect(palette, &QAction::triggered, this, [this] { m_palette->open(); });
     edit->addAction(palette);
+    edit->addSeparator();
+    auto *preferences = new QAction("Preferences...", this);
+    preferences->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Comma));
+    connect(preferences, &QAction::triggered, this, &Editor::showPreferences);
+    edit->addAction(preferences);
 
     // View
     auto *stats = new QAction("Stats Overlay", this);
@@ -542,6 +556,18 @@ void Editor::addCamera()
     e.camera = Camera {};
     e.postProcess = PostProcess {};
     m_undo->push(new AddEntityCommand(m_scene, m_selection, e));
+}
+
+void Editor::showPreferences()
+{
+    PreferencesDialog dialog(m_viewport->rhiBackend(), this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    const QRhi::Implementation before = AppSettings::backend();
+    AppSettings::setBackend(dialog.backend());
+    if (AppSettings::backend() != before)
+        QMessageBox::information(this, "Preferences",
+                                 QStringLiteral("Lune will use %1 when it starts again.").arg(AppSettings::backendLabel(dialog.backend())));
 }
 
 void Editor::alignCameraToView()

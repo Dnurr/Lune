@@ -58,6 +58,7 @@ add_library(lune_editor_core STATIC
     src/frontend/core/displayhistory.cpp
     src/frontend/core/rendersettings.cpp
     src/frontend/core/batchrender.cpp
+    src/frontend/core/appsettings.cpp
     src/frontend/components/viewport/gizmo.cpp
     src/frontend/components/viewport/overlaydraw.cpp
     src/frontend/components/viewport/lighticons.cpp
@@ -74,6 +75,7 @@ add_executable(Lune
     src/frontend/components/viewport/cameramenu.cpp
     src/frontend/components/viewport/shadingmenu.cpp
     src/frontend/components/render/rendersettingsdialog.cpp
+    src/frontend/components/preferences/preferencesdialog.cpp
     src/frontend/components/render/renderresultdialog.cpp
     src/frontend/components/widgets/draglabel.cpp
     src/frontend/components/widgets/keybutton.cpp
