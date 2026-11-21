@@ -151,6 +151,14 @@ int TimelineRuler::frameAt(int x) const
     return qBound(t.start, int(std::lround(f)), t.end);
 }
 
+void TimelineRuler::setCachedFrames(const QList<QPair<int, int>> &ranges)
+{
+    if (ranges == m_cached)
+        return;
+    m_cached = ranges;
+    update();
+}
+
 void TimelineRuler::paintEvent(QPaintEvent *)
 {
     const Timeline &t = m_scene->timeline();
@@ -166,6 +174,22 @@ void TimelineRuler::paintEvent(QPaintEvent *)
     p.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 7, 7);
 
     const double pxPerFrame = (width() - 2.0 * kRulerPad) / qMax(1, t.end - t.start);
+
+    // The fluid cache: a band along the bottom under the frames shown without simulating (half
+    // a frame on each side, so one frame is a sliver and a run is one bar).
+    if (!m_cached.isEmpty()) {
+        QColor band = c.primary;
+        band.setAlphaF(0.55f);
+        p.setBrush(band);
+        for (const auto &[first, last] : m_cached) {
+            if (last < t.start || first > t.end)
+                continue;
+            const double x0 = xOf(qMax(first, t.start)) - pxPerFrame * 0.5;
+            const double x1 = xOf(qMin(last, t.end)) + pxPerFrame * 0.5;
+            p.drawRoundedRect(QRectF(x0, height() - 4.0, qMax(2.0, x1 - x0), 3.0), 1.5, 1.5);
+        }
+        p.setBrush(Qt::NoBrush);
+    }
     const int major = tickStep(pxPerFrame, 52.0);
     int minor = 0; // ticks without numbers between the numbered ones
     for (int candidate : { major / 5, major / 2, 1 }) {
@@ -391,6 +415,11 @@ void TimelinePanel::syncTimeline()
     m_fps->setValue(t.fps);
     m_frame->setRange(t.start, t.end);
     m_frame->setValue(int(std::lround(m_playback->frame())));
+}
+
+void TimelinePanel::setCachedFrames(const QList<QPair<int, int>> &ranges)
+{
+    m_ruler->setCachedFrames(ranges);
 }
 
 void TimelinePanel::syncFrame()

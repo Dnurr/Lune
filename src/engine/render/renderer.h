@@ -178,6 +178,8 @@ public:
     QString textureError(const QString &image) const { return m_textures.error(image); }
     // Something the last frame drew is still loading (textures): render again soon.
     // Also while particles catch up with a long jump in time (ParticleSystem::pending()).
+    // Frames the fluid volumes show without simulating (FluidSystem::cachedFrames()).
+    QList<QPair<int, int>> fluidCachedFrames() const { return m_fluids.cachedFrames(); }
     bool needsAnotherFrame() const { return m_textures.loading() || m_particles.pending() || m_fluids.pending(); }
 
 private:

@@ -295,6 +295,10 @@ void Viewport::render(QRhiCommandBuffer *cb)
     m_renderer.render(cb, renderTarget(), m_camera, m_scene, selected);
     if (m_renderer.takeMaterialErrorsChanged())
         emit materialErrorsChanged();
+    if (const auto cache = m_renderer.fluidCachedFrames(); cache != m_fluidCache) {
+        m_fluidCache = cache;
+        emit fluidCacheChanged(m_fluidCache);
+    }
 
     if (m_stats->isVisible()) {
         // CPU time to prepare and record this frame (the GPU work happens later).

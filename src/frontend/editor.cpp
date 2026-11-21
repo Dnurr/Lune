@@ -465,6 +465,7 @@ void Editor::createPanels()
     // Timeline (footer): under everything, the full width of the window.
     m_timeline = new TimelinePanel(m_scene, m_playback, m_selection, m_undo, m_viewport);
     m_timeline->setMargin(12);
+    connect(m_viewport, &Viewport::fluidCacheChanged, m_timeline, &TimelinePanel::setCachedFrames);
 
     // Drag and drop onto the viewport (from the Assets panel or the file manager).
     m_viewport->setDropSuffixes({ "obj", "gltf", "glb", "hdr", "lune" });

@@ -137,6 +137,8 @@ signals:
     void flySpeedChanged(float speed);
     void viewSettingsChanged();
     void cameraViewChanged(bool on);
+    // The frames the fluid volumes show without simulating changed (Renderer::fluidCachedFrames()).
+    void fluidCacheChanged(const QList<QPair<int, int>> &frames);
 
 protected:
     bool event(QEvent *event) override;
@@ -206,5 +208,6 @@ private:
     QPoint m_lookAnchor;     // global cursor position, kept there while looking
     QSet<int> m_flyKeys;     // movement keys held
     QElapsedTimer m_frameClock; // time between animated frames
+    QList<QPair<int, int>> m_fluidCache; // last fluidCacheChanged()
     bool m_animating = false;   // the previous frame asked for another one
 };
