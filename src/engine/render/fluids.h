@@ -65,6 +65,12 @@ class Scene;
 // Snapshots make a frame the same as simulating from the start; cached frames differ only by
 // the quantization (relative error below 0.01% for the smoke densities that show).
 //
+// Detail (FluidVolume::detail > 0): rest coordinates carried by the fluid (fluid_rest.comp, a pass
+// at the end of each step), two fields at half the resolution, each reset to the identity every
+// detailPeriod steps, half a period apart. The volume and shadow shaders read a noise at those
+// coordinates and fade between the two fields (VolumeBuf.detail.y: A's weight, 0 at its reset).
+// Snapshots and cached frames keep them too (one slot more a brick).
+//
 // Drawing: the box (fluid_volume.vert: 36 vertices, front faces culled) with fluid_volume.frag
 // marching through the density, over the scene with premultiplied alpha, before the particles;
 // it reads the scene's view depth (the Renderer's distance pass) to stop at surfaces.
@@ -145,12 +151,14 @@ private:
         Project,
         AdvectPredict, // fluid_advect.comp into the predicted fields (MacCormack)
         AdvectCorrect, // fluid_advect_correct.comp
+        Rest,          // fluid_rest.comp (detail)
         PassCount
     };
     // A volume's fields after some step: velocity, density, pressure (the formats of the pairs).
     struct Snapshot
     {
         std::array<std::unique_ptr<QRhiTexture>, 3> fields;
+        std::array<std::unique_ptr<QRhiTexture>, 2> rest; // A, B, with detail
     };
     // A frame in the brick pool: its table (header and an entry per brick).
     struct CachedFrame
@@ -158,6 +166,7 @@ private:
         std::unique_ptr<QRhiBuffer> table;
         int page = 0;            // the first of the two pages it was packed with (Volume::pages)
         bool confirmed = false;  // its header read back, every brick with a slot: drawable
+        bool rest = false;       // with the rest coordinates
         int bricks = 0;          // once confirmed
     };
     // Read back after a frame was packed: its table's header, or the pool counter (step -1).
@@ -179,6 +188,9 @@ private:
         std::unique_ptr<QRhiTexture> divergence;
         // MacCormack: the semi-Lagrangian result, before the correction (made when first used).
         std::unique_ptr<QRhiTexture> predictedVelocity, predictedDensity;
+        // Detail: the rest fields, half resolution, a ping-pong pair each (made when first used).
+        std::array<std::unique_ptr<QRhiTexture>, 2> restA, restB;
+        int r = 0;                        // which texture of each rest pair is current
         int v = 0, d = 0, p = 0;          // which texture of each pair holds the current field
         std::unique_ptr<QRhiBuffer> stepUniforms; // MaxStepsPerFrame FluidBufs (dynamic offsets)
         std::unique_ptr<QRhiBuffer> clearUniforms;
@@ -186,9 +198,10 @@ private:
         std::map<int, std::unique_ptr<QRhiShaderResourceBindings>> srbs;
         std::array<std::unique_ptr<QRhiShaderResourceBindings>, 2> clearSrbs;
         std::unique_ptr<QRhiBuffer> drawUniforms;
-        std::array<std::unique_ptr<QRhiShaderResourceBindings>, 3> drawSrbs; // by d; 2: a cached frame
+        // By d * 2 + r (the density and rest fields drawn); 4: a cached frame.
+        std::array<std::unique_ptr<QRhiShaderResourceBindings>, 5> drawSrbs;
         std::unique_ptr<QRhiBuffer> shadowUniforms; // ShadowMaps::ViewCount ShadowBufs (dynamic offsets)
-        std::array<std::unique_ptr<QRhiShaderResourceBindings>, 3> shadowSrbs; // by d; 2: a cached frame
+        std::array<std::unique_ptr<QRhiShaderResourceBindings>, 5> shadowSrbs; // as drawSrbs
         int stepsDone = -1;               // steps in the fields (-1: clear first)
         std::map<int, Snapshot> snapshots; // by step (the fields after that many steps)
         quint64 snapshotBytes = 0;        // one snapshot's
@@ -199,6 +212,7 @@ private:
         bool smokeOnly = false;           // how the frames are kept (no emission: smoke only)
         quint64 generation = 0;           // bumped when the cache is dropped
         std::unique_ptr<QRhiTexture> unpacked; // the cached frame being drawn, dense (RGBA16F)
+        std::array<std::unique_ptr<QRhiTexture>, 2> unpackedRest; // and its rest fields
         int unpackedStep = -1;            // which (-1: none)
         bool shown = false;               // drawn from `unpacked` this frame (else the simulation's)
         bool seen = false;
@@ -209,6 +223,10 @@ private:
     // A copy (fluid_copy.comp): from the three textures to the other three. Its binding set is
     // retired at once (it lives until the frames using it are done).
     QRhiShaderResourceBindings *copyBindings(Volume &v, QRhiTexture *const from[3], QRhiTexture *const to[3]);
+    // The same for the two rest fields (fluid_copy_rest.comp).
+    QRhiShaderResourceBindings *copyRestBindings(Volume &v, QRhiTexture *const from[2], QRhiTexture *const to[2]);
+    // Half-resolution rest field textures (two), for a snapshot, the pairs or a cached frame.
+    bool makeRest(const Volume &v, std::array<std::unique_ptr<QRhiTexture>, 2> &out);
     void dropSnapshots(Volume &v); // and the frames
     void dropFrames(Volume &v);
     void retire(Volume &v);
@@ -221,9 +239,10 @@ private:
     QRhi *m_rhi = nullptr;
     bool m_supported = false;
     std::array<std::unique_ptr<QRhiComputePipeline>, PassCount> m_pipes;
-    std::unique_ptr<QRhiComputePipeline> m_clearPipe, m_copyPipe, m_packPipe, m_unpackPipe;
-    std::unique_ptr<QRhiShaderResourceBindings> m_passLayout, m_clearLayout, m_copyLayout, m_packLayout, m_unpackLayout,
-        m_drawLayout, m_shadowLayout;
+    std::unique_ptr<QRhiComputePipeline> m_clearPipe, m_copyPipe, m_copyRestPipe, m_packPipe, m_unpackPipe;
+    std::unique_ptr<QRhiShaderResourceBindings> m_passLayout, m_clearLayout, m_copyLayout, m_copyRestLayout, m_packLayout,
+        m_unpackLayout, m_drawLayout, m_shadowLayout;
+
     std::unique_ptr<QRhiBuffer> m_layoutStorage; // for the pack/unpack layouts
     quint64 m_cacheBudget = DefaultCacheBudget;
     std::list<Readback> m_readbacks;
@@ -231,6 +250,7 @@ private:
     std::unique_ptr<QRhiBuffer> m_layoutUniforms;
     std::unique_ptr<QRhiTexture> m_layoutVolume;    // 1x1x1, for the layouts and unused inputs
     std::unique_ptr<QRhiTexture> m_spareBrickPage;  // 1x1x1 RGBA8: a brick pass's second page when there's one
+    std::unique_ptr<QRhiTexture> m_spareRestOut;    // 1x1x1 RGBA16F: an unpack's second rest output, unused
     std::unique_ptr<QRhiTexture> m_distanceStandIn; // 1x1
     QRhiTexture *m_sceneDistance = nullptr;         // not owned
     const ShadowMaps *m_shadowMaps = nullptr;       // not owned

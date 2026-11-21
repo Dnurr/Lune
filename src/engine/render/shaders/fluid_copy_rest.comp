@@ -1,0 +1,24 @@
+#version 440
+
+// Fluid cache (FluidSystem): the two rest fields (fluid_rest.comp) copied as they are, for a
+// snapshot or back from one. Half the grid's resolution.
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in; // FluidSystem::GroupSize
+
+layout(std140, binding = 0) uniform CopyBuf {
+    uvec4 grid; // xyz = voxels of the full grid
+};
+
+layout(binding = 1) uniform sampler3D restAIn;
+layout(binding = 2) uniform sampler3D restBIn;
+layout(binding = 3, rgba16f) uniform writeonly image3D restAOut;
+layout(binding = 4, rgba16f) uniform writeonly image3D restBOut;
+
+void main()
+{
+    ivec3 h = ivec3(gl_GlobalInvocationID);
+    if (any(greaterThanEqual(uvec3(h), (grid.xyz + 1u) / 2u)))
+        return;
+    imageStore(restAOut, h, texelFetch(restAIn, h, 0));
+    imageStore(restBOut, h, texelFetch(restBIn, h, 0));
+}

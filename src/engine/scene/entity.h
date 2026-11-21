@@ -247,7 +247,27 @@ struct FluidVolume
     float emission = 0.0f;                       // fire: brightness per unit of temperature
     int samples = 96;                            // ray marching steps across the box
 
+    // Detail (fluid_volume.frag, fluid_shadow.frag): a noise finer than the grid, carried by the
+    // fluid through rest coordinates (FluidSystem: two half-resolution fields, reset in turn)
+    float detail = 0.0f;       // how strongly it carves the smoke (0: none, no rest fields)
+    float detailScale = 0.1f;  // the size of its swirls (world units)
+    int detailPeriod = 48;     // steps between resets of each rest field: longer stretches the
+                               // noise more, shorter makes its fading in and out show
+
     bool operator==(const FluidVolume &) const = default;
+    // The same simulation: equal but for how it's drawn (look, detail strength and size). A change
+    // to those doesn't simulate again; turning the detail on or off does (the rest fields).
+    bool sameSimulation(const FluidVolume &o) const
+    {
+        FluidVolume a = *this, b = o;
+        for (FluidVolume *f : { &a, &b }) {
+            f->color = f->extinction = f->emissionColor = QColor();
+            f->density = f->emission = f->detailScale = 0.0f;
+            f->samples = 0;
+            f->detail = f->detail > 0.0f ? 1.0f : 0.0f;
+        }
+        return a == b;
+    }
 };
 
 // Where gas comes from: a sphere around the entity's position adding smoke, heat and velocity

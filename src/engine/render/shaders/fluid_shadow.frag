@@ -25,8 +25,12 @@ layout(std140, binding = 0) uniform ShadowBuf {
     vec4 view;          // x = 1 for a point light's face, y = its near plane, z = its far plane
     vec4 look;          // x = density (extinction per unit of smoke per world unit), y = samples
     vec4 extinction;    // rgb: extinction per channel, relative to look.x (linear; white = grey)
+    vec4 detail;        // as fluid_volume.frag's: x = amount, y = rest field A's weight, z = 1 with rest fields
+    vec4 detailFrequency; // xyz: noise cycles across the box per axis
 };
 layout(binding = 1) uniform sampler3D density; // x = smoke, y = temperature; linear, clamped
+layout(binding = 2) uniform sampler3D restA;   // the detail's rest coordinates (see fluid_volume.frag)
+layout(binding = 3) uniform sampler3D restB;
 
 // The linear depth (0..1) of this fragment, as the translucency map keeps it (see
 // shadow_front.frag): orthographic depth is already linear; a point light's perspective depth

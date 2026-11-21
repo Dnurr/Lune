@@ -215,6 +215,9 @@ private slots:
         box.fluid->pressureIterations = 40;
         box.fluid->ambientLapse = 0.35f;
         box.fluid->advection = FluidVolume::MacCormack;
+        box.fluid->detail = 0.6f;
+        box.fluid->detailScale = 0.05f;
+        box.fluid->detailPeriod = 30;
         box.fluid->emissionColor = QColor(255, 90, 10);
         box.fluid->extinction = QColor(180, 220, 255);
         scene.createEntity(box);

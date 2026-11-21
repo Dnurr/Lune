@@ -1,0 +1,49 @@
+#version 440
+
+// Fluid detail (FluidSystem, FluidVolume::detail): the rest coordinates, carried by the fluid.
+// Each texel (half the grid's resolution: a texel covers 2^3 voxels) holds where its content was
+// when the field was last reset, in box coordinates (0..1): fluid_volume.frag reads a detail noise
+// there, so the noise moves and swirls with the smoke. The coordinates stretch over time, so
+// there are two fields, reset in turn every FluidVolume::detailPeriod steps (half a period
+// apart), and the drawing fades from one to the other (each weighs 0 when it's reset).
+//
+// Semi-Lagrangian, with the velocity after the step's projection; a reset puts the texel's own
+// position instead.
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in; // FluidSystem::GroupSize
+
+#define MAX_FLUID_SOURCES 8 // FluidSystem::MaxSources
+
+layout(std140, binding = 0) uniform FluidBuf {
+    uvec4 grid;    // xyz = voxels along each axis
+    vec4  step;    // x = dt (seconds)
+    vec4  solver;
+    vec4  solver2;
+    vec4  up;      // w = which rest fields reset this step: 1 = A, 2 = B, 3 = both
+    vec4  sources[MAX_FLUID_SOURCES * 3];
+};
+
+layout(binding = 1) uniform sampler3D velocityIn; // voxels / s, full resolution
+layout(binding = 2) uniform sampler3D restAIn;    // xyz: box coordinates, half resolution
+layout(binding = 3) uniform sampler3D restBIn;
+layout(binding = 5, rgba16f) uniform writeonly image3D restAOut;
+layout(binding = 6, rgba16f) uniform writeonly image3D restBOut;
+
+void main()
+{
+    ivec3 h = ivec3(gl_GlobalInvocationID);
+    uvec3 halfGrid = (grid.xyz + 1u) / 2u;
+    if (any(greaterThanEqual(uvec3(h), halfGrid)))
+        return;
+
+    vec3 center = (vec3(h) + 0.5) * 2.0;                      // in voxels
+    vec3 v = textureLod(velocityIn, center / vec3(grid.xyz), 0.0).xyz;
+    vec3 back = (center - v * step.x) / (2.0 * vec3(halfGrid)); // texture coordinates of the rest fields
+    vec3 here = center / vec3(grid.xyz);                      // a reset: where the texel is
+
+    uint reset = uint(up.w + 0.5);
+    vec3 a = (reset & 1u) != 0u ? here : textureLod(restAIn, back, 0.0).xyz;
+    vec3 b = (reset & 2u) != 0u ? here : textureLod(restBIn, back, 0.0).xyz;
+    imageStore(restAOut, h, vec4(a, 0.0));
+    imageStore(restBOut, h, vec4(b, 0.0));
+}

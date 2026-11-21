@@ -33,10 +33,19 @@ layout(std140, binding = 0) uniform VolumeBuf {
     vec4 params;         // xy = viewport size in pixels, z = scene time (seconds)
     vec4 extinction;     // rgb: extinction per channel, relative to look.x (linear; white = grey)
     vec4 shadowLight;    // x = the main light's index in shadowBuf.lightShadow (-1: no shadows)
+    vec4 detail;         // x = detail amount, y = rest field A's weight (B's: 1 - y), z = 1 when the
+                         // rest fields are there (0: no detail)
+    vec4 detailFrequency; // xyz: noise cycles across the box per axis (rest coordinates are 0..1)
 };
 layout(binding = 1) uniform sampler3D density;        // x = smoke, y = temperature; linear, clamped
 layout(binding = 2) uniform sampler2D sceneDistance;  // view depth of the scene per pixel, like
                                                       // particle.frag's (texelFetch at gl_FragCoord)
+// Detail (FluidVolume::detail, fluid_rest.comp): rest coordinates carried by the fluid, two fields
+// at half the grid's resolution, sampled like the density (box position + 0.5). xyz: where the
+// content at that point was when the field was last reset, in box coordinates (0..1). A noise read
+// at rest * detailFrequency.xyz moves with the smoke; mix the two fields' noises by detail.y.
+layout(binding = 6) uniform sampler3D restA;
+layout(binding = 7) uniform sampler3D restB;
 
 // The meshes' shadows (ShadowMaps): mesh.frag's shadow block, of which sunShadow() below reads
 // the directional cascades, the directional atlas through the comparison sampler, and the glass

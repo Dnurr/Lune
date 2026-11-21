@@ -54,10 +54,34 @@ void fixVolumeStorageView(QRhi *rhi, QRhiTexture *texture)
 
 // FluidBuf in fluid_*.comp: uvec4 grid, vec4 step, solver, solver2, up, vec4 sources[MaxSources * 3].
 constexpr int kFluidUbufSize = 5 * 16 + FluidSystem::MaxSources * 3 * 16;
-// VolumeBuf in fluid_volume.vert/.frag: mat4 viewProj, model, worldToBox, then 10 vec4.
-constexpr int kVolumeUbufSize = 3 * 64 + 10 * 16;
-// ShadowBuf in fluid_shadow.vert/.frag: mat4 lightViewProj, model, worldToBox, then 4 vec4.
-constexpr int kShadowUbufSize = 3 * 64 + 4 * 16;
+// VolumeBuf in fluid_volume.vert/.frag: mat4 viewProj, model, worldToBox, then 12 vec4.
+constexpr int kVolumeUbufSize = 3 * 64 + 12 * 16;
+// ShadowBuf in fluid_shadow.vert/.frag: mat4 lightViewProj, model, worldToBox, then 6 vec4.
+constexpr int kShadowUbufSize = 3 * 64 + 6 * 16;
+
+// Detail: A's weight after `steps` steps (B's is 1 minus it). Each field weighs 0 when it's reset
+// (A at steps 0, P, 2P..., B half a period later) and 1 half a period after.
+float restWeightA(int steps, int period)
+{
+    const int p = qMax(2, period);
+    const float phase = float(((steps - 1) % p + p) % p) / float(p);
+    return 1.0f - std::abs(2.0f * phase - 1.0f);
+}
+
+// The detail block of VolumeBuf and ShadowBuf: amount, A's weight, rest fields there, 0; noise
+// cycles across the box per axis.
+void putDetail(float *x, const FluidVolume &f, bool rest, int steps)
+{
+    x[0] = rest ? f.detail : 0.0f;
+    x[1] = restWeightA(steps, f.detailPeriod);
+    x[2] = rest ? 1.0f : 0.0f;
+    x[3] = 0.0f;
+    const QVector3D cycles = f.size / qMax(1e-3f, f.detailScale);
+    x[4] = cycles.x();
+    x[5] = cycles.y();
+    x[6] = cycles.z();
+    x[7] = 0.0f;
+}
 
 QShader loadShader(const QString &name)
 {
@@ -199,6 +223,10 @@ void FluidSystem::initialize(QRhi *rhi)
                                              QRhiTexture::ThreeDimensional | QRhiTexture::UsedWithLoadStore));
     if (m_spareBrickPage->create())
         fixVolumeStorageView(m_rhi, m_spareBrickPage.get());
+    m_spareRestOut.reset(m_rhi->newTexture(QRhiTexture::RGBA16F, 1, 1, 1, 1,
+                                           QRhiTexture::ThreeDimensional | QRhiTexture::UsedWithLoadStore));
+    if (m_spareRestOut->create())
+        fixVolumeStorageView(m_rhi, m_spareRestOut.get());
     m_layoutUniforms.reset(m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, kVolumeUbufSize));
     m_layoutUniforms->create();
 
@@ -220,17 +248,23 @@ void FluidSystem::initialize(QRhi *rhi)
                                 B::sampledTexture(2, cs, t, m_linear.get()), B::sampledTexture(3, cs, t, m_linear.get()),
                                 B::imageStore(4, cs, t, 0), B::imageStore(5, cs, t, 0), B::imageStore(6, cs, t, 0) });
     m_copyLayout->create();
+    m_copyRestLayout.reset(m_rhi->newShaderResourceBindings());
+    m_copyRestLayout->setBindings({ B::uniformBuffer(0, cs, m_layoutUniforms.get()), B::sampledTexture(1, cs, t, m_linear.get()),
+                                    B::sampledTexture(2, cs, t, m_linear.get()), B::imageStore(3, cs, t, 0),
+                                    B::imageStore(4, cs, t, 0) });
+    m_copyRestLayout->create();
     m_layoutStorage.reset(m_rhi->newBuffer(QRhiBuffer::Immutable, QRhiBuffer::StorageBuffer, 64));
     m_layoutStorage->create();
     m_packLayout.reset(m_rhi->newShaderResourceBindings());
     m_packLayout->setBindings({ B::uniformBuffer(0, cs, m_layoutUniforms.get()), B::sampledTexture(1, cs, t, m_linear.get()),
                                 B::bufferLoadStore(2, cs, m_layoutStorage.get()), B::bufferLoadStore(3, cs, m_layoutStorage.get()),
-                                B::imageStore(4, cs, t, 0), B::imageStore(5, cs, t, 0) });
+                                B::imageStore(4, cs, t, 0), B::imageStore(5, cs, t, 0), B::sampledTexture(6, cs, t, m_nearest.get()),
+                                B::sampledTexture(7, cs, t, m_nearest.get()) });
     m_packLayout->create();
     m_unpackLayout.reset(m_rhi->newShaderResourceBindings());
     m_unpackLayout->setBindings({ B::uniformBuffer(0, cs, m_layoutUniforms.get()), B::sampledTexture(1, cs, t, m_nearest.get()),
                                   B::sampledTexture(2, cs, t, m_nearest.get()), B::bufferLoad(3, cs, m_layoutStorage.get()),
-                                  B::imageStore(4, cs, t, 0) });
+                                  B::imageStore(4, cs, t, 0), B::imageStore(5, cs, t, 0), B::imageStore(6, cs, t, 0) });
     m_unpackLayout->create();
     m_drawLayout.reset(m_rhi->newShaderResourceBindings());
     m_drawLayout->setBindings({ B::uniformBuffer(0, B::VertexStage | B::FragmentStage, m_layoutUniforms.get()),
@@ -239,12 +273,17 @@ void FluidSystem::initialize(QRhi *rhi)
                                 // the shadow block, the directional atlas, the glass map (setShadowMaps())
                                 B::uniformBuffer(3, B::FragmentStage, m_layoutUniforms.get()),
                                 B::sampledTexture(4, B::FragmentStage, m_distanceStandIn.get(), m_nearest.get()),
-                                B::sampledTexture(5, B::FragmentStage, m_distanceStandIn.get(), m_nearest.get()) });
+                                B::sampledTexture(5, B::FragmentStage, m_distanceStandIn.get(), m_nearest.get()),
+                                // the rest fields (detail)
+                                B::sampledTexture(6, B::FragmentStage, t, m_linear.get()),
+                                B::sampledTexture(7, B::FragmentStage, t, m_linear.get()) });
     m_drawLayout->create();
     m_shadowLayout.reset(m_rhi->newShaderResourceBindings());
     m_shadowLayout->setBindings({ B::uniformBufferWithDynamicOffset(0, B::VertexStage | B::FragmentStage, m_layoutUniforms.get(),
                                                                     kShadowUbufSize),
-                                  B::sampledTexture(1, B::FragmentStage, t, m_linear.get()) });
+                                  B::sampledTexture(1, B::FragmentStage, t, m_linear.get()),
+                                  B::sampledTexture(2, B::FragmentStage, t, m_linear.get()),
+                                  B::sampledTexture(3, B::FragmentStage, t, m_linear.get()) });
     m_shadowLayout->create();
     m_shadowStride = quint32(m_rhi->ubufAligned(kShadowUbufSize));
 
@@ -266,8 +305,10 @@ void FluidSystem::initialize(QRhi *rhi)
     m_pipes[Project] = compute("fluid_project.comp", m_passLayout.get());
     m_pipes[AdvectPredict] = compute("fluid_advect.comp", m_passLayout.get());
     m_pipes[AdvectCorrect] = compute("fluid_advect_correct.comp", m_passLayout.get());
+    m_pipes[Rest] = compute("fluid_rest.comp", m_passLayout.get());
     m_clearPipe = compute("fluid_clear.comp", m_clearLayout.get());
     m_copyPipe = compute("fluid_copy.comp", m_copyLayout.get());
+    m_copyRestPipe = compute("fluid_copy_rest.comp", m_copyRestLayout.get());
     m_packPipe = compute("fluid_brick_pack.comp", m_packLayout.get());
     m_unpackPipe = compute("fluid_brick_unpack.comp", m_unpackLayout.get());
 }
@@ -343,12 +384,14 @@ void FluidSystem::release()
         p.reset();
     m_clearPipe.reset();
     m_copyPipe.reset();
+    m_copyRestPipe.reset();
     m_packPipe.reset();
     m_unpackPipe.reset();
     m_readbacks.clear();
     m_passLayout.reset();
     m_clearLayout.reset();
     m_copyLayout.reset();
+    m_copyRestLayout.reset();
     m_packLayout.reset();
     m_unpackLayout.reset();
     m_layoutStorage.reset();
@@ -357,6 +400,7 @@ void FluidSystem::release()
     m_layoutUniforms.reset();
     m_layoutVolume.reset();
     m_spareBrickPage.reset();
+    m_spareRestOut.reset();
     if (m_pendingUpload) {
         m_pendingUpload->release();
         m_pendingUpload = nullptr;
@@ -411,6 +455,10 @@ void FluidSystem::retire(Volume &v)
     retire(v.divergence);
     retire(v.predictedVelocity);
     retire(v.predictedDensity);
+    for (auto *pair : { &v.restA, &v.restB })
+        for (auto &t : *pair)
+            retire(t);
+    v.r = 0;
     dropSnapshots(v);
     retire(v.stepUniforms);
     retire(v.clearUniforms);
@@ -419,7 +467,7 @@ void FluidSystem::retire(Volume &v)
 
 QRhiShaderResourceBindings *FluidSystem::passBindings(Volume &v, Pass pass)
 {
-    const int key = int(pass) * 8 + v.v * 4 + v.d * 2 + v.p;
+    const int key = int(pass) * 16 + v.r * 8 + v.v * 4 + v.d * 2 + v.p;
     auto it = v.srbs.find(key);
     if (it != v.srbs.end())
         return it->second.get();
@@ -451,6 +499,13 @@ QRhiShaderResourceBindings *FluidSystem::passBindings(Volume &v, Pass pass)
         in[2] = v.predictedVelocity.get();
         in[3] = v.predictedDensity.get();
         break;
+    case Rest: // the velocity, the rest fields -> the other rest fields
+        in[1] = v.restA[size_t(v.r)].get();
+        in[2] = v.restB[size_t(v.r)].get();
+        in[3] = none;
+        out5 = v.restA[size_t(1 - v.r)].get();
+        out6 = v.restB[size_t(1 - v.r)].get();
+        break;
     default: break;
     }
     std::unique_ptr<QRhiShaderResourceBindings> srb(m_rhi->newShaderResourceBindings());
@@ -476,11 +531,43 @@ QRhiShaderResourceBindings *FluidSystem::copyBindings(Volume &v, QRhiTexture *co
     return raw;
 }
 
+QRhiShaderResourceBindings *FluidSystem::copyRestBindings(Volume &v, QRhiTexture *const from[2], QRhiTexture *const to[2])
+{
+    using B = QRhiShaderResourceBinding;
+    const auto cs = B::ComputeStage;
+    std::unique_ptr<QRhiShaderResourceBindings> srb(m_rhi->newShaderResourceBindings());
+    srb->setBindings({ B::uniformBuffer(0, cs, v.clearUniforms.get()), B::sampledTexture(1, cs, from[0], m_linear.get()),
+                       B::sampledTexture(2, cs, from[1], m_linear.get()), B::imageStore(3, cs, to[0], 0),
+                       B::imageStore(4, cs, to[1], 0) });
+    srb->create();
+    QRhiShaderResourceBindings *raw = srb.get();
+    retire(srb);
+    return raw;
+}
+
+bool FluidSystem::makeRest(const Volume &v, std::array<std::unique_ptr<QRhiTexture>, 2> &out)
+{
+    const auto flags = QRhiTexture::ThreeDimensional | QRhiTexture::UsedWithLoadStore;
+    for (auto &t : out) {
+        t.reset(m_rhi->newTexture(QRhiTexture::RGBA16F, (v.nx + 1) / 2, (v.ny + 1) / 2, (v.nz + 1) / 2, 1, flags));
+        if (!t->create()) {
+            for (auto &u : out)
+                retire(u);
+            return false;
+        }
+        fixVolumeStorageView(m_rhi, t.get());
+    }
+    return true;
+}
+
 void FluidSystem::dropSnapshots(Volume &v)
 {
-    for (auto &[step, snapshot] : v.snapshots)
+    for (auto &[step, snapshot] : v.snapshots) {
         for (auto &t : snapshot.fields)
             retire(t);
+        for (auto &t : snapshot.rest)
+            retire(t);
+    }
     v.snapshots.clear();
     dropFrames(v);
 }
@@ -494,8 +581,10 @@ void FluidSystem::dropFrames(Volume &v)
         retire(page);
     v.pages.clear();
     retire(v.unpacked);
-    retire(v.drawSrbs[2]); // they read `unpacked`
-    retire(v.shadowSrbs[2]);
+    for (auto &t : v.unpackedRest)
+        retire(t);
+    retire(v.drawSrbs[4]); // they read `unpacked`
+    retire(v.shadowSrbs[4]);
     v.unpackedStep = -1;
     retire(v.counter);
     v.knownSlots = 0;
@@ -687,14 +776,14 @@ void FluidSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float seco
                 v.clearSrbs[size_t(i)]->create();
             }
             v.stepsDone = -1;
-            v.snapshotBytes = quint64(nx) * quint64(ny) * quint64(nz) * (8 + 8 + 4);
+            v.snapshotBytes = quint64(nx) * quint64(ny) * quint64(nz) * (8 + 8 + 4 + 2); // + rest fields at 1/8
         }
         v.voxelSize = voxel;
         m_voxels += quint64(nx) * quint64(ny) * quint64(nz);
         ++m_drawn;
 
         const Entity reference = at(entity, timeline.start);
-        if (reference.fluid != v.reference.fluid || reference.transform != v.reference.transform
+        if (!v.reference.fluid || !reference.fluid->sameSimulation(*v.reference.fluid) || reference.transform != v.reference.transform
             || reference.animation != v.reference.animation || !sameEntities(sourceReference, v.sourceReference)) {
             v.reference = reference;
             v.sourceReference = sourceReference;
@@ -734,10 +823,17 @@ void FluidSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float seco
                         std::unique_ptr<QRhiShaderResourceBindings> srb(m_rhi->newShaderResourceBindings());
                         QRhiTexture *pageA = v.pages[size_t(f.page)].get();
                         QRhiTexture *pageB = size_t(f.page + 1) < v.pages.size() ? v.pages[size_t(f.page + 1)].get() : pageA;
+                        if (f.rest && !v.unpackedRest[0] && makeRest(v, v.unpackedRest))
+                            retire(v.drawSrbs[4]), retire(v.shadowSrbs[4]); // now with the rest fields
+                        const bool rest = f.rest && v.unpackedRest[0];
+                        // Without rest coordinates the frame writes none: any storage textures do.
+                        QRhiTexture *restOutA = rest ? v.unpackedRest[0].get() : m_layoutVolume.get();
+                        QRhiTexture *restOutB = rest ? v.unpackedRest[1].get() : m_spareRestOut.get();
                         srb->setBindings({ B::uniformBuffer(0, cs, v.clearUniforms.get()),
                                            B::sampledTexture(1, cs, pageA, m_nearest.get()),
                                            B::sampledTexture(2, cs, pageB, m_nearest.get()), B::bufferLoad(3, cs, f.table.get()),
-                                           B::imageStore(4, cs, v.unpacked.get(), 0) });
+                                           B::imageStore(4, cs, v.unpacked.get(), 0), B::imageStore(5, cs, restOutA, 0),
+                                           B::imageStore(6, cs, restOutB, 0) });
                         srb->create();
                         dispatches.push_back({ m_unpackPipe.get(), srb.get(), ~0u, gx, gy, gz });
                         retire(srb);
@@ -750,6 +846,19 @@ void FluidSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float seco
             }
         }
 
+        // Detail: the rest fields (made when first used; turning it on simulates again).
+        const bool detail = f.detail > 0.0f && m_pipes[Rest] && m_copyRestPipe;
+        if (detail && !v.restA[0]) {
+            if (!makeRest(v, v.restA) || !makeRest(v, v.restB)) {
+                for (auto *pair : { &v.restA, &v.restB })
+                    for (auto &t : *pair)
+                        retire(t);
+            }
+            v.r = 0;
+        }
+        const bool rest = detail && v.restA[0];
+        const int hgx = groups((nx + 1) / 2), hgy = groups((ny + 1) / 2), hgz = groups((nz + 1) / 2);
+
         // The cache: back in time (or before any step), or ahead past a snapshot, start from the
         // nearest snapshot at or before the frame; back in time without one, from the start.
         auto best = v.snapshots.upper_bound(target); // the first after the frame
@@ -761,13 +870,19 @@ void FluidSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float seco
             QRhiTexture *const from[3] = { snapshot.fields[0].get(), snapshot.fields[1].get(), snapshot.fields[2].get() };
             QRhiTexture *const to[3] = { v.velocity[0].get(), v.density[0].get(), v.pressure[0].get() };
             dispatches.push_back({ m_copyPipe.get(), copyBindings(v, from, to), ~0u, gx, gy, gz });
-            v.v = v.d = v.p = 0;
+            if (snapshot.rest[0] && v.restA[0]) {
+                QRhiTexture *const restFrom[2] = { snapshot.rest[0].get(), snapshot.rest[1].get() };
+                QRhiTexture *const restTo[2] = { v.restA[0].get(), v.restB[0].get() };
+                dispatches.push_back({ m_copyRestPipe.get(), copyRestBindings(v, restFrom, restTo), ~0u, groups((nx + 1) / 2),
+                                       groups((ny + 1) / 2), groups((nz + 1) / 2) });
+            }
+            v.v = v.d = v.p = v.r = 0;
             v.stepsDone = snapshotStep;
         }
         if (v.stepsDone < 0) { // from cleared fields
             for (auto &s : v.clearSrbs)
                 dispatches.push_back({ m_clearPipe.get(), s.get(), ~0u, gx, gy, gz });
-            v.v = v.d = v.p = 0;
+            v.v = v.d = v.p = v.r = 0;
             v.stepsDone = 0;
         }
 
@@ -782,7 +897,7 @@ void FluidSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float seco
                 fixVolumeStorageView(m_rhi, t);
             }
         }
-        const double stepCost = double(nx) * ny * nz * (5 + (macCormack ? 1 : 0) + f.pressureIterations);
+        const double stepCost = double(nx) * ny * nz * (5 + (macCormack ? 1 : 0) + (rest ? 0.25 : 0.0) + f.pressureIterations);
         const int affordable = int(qBound(1.0, budget / stepCost, double(MaxStepsPerFrame)));
         const int count = qMin(target - v.stepsDone, affordable);
         if (count <= 0)
@@ -799,6 +914,8 @@ void FluidSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float seco
         for (auto it = v.snapshots.begin(); it != v.snapshots.end();) { // after a longer timeline
             if (it->first % interval != 0) {
                 for (auto &t : it->second.fields)
+                    retire(t);
+                for (auto &t : it->second.rest)
                     retire(t);
                 it = v.snapshots.erase(it);
             } else {
@@ -879,6 +996,13 @@ void FluidSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float seco
             }
             pass(Project);
             v.v ^= 1;
+            if (rest) { // the rest coordinates, carried by the velocity; reset in turn
+                const int period = qMax(2, f.detailPeriod);
+                const int phase = k % period;
+                u[19] = float((k == 0 || phase == 0 ? 1 : 0) | (k == 0 || phase == period / 2 ? 2 : 0));
+                dispatches.push_back({ m_pipes[Rest].get(), passBindings(v, Rest), offset, hgx, hgy, hgz });
+                v.r ^= 1;
+            }
 
             // This frame (k + 1 steps), sparse, for drawing it again: its bricks take the pool's
             // next slots (the GPU counter). Bound: the page the known count is in and the next, so
@@ -909,11 +1033,13 @@ void FluidSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float seco
                 }
                 CachedFrame frame;
                 frame.page = page;
+                frame.rest = rest;
                 frame.table.reset(m_rhi->newBuffer(QRhiBuffer::Immutable, QRhiBuffer::StorageBuffer,
                                                    quint32(16 + 4 * allBricks)));
                 if (page < int(v.pages.size()) && v.counter && frame.table->create()) {
                     const int bound = page + 1 < int(v.pages.size()) ? 2 : 1;
-                    const quint32 header[4] = { 0, 0, quint32(page), quint32((v.smokeOnly ? 1 : 0) | (bound << 1)) };
+                    const quint32 header[4] = { 0, 0, quint32(page),
+                                                quint32((v.smokeOnly ? 1 : 0) | (bound == 2 ? 2 : 0) | (rest ? 4 : 0)) };
                     rub->uploadStaticBuffer(frame.table.get(), 0, 16, header);
                     QRhiTexture *pageA = v.pages[size_t(page)].get();
                     QRhiTexture *pageB = bound == 2 ? v.pages[size_t(page + 1)].get() : m_spareBrickPage.get();
@@ -923,7 +1049,9 @@ void FluidSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float seco
                     srb->setBindings({ B::uniformBuffer(0, cs, v.clearUniforms.get()),
                                        B::sampledTexture(1, cs, v.density[size_t(v.d)].get(), m_nearest.get()),
                                        B::bufferLoadStore(2, cs, v.counter.get()), B::bufferLoadStore(3, cs, frame.table.get()),
-                                       B::imageStore(4, cs, pageA, 0), B::imageStore(5, cs, pageB, 0) });
+                                       B::imageStore(4, cs, pageA, 0), B::imageStore(5, cs, pageB, 0),
+                                       B::sampledTexture(6, cs, rest ? v.restA[size_t(v.r)].get() : m_layoutVolume.get(), m_nearest.get()),
+                                       B::sampledTexture(7, cs, rest ? v.restB[size_t(v.r)].get() : m_layoutVolume.get(), m_nearest.get()) });
                     srb->create();
                     dispatches.push_back({ m_packPipe.get(), srb.get(), ~0u, gx, gy, gz });
                     retire(srb);
@@ -952,14 +1080,23 @@ void FluidSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float seco
                     made = made && snapshot.fields[size_t(f3)]->create();
                     fixVolumeStorageView(m_rhi, snapshot.fields[size_t(f3)].get());
                 }
+                if (made && rest)
+                    made = makeRest(v, snapshot.rest);
                 if (made) {
                     QRhiTexture *const from[3] = { v.velocity[size_t(v.v)].get(), v.density[size_t(v.d)].get(),
                                                    v.pressure[size_t(v.p)].get() };
                     QRhiTexture *const to[3] = { snapshot.fields[0].get(), snapshot.fields[1].get(), snapshot.fields[2].get() };
                     dispatches.push_back({ m_copyPipe.get(), copyBindings(v, from, to), ~0u, gx, gy, gz });
+                    if (rest) {
+                        QRhiTexture *const restFrom[2] = { v.restA[size_t(v.r)].get(), v.restB[size_t(v.r)].get() };
+                        QRhiTexture *const restTo[2] = { snapshot.rest[0].get(), snapshot.rest[1].get() };
+                        dispatches.push_back({ m_copyRestPipe.get(), copyRestBindings(v, restFrom, restTo), ~0u, hgx, hgy, hgz });
+                    }
                     v.snapshots.emplace(done, std::move(snapshot));
                 } else {
                     for (auto &t : snapshot.fields) // out of video memory: no more snapshots
+                        retire(t);
+                    for (auto &t : snapshot.rest)
                         retire(t);
                 }
             }
@@ -1042,6 +1179,8 @@ void FluidSystem::prepareDraw(QRhiResourceUpdateBatch *rub, const QMatrix4x4 &cl
         x[30] = seconds;
         putColor(x + 32, v.settings.extinction);
         x[36] = m_shadowMaps && hasLight ? float(shadowLight) : -1.0f; // shadow
+        const bool rest = v.shown ? bool(v.unpackedRest[0]) : bool(v.restA[0]);
+        putDetail(x + 40, v.settings, rest && v.settings.detail > 0.0f, v.shown ? v.unpackedStep : v.stepsDone);
         rub->updateDynamicBuffer(v.drawUniforms.get(), 0, kVolumeUbufSize, data);
     }
 }
@@ -1053,8 +1192,10 @@ void FluidSystem::draw(QRhiCommandBuffer *cb, const QRhiViewport &viewport)
     for (auto &[id, v] : m_volumes) {
         if (!v.drawUniforms || v.stepsDone < 0)
             continue;
-        const size_t slot = v.shown ? 2 : size_t(v.d);
+        const size_t slot = v.shown ? 4 : size_t(v.d * 2 + v.r);
         QRhiTexture *density = v.shown ? v.unpacked.get() : v.density[size_t(v.d)].get();
+        QRhiTexture *restA = v.shown ? v.unpackedRest[0].get() : v.restA[size_t(v.r)].get();
+        QRhiTexture *restB = v.shown ? v.unpackedRest[1].get() : v.restB[size_t(v.r)].get();
         auto &srb = v.drawSrbs[slot];
         if (!srb) {
             using B = QRhiShaderResourceBinding;
@@ -1065,6 +1206,8 @@ void FluidSystem::draw(QRhiCommandBuffer *cb, const QRhiViewport &viewport)
                 B::sampledTexture(2, B::FragmentStage, m_sceneDistance ? m_sceneDistance : m_distanceStandIn.get(), m_nearest.get())
             };
             bindings.append(m_shadowMaps->directionalBindings(3, 4, 5));
+            bindings.append(B::sampledTexture(6, B::FragmentStage, restA ? restA : m_layoutVolume.get(), m_linear.get()));
+            bindings.append(B::sampledTexture(7, B::FragmentStage, restB ? restB : m_layoutVolume.get(), m_linear.get()));
             srb->setBindings(bindings.cbegin(), bindings.cend());
             srb->create();
         }
@@ -1145,6 +1288,8 @@ void FluidSystem::prepareShadows(QRhiResourceUpdateBatch *rub, const std::vector
             x[56] = v.settings.density; // look
             x[57] = float(v.settings.samples);
             putColor(x + 60, v.settings.extinction);
+            const bool rest = v.shown ? bool(v.unpackedRest[0]) : bool(v.restA[0]);
+            putDetail(x + 64, v.settings, rest && v.settings.detail > 0.0f, v.shown ? v.unpackedStep : v.stepsDone);
         }
         rub->updateDynamicBuffer(v.shadowUniforms.get(), 0, quint32(data.size()), data.constData());
     }
@@ -1158,15 +1303,19 @@ void FluidSystem::drawShadows(QRhiCommandBuffer *cb)
     for (auto &[id, v] : m_volumes) {
         if (!v.shadowUniforms || v.stepsDone < 0)
             continue;
-        const size_t slot = v.shown ? 2 : size_t(v.d);
+        const size_t slot = v.shown ? 4 : size_t(v.d * 2 + v.r);
         QRhiTexture *density = v.shown ? v.unpacked.get() : v.density[size_t(v.d)].get();
+        QRhiTexture *restA = v.shown ? v.unpackedRest[0].get() : v.restA[size_t(v.r)].get();
+        QRhiTexture *restB = v.shown ? v.unpackedRest[1].get() : v.restB[size_t(v.r)].get();
         auto &srb = v.shadowSrbs[slot];
         if (!srb) {
             using B = QRhiShaderResourceBinding;
             srb.reset(m_rhi->newShaderResourceBindings());
             srb->setBindings({ B::uniformBufferWithDynamicOffset(0, B::VertexStage | B::FragmentStage, v.shadowUniforms.get(),
                                                                  kShadowUbufSize),
-                               B::sampledTexture(1, B::FragmentStage, density, m_linear.get()) });
+                               B::sampledTexture(1, B::FragmentStage, density, m_linear.get()),
+                               B::sampledTexture(2, B::FragmentStage, restA ? restA : m_layoutVolume.get(), m_linear.get()),
+                               B::sampledTexture(3, B::FragmentStage, restB ? restB : m_layoutVolume.get(), m_linear.get()) });
             srb->create();
         }
         if (!bound) {

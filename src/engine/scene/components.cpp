@@ -526,6 +526,9 @@ ComponentDesc fluidVolumeComponent()
         prop("emission color", "look", PropertyType::Color),
         prop("emission", "look", PropertyType::Float, 0.02, 0.0, 1e4),
         prop("samples", "look", PropertyType::Float, 0.5, 8.0, 512.0),
+        prop("amount", "detail", PropertyType::Float, 0.005, 0.0, 10.0),
+        prop("scale", "detail", PropertyType::Float, 0.001, 0.001, 100.0),
+        prop("period", "detail", PropertyType::Float, 0.2, 4.0, 1000.0),
     };
     c.present = [](const Entity &e) { return e.fluid.has_value(); };
     c.get = [](const Entity &e, int i) -> QVariant {
@@ -550,6 +553,9 @@ ComponentDesc fluidVolumeComponent()
         case 14: return f.emissionColor;
         case 15: return double(f.emission);
         case 16: return double(f.samples);
+        case 17: return double(f.detail);
+        case 18: return double(f.detailScale);
+        case 19: return double(f.detailPeriod);
         }
         return {};
     };
@@ -581,6 +587,9 @@ ComponentDesc fluidVolumeComponent()
         case 14: f.emissionColor = v.value<QColor>(); break;
         case 15: f.emission = clamp(0.0, 1e4); break;
         case 16: f.samples = int(std::lround(qBound(8.0, x, 512.0))); break;
+        case 17: f.detail = clamp(0.0, 10.0); break;
+        case 18: f.detailScale = clamp(0.001, 100.0); break;
+        case 19: f.detailPeriod = int(std::lround(qBound(4.0, x, 1000.0))); break;
         }
     };
     c.add = [](Entity &e) {

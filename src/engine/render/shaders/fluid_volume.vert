@@ -23,6 +23,9 @@ layout(std140, binding = 0) uniform VolumeBuf {
     vec4 params;         // xy = viewport size in pixels, z = scene time (seconds)
     vec4 extinction;     // rgb: extinction per channel, relative to look.x (linear; white = grey)
     vec4 shadowLight;    // x = the main light's index in shadowBuf.lightShadow (-1: no shadows)
+    vec4 detail;         // x = detail amount, y = rest field A's weight (B's: 1 - y), z = 1 when the
+                         // rest fields are there (0: no detail)
+    vec4 detailFrequency; // xyz: noise cycles across the box per axis (rest coordinates are 0..1)
 };
 
 void main()

@@ -1,8 +1,10 @@
 #version 440
 
-// Fluid cache (FluidSystem): a cached frame back as a dense field, for drawing it. One workgroup
+// Fluid cache (FluidSystem): a cached frame back as dense fields, for drawing it. One workgroup
 // per brick of 8^3 voxels: its voxels from the brick pool (see fluid_brick_pack.comp for the
 // layout), decoded, or zero for an empty brick. Smoke-only frames give a temperature of 0.
+// Frames with rest coordinates also give the two rest fields (half resolution); an empty brick
+// gives its texels' own positions (a freshly reset field).
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in; // one brick
 
@@ -17,11 +19,13 @@ layout(std430, binding = 3) readonly buffer FrameTable {
     uint count;
     uint leftOut;
     uint firstPage;
-    uint flags; // bit 0: smoke only
+    uint flags; // bit 0: smoke only; bit 2: rest coordinates
     uint entries[];
 };
 
 layout(binding = 4, rgba16f) uniform writeonly image3D densityOut; // x = smoke, y = temperature
+layout(binding = 5, rgba16f) uniform writeonly image3D restAOut;   // half resolution
+layout(binding = 6, rgba16f) uniform writeonly image3D restBOut;
 
 const uint PageSlots = 65536u;
 
@@ -31,6 +35,11 @@ vec4 fetch(uint slot, ivec3 texel)
     uint h = rel % PageSlots;
     ivec3 origin = ivec3(int(h % 32u), int((h / 32u) % 32u), int(h / 1024u)) * ivec3(8, 8, 4);
     return rel < PageSlots ? texelFetch(pageA, origin + texel, 0) : texelFetch(pageB, origin + texel, 0);
+}
+
+ivec3 slotTexel(int t)
+{
+    return ivec3(t % 8, (t / 8) % 8, t / 64);
 }
 
 // Two bytes (0..1 each, as stored) back to the 16-bit value, 0..1.
@@ -50,15 +59,39 @@ void main()
     ivec3 brick = ivec3(gl_WorkGroupID);
     ivec3 local = ivec3(gl_LocalInvocationID);
     ivec3 cell = brick * 8 + local;
-    if (any(greaterThanEqual(uvec3(cell), grid.xyz)))
-        return;
 
     uvec3 bricks = (grid.xyz + 7u) / 8u;
     uint entry = entries[uint(brick.x) + bricks.x * (uint(brick.y) + bricks.y * uint(brick.z))];
+    bool filled = entry != 0u && entry != 0xFFFFFFFFu;
+    bool smokeOnly = (flags & 1u) != 0u;
+    uint slot = entry - 1u;
+
+    // The rest coordinates: one thread per texel of the half-resolution fields.
+    if ((flags & 4u) != 0u && all(equal(local & 1, ivec3(0)))) {
+        ivec3 h = local / 2;
+        ivec3 halfCell = brick * 4 + h;
+        uvec3 halfGrid = (grid.xyz + 1u) / 2u;
+        if (all(lessThan(uvec3(halfCell), halfGrid))) {
+            vec3 a = (vec3(halfCell) + 0.5) * 2.0 / vec3(grid.xyz); // empty: where the texel is
+            vec3 b = a;
+            if (filled) {
+                int t = 3 * (h.x + 4 * (h.y + 4 * h.z));
+                uint restSlot = slot + (smokeOnly ? 1u : 2u);
+                vec4 t0 = fetch(restSlot, slotTexel(t)), t1 = fetch(restSlot, slotTexel(t + 1));
+                vec4 t2 = fetch(restSlot, slotTexel(t + 2));
+                a = vec3(word(t0.xy), word(t0.zw), word(t1.xy));
+                b = vec3(word(t1.zw), word(t2.xy), word(t2.zw));
+            }
+            imageStore(restAOut, halfCell, vec4(a, 0.0));
+            imageStore(restBOut, halfCell, vec4(b, 0.0));
+        }
+    }
+
+    if (any(greaterThanEqual(uvec3(cell), grid.xyz)))
+        return;
     vec2 v = vec2(0.0);
-    if (entry != 0u && entry != 0xFFFFFFFFu) {
-        uint slot = entry - 1u;
-        if ((flags & 1u) != 0u) {
+    if (filled) {
+        if (smokeOnly) {
             vec4 b = fetch(slot, ivec3(local.xy, local.z / 2));
             v.x = smoke(word((local.z & 1) == 0 ? b.xy : b.zw));
         } else {
