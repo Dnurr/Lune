@@ -81,6 +81,7 @@ Editor::Editor(QWidget *parent)
     default: m_viewport->setApi(QRhiWidget::Api::Direct3D11); break;
     }
     setCentralWidget(m_viewport);
+    m_viewport->setFluidCacheBudget(quint64(AppSettings::fluidCacheMegabytes()) * 1024 * 1024);
 
     m_viewport->setEditorContext(m_scene, m_selection, m_undo);
     m_viewport->setDisplaySettings(m_display);
@@ -564,6 +565,8 @@ void Editor::showPreferences()
     PreferencesDialog dialog(m_viewport->rhiBackend(), this);
     if (dialog.exec() != QDialog::Accepted)
         return;
+    AppSettings::setFluidCacheMegabytes(dialog.fluidCacheMegabytes());
+    m_viewport->setFluidCacheBudget(quint64(AppSettings::fluidCacheMegabytes()) * 1024 * 1024);
     const QRhi::Implementation before = AppSettings::backend();
     AppSettings::setBackend(dialog.backend());
     if (AppSettings::backend() != before)

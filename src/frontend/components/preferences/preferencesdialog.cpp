@@ -6,6 +6,7 @@
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QLabel>
+#include <QSpinBox>
 
 #include "frontend/core/appsettings.h"
 
@@ -34,10 +35,33 @@ PreferencesDialog::PreferencesDialog(QRhi::Implementation running, QWidget *pare
     form->addRow(note);
     layout->addWidget(graphics);
 
+    // Simulation
+    auto *simulation = new QGroupBox("Simulation", this);
+    auto *simForm = new QFormLayout(simulation);
+    m_fluidCache = new QSpinBox(simulation);
+    m_fluidCache->setRange(AppSettings::MinFluidCacheMegabytes, AppSettings::MaxFluidCacheMegabytes);
+    m_fluidCache->setSingleStep(256);
+    m_fluidCache->setSuffix(" MB");
+    m_fluidCache->setValue(AppSettings::fluidCacheMegabytes());
+    m_fluidCache->setToolTip("Video memory each fluid volume may use to keep simulated frames, for scrubbing without simulating again");
+    simForm->addRow("Fluid cache", m_fluidCache);
+    auto *cacheNote = new QLabel("Per fluid volume, in video memory. Frames are kept sparse (only the parts with smoke), so "
+                                 "how many fit depends on the simulation.",
+                                 simulation);
+    cacheNote->setEnabled(false);
+    cacheNote->setWordWrap(true);
+    simForm->addRow(cacheNote);
+    layout->addWidget(simulation);
+
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     layout->addWidget(buttons);
+}
+
+int PreferencesDialog::fluidCacheMegabytes() const
+{
+    return m_fluidCache->value();
 }
 
 QRhi::Implementation PreferencesDialog::backend() const

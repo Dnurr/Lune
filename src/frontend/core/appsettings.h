@@ -16,4 +16,10 @@ QString backendLabel(QRhi::Implementation backend);
 // has it, else the platform's default (Direct3D 11 on Windows). A change applies on restart.
 QRhi::Implementation backend();
 void setBackend(QRhi::Implementation backend);
+
+// GPU memory each fluid volume's cache may take (cached frames and snapshots), in megabytes.
+constexpr int MinFluidCacheMegabytes = 256;
+constexpr int MaxFluidCacheMegabytes = 65536;
+int fluidCacheMegabytes(); // default 2048
+void setFluidCacheMegabytes(int megabytes);
 } // namespace AppSettings

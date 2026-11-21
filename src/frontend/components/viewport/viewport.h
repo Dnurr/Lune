@@ -69,6 +69,8 @@ public:
 
     // Frame statistics panel; while visible the viewport renders continuously.
     void setStatsVisible(bool visible);
+    // GPU memory per fluid volume for its cache (Renderer::setFluidCacheBudget()).
+    void setFluidCacheBudget(quint64 bytes);
     bool isStatsVisible() const;
 
     // Editor overlays: the grid's lines, the light icons, the gizmo and the selection

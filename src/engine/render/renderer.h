@@ -144,6 +144,8 @@ public:
     // Parameters of the display pass (display.frag): params.x = exposure in EV,
     // params.y = tonemapping operator index.
     void setDisplayParams(float exposureEv, int tonemapper);
+    // GPU memory per fluid volume for its cache (FluidSystem::setCacheBudget()).
+    void setFluidCacheBudget(quint64 bytes) { m_fluids.setCacheBudget(bytes); }
 
     // Scene time in seconds (Timeline::seconds() of the frame shown): `viewport.w` in the
     // mesh shaders' uniforms, `camera.w` in the post-processing shaders.

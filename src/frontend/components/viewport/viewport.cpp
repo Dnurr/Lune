@@ -312,6 +312,12 @@ void Viewport::render(QRhiCommandBuffer *cb)
         QRhiWidget::update(); // next frame continues the camera's motion, or shows loaded textures
 }
 
+void Viewport::setFluidCacheBudget(quint64 bytes)
+{
+    m_renderer.setFluidCacheBudget(bytes);
+    redraw();
+}
+
 void Viewport::releaseResources()
 {
     m_renderer.release();

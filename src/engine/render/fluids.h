@@ -5,6 +5,7 @@
 #include <QPair>
 #include <QVector3D>
 #include <array>
+#include <list>
 #include <map>
 #include <memory>
 #include <rhi/qrhi.h>
@@ -42,16 +43,24 @@ class Scene;
 // after k steps from cleared fields; editing the volume or a source clears and simulates again;
 // catching up is spread over frames within FrameBudget (pending()).
 //
-// The cache, two kinds of copies, dropped on an edit:
-//   frames     every frame as it's drawn (smoke and temperature, fluid_frame.comp), up to
-//              FrameCacheBudget bytes per volume: a cached frame is drawn as it is, without
-//              simulating (the simulation stays where it was)
+// The cache, two kinds of copies within setCacheBudget() bytes per volume, dropped on an edit:
+//   frames     every frame as it's drawn (smoke and temperature), sparse, like a VDB grid: the
+//              grid in bricks of 8^3 voxels, only the bricks with something in them, quantized to
+//              16 bits per channel (fluid_brick_pack.comp), into a pool of pages (3D textures of
+//              32^3 bricks, PageBytes each) shared by the volume's frames, with a table per frame
+//              of where its bricks are. A cached frame is drawn as it is, without simulating (the
+//              simulation stays where it was): fluid_brick_unpack.comp makes it dense again in a
+//              texture of its own. Each frame reserves slots in a page from how many bricks the
+//              last frames had; the table's count, read back a frame or two later, confirms it
+//              (more bricks than reserved: the frame isn't cached) and returns the unused slots
+//              of the latest reservation. Frames get FrameShare of the budget.
 //   snapshots  every `interval` steps all the fields (velocity, density, pressure,
-//              fluid_copy.comp), up to SnapshotBudget bytes per volume (the interval grows with
-//              the timeline to fit): to simulate a frame that isn't cached, going back in time or
-//              jumping ahead, the nearest snapshot at or before it is restored and only the steps
-//              after it are simulated
-// Both are exact copies (bit for bit), so a frame is the same as simulating from the start.
+//              fluid_copy.comp), exact (bit for bit), in the rest of the budget (the interval
+//              grows with the timeline to fit): to simulate a frame that isn't cached, going back
+//              in time or jumping ahead, the nearest snapshot at or before it is restored and only
+//              the steps after it are simulated
+// Snapshots make a frame the same as simulating from the start; cached frames differ only by
+// the quantization (relative error below 0.01% for the smoke densities that show).
 //
 // Drawing: the box (fluid_volume.vert: 36 vertices, front faces culled) with fluid_volume.frag
 // marching through the density, over the scene with premultiplied alpha, before the particles;
@@ -70,10 +79,13 @@ public:
     // GPU work one frame may take, in voxel passes (voxels x passes of a step): catching up
     // after a jump or an edit is spread over frames under it.
     static constexpr double FrameBudget = 4.0e8;
-    // The cache: GPU memory for one volume's snapshots, and the fewest steps between two.
-    static constexpr quint64 SnapshotBudget = 256ull * 1024 * 1024;
-    static constexpr quint64 FrameCacheBudget = 512ull * 1024 * 1024;
+    // The cache (see above): the default budget per volume, the share of it for cached frames,
+    // the fewest steps between two snapshots, one page of the brick pool.
+    static constexpr quint64 DefaultCacheBudget = 2048ull * 1024 * 1024;
+    static constexpr double FrameShare = 0.75;
     static constexpr int MinSnapshotInterval = 4;
+    static constexpr int PageBricks = 32 * 32 * 32;                  // must match fluid_brick_*.comp
+    static constexpr quint64 PageBytes = quint64(PageBricks) * 512 * 4; // 4 bytes a voxel
 
     void initialize(QRhi *rhi);
     // Pipelines for drawing into the scene's kept pass (Renderer::m_sceneKeepRp).
@@ -86,6 +98,9 @@ public:
     // The shadow maps the volumes test the main light's shadows in (fluid_volume.frag's
     // shadowBuf, dirShadowMap). Set before drawing.
     void setShadowMaps(const ShadowMaps *shadows);
+    // GPU memory the cache may take per volume (frames and snapshots). Less than a volume's
+    // cache uses already drops it.
+    void setCacheBudget(quint64 bytes);
 
     // Brings every enabled volume of `scene` to scene time `seconds`: a compute pass. Outside any
     // render pass, before the scene pass.
@@ -111,7 +126,7 @@ public:
     int volumeCount() const { return m_drawn; }
     quint64 voxelCount() const { return m_voxels; }
     int stepsLastFrame() const { return m_stepsLastFrame; }
-    quint64 cacheBytes() const; // every volume's snapshots and cached frames
+    quint64 cacheBytes() const; // every volume's snapshots, pages and unpacked frame
     // The timeline frames every volume can show at once without simulating (cached, or the
     // simulation's own), as ranges of frames (first, last). Empty without volumes.
     QList<QPair<int, int>> cachedFrames() const;
@@ -131,6 +146,24 @@ private:
     struct Snapshot
     {
         std::array<std::unique_ptr<QRhiTexture>, 3> fields;
+    };
+    // A frame in the brick pool: its table (header and an entry per brick) and its reservation.
+    struct CachedFrame
+    {
+        std::unique_ptr<QRhiBuffer> table;
+        int page = 0;            // in Volume::pages
+        int base = 0, reserve = 0; // slots in the page
+        bool confirmed = false;  // its count read back, within the reservation: drawable
+        int bricks = 0;          // once confirmed
+    };
+    // A table's count, read back after its frame was packed.
+    struct Readback
+    {
+        EntityId volume = InvalidEntity;
+        quint64 generation = 0; // Volume::generation then: a dropped cache ignores it
+        int step = 0;
+        QRhiReadbackResult result;
+        bool done = false;
     };
     struct Volume
     {
@@ -153,10 +186,15 @@ private:
         int stepsDone = -1;               // steps in the fields (-1: clear first)
         std::map<int, Snapshot> snapshots; // by step (the fields after that many steps)
         quint64 snapshotBytes = 0;        // one snapshot's
-        std::map<int, std::unique_ptr<QRhiTexture>> frames; // by step: smoke and temperature (RGBA16F: no two-channel half format in Qt 6.8)
-        quint64 frameBytes = 0;           // one frame's
-        QRhiTexture *shown = nullptr;     // the cached frame drawn this frame (null: the simulation's)
-        QRhiTexture *frameDrawn = nullptr, *frameShadowed = nullptr; // what drawSrbs[2] / shadowSrbs[2] read
+        std::map<int, CachedFrame> frames; // by step
+        std::vector<std::unique_ptr<QRhiTexture>> pages; // the brick pool (RGBA8: 2 x 16 bits, 256^3 voxels each)
+        int nextSlot = 0;                 // where the next reservation starts (page * PageBricks + slot)
+        int recentBricks = 0;             // bricks of the latest confirmed frame
+        int unconfirmed = 0;              // frames reserved since then
+        quint64 generation = 0;           // bumped when the cache is dropped
+        std::unique_ptr<QRhiTexture> unpacked; // the cached frame being drawn, dense (RGBA16F)
+        int unpackedStep = -1;            // which (-1: none)
+        bool shown = false;               // drawn from `unpacked` this frame (else the simulation's)
         bool seen = false;
         QMatrix4x4 model;                 // box space -> world, this frame
         FluidVolume settings;             // this frame's, for drawing
@@ -176,9 +214,12 @@ private:
     QRhi *m_rhi = nullptr;
     bool m_supported = false;
     std::array<std::unique_ptr<QRhiComputePipeline>, PassCount> m_pipes;
-    std::unique_ptr<QRhiComputePipeline> m_clearPipe, m_copyPipe, m_framePipe;
-    std::unique_ptr<QRhiShaderResourceBindings> m_passLayout, m_clearLayout, m_copyLayout, m_frameLayout, m_drawLayout,
-        m_shadowLayout;
+    std::unique_ptr<QRhiComputePipeline> m_clearPipe, m_copyPipe, m_packPipe, m_unpackPipe;
+    std::unique_ptr<QRhiShaderResourceBindings> m_passLayout, m_clearLayout, m_copyLayout, m_packLayout, m_unpackLayout,
+        m_drawLayout, m_shadowLayout;
+    std::unique_ptr<QRhiBuffer> m_layoutStorage; // for the pack/unpack layouts
+    quint64 m_cacheBudget = DefaultCacheBudget;
+    std::list<Readback> m_readbacks;
     int m_timelineStart = 0; // of the last simulate()
     std::unique_ptr<QRhiBuffer> m_layoutUniforms;
     std::unique_ptr<QRhiTexture> m_layoutVolume;    // 1x1x1, for the layouts and unused inputs

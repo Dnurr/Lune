@@ -1,0 +1,46 @@
+#version 440
+
+// Fluid cache (FluidSystem): a cached frame back as a dense field, for drawing it. One workgroup
+// per brick of 8^3 voxels: its voxels from the brick pool (fluid_brick_pack.comp), decoded, or
+// zero for an empty brick.
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in; // one brick
+
+layout(std140, binding = 0) uniform CopyBuf {
+    uvec4 grid; // xyz = voxels along each axis
+};
+
+layout(binding = 1) uniform sampler3D page; // the frame's page of the pool (RGBA8: two bytes a channel)
+
+layout(std430, binding = 2) readonly buffer FrameTable {
+    uint count;
+    uint base;
+    uint reserve;
+    uint pad;
+    uint entries[];
+};
+
+layout(binding = 3, rgba16f) uniform writeonly image3D densityOut; // x = smoke, y = temperature
+
+void main()
+{
+    ivec3 brick = ivec3(gl_WorkGroupID);
+    ivec3 local = ivec3(gl_LocalInvocationID);
+    ivec3 cell = brick * 8 + local;
+    if (any(greaterThanEqual(uvec3(cell), grid.xyz)))
+        return;
+
+    uvec3 bricks = (grid.xyz + 7u) / 8u;
+    uint entry = entries[uint(brick.x) + bricks.x * (uint(brick.y) + bricks.y * uint(brick.z))];
+    vec2 v = vec2(0.0);
+    if (entry != 0u && entry != 0xFFFFFFFFu) {
+        uint s = entry - 1u;
+        ivec3 origin = ivec3(int(s % 32u), int((s / 32u) % 32u), int(s / 1024u)) * 8;
+        uvec4 b = uvec4(round(texelFetch(page, origin + local, 0) * 255.0));
+        vec2 q = vec2(b.x * 256u + b.y, b.z * 256u + b.w) / 65535.0;
+        float smoke = q.x / max(1.0 - q.x, 1e-6);
+        float t = 2.0 * q.y - 1.0; // t / (1 + |t|)
+        v = vec2(smoke, t / max(1.0 - abs(t), 1e-6));
+    }
+    imageStore(densityOut, cell, vec4(v, 0.0, 0.0));
+}

@@ -6,6 +6,7 @@
 namespace
 {
 const char *kBackendKey = "graphics/backend";
+const char *kFluidCacheKey = "simulation/fluidCacheMB";
 
 struct BackendName
 {
@@ -72,6 +73,17 @@ QRhi::Implementation backend()
             return b.backend;
     }
     return platformDefault();
+}
+
+int fluidCacheMegabytes()
+{
+    const int mb = QSettings().value(QString::fromLatin1(kFluidCacheKey), 2048).toInt();
+    return qBound(MinFluidCacheMegabytes, mb, MaxFluidCacheMegabytes);
+}
+
+void setFluidCacheMegabytes(int megabytes)
+{
+    QSettings().setValue(QString::fromLatin1(kFluidCacheKey), qBound(MinFluidCacheMegabytes, megabytes, MaxFluidCacheMegabytes));
 }
 
 void setBackend(QRhi::Implementation backend)
