@@ -1,7 +1,6 @@
 #version 440
 
-// Fluid solver: MacCormack correction of the advection (FluidVolume::MacCormack). Author: to be
-// written.
+// Fluid solver: MacCormack correction of the advection (FluidVolume::MacCormack)
 //
 // fluid_advect.comp has just written its semi-Lagrangian result into the predicted fields (the
 // fields as they'd be after the step: phi^). The correction measures that advection's error and
@@ -13,8 +12,6 @@
 //   3. clamp it between the smallest and the largest of the 8 original voxels around the point
 //      the semi-Lagrangian trace landed on (otherwise new extremes appear and it can blow up)
 // For both fields, velocity and density; the dissipation and cooling are already in phi^.
-//
-// Until then: the prediction as it is (the same as the semi-Lagrangian advection).
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in; // FluidSystem::GroupSize
 
@@ -51,7 +48,52 @@ void main()
     ivec3 cell = ivec3(gl_GlobalInvocationID);
     if (any(greaterThanEqual(uvec3(cell), grid.xyz)))
         return;
-    // TODO (Author): the forward trace, the half error back, the clamp, for both fields.
-    imageStore(velocityOut, cell, texelFetch(predictedVelocity, cell, 0));
-    imageStore(densityOut, cell, texelFetch(predictedDensity, cell, 0));
+    
+    vec3 p = vec3(cell) + 0.5;
+    vec3 v = texelFetch(velocityIn, cell, 0).xyz;
+
+    vec3 fwd = (p + v * step.x) / vec3(grid.xyz);
+
+    vec4 vTilde = textureLod(predictedVelocity, fwd, 0.0);
+    vec4 dTilde = textureLod(predictedDensity,  fwd, 0.0);
+
+    vec4 v0 = texelFetch(velocityIn, cell, 0);
+    vec4 d0 = texelFetch(densityIn,  cell, 0);
+
+    vec4 vHat = texelFetch(predictedVelocity, cell, 0);
+    vec4 dHat = texelFetch(predictedDensity,  cell, 0);
+
+    vec4 vel = vHat + 0.5 * (v0 - vTilde);
+    vec4 den = dHat + 0.5 * (d0 - dTilde);
+
+    vec3 b     = p - v * step.x;
+    ivec3 b0   = ivec3(floor(b - 0.5));
+    ivec3 last = ivec3(grid.xyz) - 1;
+
+    vec4 minV = vec4(1e30), maxV = vec4(-1e30);
+    vec4 minD = vec4(1e30), maxD = vec4(-1e30);
+
+    for (int dz = 0; dz <= 1; dz++)
+    {
+        for (int dy = 0; dy <= 1; dy++)
+        {
+            for (int dx = 0; dx <= 1; dx++)
+            {
+                ivec3 c = clamp(b0 + ivec3(dx, dy, dz), ivec3(0), last);
+
+                vec4 vel1 = texelFetch(velocityIn, c, 0);
+                vec4 den1 = texelFetch(densityIn,  c, 0);
+
+                minV = min(minV, vel1); maxV = max(maxV, vel1);
+                minD = min(minD, den1); maxD = max(maxD, den1);
+            }
+        }
+    }
+
+    vec4 keep = vec4(exp(-solver.x * step.x), exp(-solver.y * step.x), 1.0, 1.0);
+    vel = clamp(vel, minV, maxV);
+    den = clamp(den, minD * keep, maxD);
+    
+    imageStore(velocityOut, cell, vel);
+    imageStore(densityOut, cell, den);
 }

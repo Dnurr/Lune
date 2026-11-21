@@ -8,8 +8,6 @@
 // camera, plus `transmittance` = how much of what's behind gets through, per channel; a = how
 // much is hidden, on average), into the HDR target, after the meshes and
 // before the particles, without depth testing: the march stops at sceneDistance itself.
-//
-// Until then: nothing (fully transparent).
 
 layout(location = 0) in vec3 v_world; // where the ray leaves the box (a back face), world space
 layout(location = 0) out vec4 fragColor;

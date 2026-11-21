@@ -1,12 +1,10 @@
 #version 440
 
-// Fluid solver: advection. Author: to be written.
+// Fluid solver: advection
 //
 // The fluid carries itself and what is in it: each voxel takes the value found where its
 // content was dt ago (semi-Lagrangian: trace back along the velocity, sample there). The
 // smoke dissipates and the heat cools here too.
-//
-// Until then: the fields copied as they are.
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in; // FluidSystem::GroupSize
 
