@@ -207,6 +207,11 @@ void FluidSystem::initialize(QRhi *rhi)
     m_clearLayout->setBindings({ B::uniformBuffer(0, cs, m_layoutUniforms.get()), B::imageStore(1, cs, t, 0),
                                  B::imageStore(2, cs, t, 0), B::imageStore(3, cs, t, 0), B::imageStore(4, cs, t, 0) });
     m_clearLayout->create();
+    m_copyLayout.reset(m_rhi->newShaderResourceBindings());
+    m_copyLayout->setBindings({ B::uniformBuffer(0, cs, m_layoutUniforms.get()), B::sampledTexture(1, cs, t, m_linear.get()),
+                                B::sampledTexture(2, cs, t, m_linear.get()), B::sampledTexture(3, cs, t, m_linear.get()),
+                                B::imageStore(4, cs, t, 0), B::imageStore(5, cs, t, 0), B::imageStore(6, cs, t, 0) });
+    m_copyLayout->create();
     m_drawLayout.reset(m_rhi->newShaderResourceBindings());
     m_drawLayout->setBindings({ B::uniformBuffer(0, B::VertexStage | B::FragmentStage, m_layoutUniforms.get()),
                                 B::sampledTexture(1, B::FragmentStage, t, m_linear.get()),
@@ -240,6 +245,7 @@ void FluidSystem::initialize(QRhi *rhi)
     m_pipes[Pressure] = compute("fluid_pressure.comp", m_passLayout.get());
     m_pipes[Project] = compute("fluid_project.comp", m_passLayout.get());
     m_clearPipe = compute("fluid_clear.comp", m_clearLayout.get());
+    m_copyPipe = compute("fluid_copy.comp", m_copyLayout.get());
 }
 
 void FluidSystem::createPipelines(QRhiRenderPassDescriptor *sceneRp, int sampleCount)
@@ -312,8 +318,10 @@ void FluidSystem::release()
     for (auto &p : m_pipes)
         p.reset();
     m_clearPipe.reset();
+    m_copyPipe.reset();
     m_passLayout.reset();
     m_clearLayout.reset();
+    m_copyLayout.reset();
     m_drawLayout.reset();
     m_shadowLayout.reset();
     m_layoutUniforms.reset();
@@ -370,6 +378,7 @@ void FluidSystem::retire(Volume &v)
         for (auto &t : *pair)
             retire(t);
     retire(v.divergence);
+    dropSnapshots(v);
     retire(v.stepUniforms);
     retire(v.clearUniforms);
     retire(v.drawUniforms);
@@ -410,6 +419,36 @@ QRhiShaderResourceBindings *FluidSystem::passBindings(Volume &v, Pass pass)
                        B::imageStore(5, cs, out5, 0), B::imageStore(6, cs, denOut, 0) });
     srb->create();
     return v.srbs.emplace(key, std::move(srb)).first->second.get();
+}
+
+QRhiShaderResourceBindings *FluidSystem::copyBindings(Volume &v, QRhiTexture *const from[3], QRhiTexture *const to[3])
+{
+    using B = QRhiShaderResourceBinding;
+    const auto cs = B::ComputeStage;
+    std::unique_ptr<QRhiShaderResourceBindings> srb(m_rhi->newShaderResourceBindings());
+    srb->setBindings({ B::uniformBuffer(0, cs, v.clearUniforms.get()), B::sampledTexture(1, cs, from[0], m_linear.get()),
+                       B::sampledTexture(2, cs, from[1], m_linear.get()), B::sampledTexture(3, cs, from[2], m_linear.get()),
+                       B::imageStore(4, cs, to[0], 0), B::imageStore(5, cs, to[1], 0), B::imageStore(6, cs, to[2], 0) });
+    srb->create();
+    QRhiShaderResourceBindings *raw = srb.get();
+    retire(srb);
+    return raw;
+}
+
+void FluidSystem::dropSnapshots(Volume &v)
+{
+    for (auto &[step, snapshot] : v.snapshots)
+        for (auto &t : snapshot.fields)
+            retire(t);
+    v.snapshots.clear();
+}
+
+quint64 FluidSystem::cacheBytes() const
+{
+    quint64 bytes = 0;
+    for (const auto &[id, v] : m_volumes)
+        bytes += v.snapshotBytes * quint64(v.snapshots.size());
+    return bytes;
 }
 
 void FluidSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float seconds)
@@ -512,6 +551,7 @@ void FluidSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float seco
                 v.clearSrbs[size_t(i)]->create();
             }
             v.stepsDone = -1;
+            v.snapshotBytes = quint64(nx) * quint64(ny) * quint64(nz) * (8 + 8 + 4);
         }
         v.voxelSize = voxel;
         m_voxels += quint64(nx) * quint64(ny) * quint64(nz);
@@ -519,16 +559,33 @@ void FluidSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float seco
 
         const Entity reference = at(entity, timeline.start);
         if (reference.fluid != v.reference.fluid || reference.transform != v.reference.transform
-            || reference.animation != v.reference.animation || !sameEntities(sourceReference, v.sourceReference)
-            || target < v.stepsDone) {
+            || reference.animation != v.reference.animation || !sameEntities(sourceReference, v.sourceReference)) {
             v.reference = reference;
             v.sourceReference = sourceReference;
             v.stepsDone = -1;
+            dropSnapshots(v);
         }
         const int gx = groups(nx), gy = groups(ny), gz = groups(nz);
-        if (v.stepsDone < 0) { // from cleared fields
+        {
             const quint32 grid[4] = { quint32(nx), quint32(ny), quint32(nz), 0 };
-            rub->updateDynamicBuffer(v.clearUniforms.get(), 0, 16, grid);
+            rub->updateDynamicBuffer(v.clearUniforms.get(), 0, 16, grid); // clear and copy passes
+        }
+
+        // The cache: back in time (or before any step), or ahead past a snapshot, start from the
+        // nearest snapshot at or before the frame; back in time without one, from the start.
+        auto best = v.snapshots.upper_bound(target); // the first after the frame
+        const int snapshotStep = best == v.snapshots.begin() ? -1 : std::prev(best)->first;
+        if (target < v.stepsDone && snapshotStep < 0)
+            v.stepsDone = -1;
+        else if (snapshotStep > 0 && (target < v.stepsDone || snapshotStep > v.stepsDone)) {
+            const Snapshot &snapshot = std::prev(best)->second;
+            QRhiTexture *const from[3] = { snapshot.fields[0].get(), snapshot.fields[1].get(), snapshot.fields[2].get() };
+            QRhiTexture *const to[3] = { v.velocity[0].get(), v.density[0].get(), v.pressure[0].get() };
+            dispatches.push_back({ m_copyPipe.get(), copyBindings(v, from, to), ~0u, gx, gy, gz });
+            v.v = v.d = v.p = 0;
+            v.stepsDone = snapshotStep;
+        }
+        if (v.stepsDone < 0) { // from cleared fields
             for (auto &s : v.clearSrbs)
                 dispatches.push_back({ m_clearPipe.get(), s.get(), ~0u, gx, gy, gz });
             v.v = v.d = v.p = 0;
@@ -544,6 +601,20 @@ void FluidSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float seco
         budget = qMax(0.0, budget - stepCost * count);
         if (target - v.stepsDone > count)
             m_pending = true;
+
+        // Snapshots every `interval` steps: as many as fit SnapshotBudget over the timeline.
+        const int frames = qMax(1, timeline.end - timeline.start + 1);
+        const int fitting = int(qMax<quint64>(1, SnapshotBudget / qMax<quint64>(1, v.snapshotBytes)));
+        const int interval = qMax(MinSnapshotInterval, (frames + fitting - 1) / fitting);
+        for (auto it = v.snapshots.begin(); it != v.snapshots.end();) { // after a longer timeline
+            if (it->first % interval != 0) {
+                for (auto &t : it->second.fields)
+                    retire(t);
+                it = v.snapshots.erase(it);
+            } else {
+                ++it;
+            }
+        }
 
         QByteArray data(qsizetype(count) * stride, '\0');
         for (int i = 0; i < count; ++i) {
@@ -612,6 +683,30 @@ void FluidSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float seco
             }
             pass(Project);
             v.v ^= 1;
+
+            // A snapshot of the fields after this step (k + 1 steps), if it's one of the cache's.
+            const int done = k + 1;
+            if (done % interval == 0 && !v.snapshots.count(done) && m_copyPipe) {
+                Snapshot snapshot;
+                const auto flags = QRhiTexture::ThreeDimensional | QRhiTexture::UsedWithLoadStore;
+                const QRhiTexture::Format formats[3] = { QRhiTexture::RGBA16F, QRhiTexture::RGBA16F, QRhiTexture::R32F };
+                bool made = true;
+                for (int f3 = 0; f3 < 3; ++f3) {
+                    snapshot.fields[size_t(f3)].reset(m_rhi->newTexture(formats[f3], nx, ny, nz, 1, flags));
+                    made = made && snapshot.fields[size_t(f3)]->create();
+                    fixVolumeStorageView(m_rhi, snapshot.fields[size_t(f3)].get());
+                }
+                if (made) {
+                    QRhiTexture *const from[3] = { v.velocity[size_t(v.v)].get(), v.density[size_t(v.d)].get(),
+                                                   v.pressure[size_t(v.p)].get() };
+                    QRhiTexture *const to[3] = { snapshot.fields[0].get(), snapshot.fields[1].get(), snapshot.fields[2].get() };
+                    dispatches.push_back({ m_copyPipe.get(), copyBindings(v, from, to), ~0u, gx, gy, gz });
+                    v.snapshots.emplace(done, std::move(snapshot));
+                } else {
+                    for (auto &t : snapshot.fields) // out of video memory: no more snapshots
+                        retire(t);
+                }
+            }
         }
         rub->updateDynamicBuffer(v.stepUniforms.get(), 0, quint32(data.size()), data.constData());
         v.stepsDone += count;

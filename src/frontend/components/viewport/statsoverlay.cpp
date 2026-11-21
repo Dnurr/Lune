@@ -64,10 +64,11 @@ void StatsOverlay::frameRendered(double cpuMs, const FrameStats &stats, const ch
                                                 .arg(stats.emitters)
                                                 .arg(stats.particleSteps))
                      + (stats.fluids == 0 ? QString()
-                                          : QStringLiteral("\n%1 voxels  %2 fluids  %3 steps")
+                                          : QStringLiteral("\n%1 voxels  %2 fluids  %3 steps  cache %4 MB")
                                                 .arg(c.toString(qulonglong(stats.voxels)))
                                                 .arg(stats.fluids)
-                                                .arg(stats.fluidSteps))));
+                                                .arg(stats.fluidSteps)
+                                                .arg(double(stats.fluidCache) / (1024.0 * 1024.0), 0, 'f', 0))));
     reposition();
 
     m_window.restart();

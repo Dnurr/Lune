@@ -57,6 +57,7 @@ struct FrameStats
     int fluids = 0;         // fluid volumes drawn
     quint64 voxels = 0;     // their voxels
     int fluidSteps = 0;     // fluid steps run this frame
+    quint64 fluidCache = 0; // bytes of the fluid cache's snapshots
 };
 
 // How meshes are shaded (the viewport's shading menu, and each pass of an image render).

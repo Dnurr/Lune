@@ -140,7 +140,7 @@ Smoke, fire, dust and other gas simulations on a 3D grid (Eulerian), rendered by
 - [x] Fluid Volume component: a box with a grid resolution (cubic voxels), solver and look settings; Add menu, box drawn in the viewport (Claude)
 - [x] 3D textures for the fields (velocity, smoke and temperature, pressure, divergence), ping-pong, a compute dispatch per pass and step; workarounds for Qt 6.8's Direct3D 11 3D storage views (Claude)
 - [x] Simulation on the timeline: fixed steps, re-simulation on edits, catching up within a frame budget (Claude)
-- [ ] A cache of grid snapshots for scrubbing (Claude)
+- [x] A cache of grid snapshots for scrubbing: exact copies every few steps within a memory budget, restored on jumps (Claude)
 - [x] Fluid Source component: spheres adding smoke, heat and velocity, in grid space per step (Claude)
 - [ ] Sources from meshes and particles (Claude: sampling and buffers, Author: the injection)
 - [x] `fluid_source.comp`: the sources' injection (Author)

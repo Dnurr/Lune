@@ -1311,6 +1311,7 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
     m_stats.fluids = m_fluids.volumeCount();
     m_stats.voxels = m_fluids.voxelCount();
     m_stats.fluidSteps = m_fluids.stepsLastFrame();
+    m_stats.fluidCache = m_fluids.cacheBytes();
     m_stats.drawCalls += m_stats.fluids;
     const bool particlePass = m_stats.emitters > 0 || m_stats.fluids > 0;
     const bool distancePass = particlePass && m_distancePipe;

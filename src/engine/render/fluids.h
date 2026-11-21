@@ -37,8 +37,14 @@ class Scene;
 // offset into a buffer of the frame's steps.
 //
 // Like the particles, the simulation follows the timeline: frame start + k shows the fields
-// after k steps from cleared fields; going back in time or editing the volume or a source
-// clears and simulates again; catching up is spread over frames within FrameBudget (pending()).
+// after k steps from cleared fields; editing the volume or a source clears and simulates again;
+// catching up is spread over frames within FrameBudget (pending()).
+//
+// The cache: every `interval` steps the fields (velocity, density, pressure) are copied into a
+// snapshot (fluid_copy.comp), up to SnapshotBudget bytes per volume (the interval grows with
+// the timeline to fit). Going back in time, or jumping ahead past a snapshot, restores the
+// nearest snapshot at or before the frame and simulates only from there. Snapshots are exact
+// (bit for bit), so the result is the same as simulating from the start. An edit drops them.
 //
 // Drawing: the box (fluid_volume.vert: 36 vertices, front faces culled) with fluid_volume.frag
 // marching through the density, over the scene with premultiplied alpha, before the particles;
@@ -57,6 +63,9 @@ public:
     // GPU work one frame may take, in voxel passes (voxels x passes of a step): catching up
     // after a jump or an edit is spread over frames under it.
     static constexpr double FrameBudget = 4.0e8;
+    // The cache: GPU memory for one volume's snapshots, and the fewest steps between two.
+    static constexpr quint64 SnapshotBudget = 256ull * 1024 * 1024;
+    static constexpr int MinSnapshotInterval = 4;
 
     void initialize(QRhi *rhi);
     // Pipelines for drawing into the scene's kept pass (Renderer::m_sceneKeepRp).
@@ -94,6 +103,7 @@ public:
     int volumeCount() const { return m_drawn; }
     quint64 voxelCount() const { return m_voxels; }
     int stepsLastFrame() const { return m_stepsLastFrame; }
+    quint64 cacheBytes() const; // every volume's snapshots
 
 private:
     enum Pass
@@ -105,6 +115,11 @@ private:
         Pressure,
         Project,
         PassCount
+    };
+    // A volume's fields after some step: velocity, density, pressure (the formats of the pairs).
+    struct Snapshot
+    {
+        std::array<std::unique_ptr<QRhiTexture>, 3> fields;
     };
     struct Volume
     {
@@ -125,11 +140,17 @@ private:
         std::unique_ptr<QRhiBuffer> shadowUniforms; // ShadowMaps::ViewCount ShadowBufs (dynamic offsets)
         std::array<std::unique_ptr<QRhiShaderResourceBindings>, 2> shadowSrbs; // by d
         int stepsDone = -1;               // steps in the fields (-1: clear first)
+        std::map<int, Snapshot> snapshots; // by step (the fields after that many steps)
+        quint64 snapshotBytes = 0;        // one snapshot's
         bool seen = false;
         QMatrix4x4 model;                 // box space -> world, this frame
         FluidVolume settings;             // this frame's, for drawing
     };
     QRhiShaderResourceBindings *passBindings(Volume &v, Pass pass);
+    // A copy (fluid_copy.comp): from the three textures to the other three. Its binding set is
+    // retired at once (it lives until the frames using it are done).
+    QRhiShaderResourceBindings *copyBindings(Volume &v, QRhiTexture *const from[3], QRhiTexture *const to[3]);
+    void dropSnapshots(Volume &v);
     void retire(Volume &v);
     template<typename T> void retire(std::unique_ptr<T> &resource)
     {
@@ -140,8 +161,8 @@ private:
     QRhi *m_rhi = nullptr;
     bool m_supported = false;
     std::array<std::unique_ptr<QRhiComputePipeline>, PassCount> m_pipes;
-    std::unique_ptr<QRhiComputePipeline> m_clearPipe;
-    std::unique_ptr<QRhiShaderResourceBindings> m_passLayout, m_clearLayout, m_drawLayout, m_shadowLayout;
+    std::unique_ptr<QRhiComputePipeline> m_clearPipe, m_copyPipe;
+    std::unique_ptr<QRhiShaderResourceBindings> m_passLayout, m_clearLayout, m_copyLayout, m_drawLayout, m_shadowLayout;
     std::unique_ptr<QRhiBuffer> m_layoutUniforms;
     std::unique_ptr<QRhiTexture> m_layoutVolume;    // 1x1x1, for the layouts and unused inputs
     std::unique_ptr<QRhiTexture> m_distanceStandIn; // 1x1

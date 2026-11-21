@@ -1,0 +1,29 @@
+#version 440
+
+// Fluid cache (FluidSystem): copies a volume's fields, velocity, density and pressure, from one
+// set of 3D textures into another, as they are (bit for bit: a texel fetched and stored again
+// in the same format). Saving a snapshot: the current fields into the snapshot's textures;
+// restoring one: the snapshot into the first texture of each pair.
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in; // FluidSystem::GroupSize
+
+layout(std140, binding = 0) uniform CopyBuf {
+    uvec4 grid; // xyz = voxels along each axis
+};
+
+layout(binding = 1) uniform sampler3D velocityIn;
+layout(binding = 2) uniform sampler3D densityIn;
+layout(binding = 3) uniform sampler3D pressureIn;
+layout(binding = 4, rgba16f) uniform writeonly image3D velocityOut;
+layout(binding = 5, rgba16f) uniform writeonly image3D densityOut;
+layout(binding = 6, r32f) uniform writeonly image3D pressureOut;
+
+void main()
+{
+    ivec3 cell = ivec3(gl_GlobalInvocationID);
+    if (any(greaterThanEqual(uvec3(cell), grid.xyz)))
+        return;
+    imageStore(velocityOut, cell, texelFetch(velocityIn, cell, 0));
+    imageStore(densityOut, cell, texelFetch(densityIn, cell, 0));
+    imageStore(pressureOut, cell, texelFetch(pressureIn, cell, 0));
+}
