@@ -212,6 +212,15 @@ struct ParticleForce
 // longest side, cubic voxels.
 struct FluidVolume
 {
+    // How the fluid carries itself (fluid_advect*.comp): one semi-Lagrangian trace back, or
+    // MacCormack: that, then a trace forward to measure the error and take half of it back
+    // (sharper smoke and curls at the same resolution, one pass more).
+    enum Advection
+    {
+        SemiLagrangian,
+        MacCormack
+    };
+
     bool enabled = true;
     QVector3D size { 4.0f, 4.0f, 4.0f };
     int resolution = 64;
@@ -223,6 +232,7 @@ struct FluidVolume
     float weight = 0.2f;        // downward acceleration per unit of smoke
     float vorticity = 0.3f;     // vorticity confinement: how strongly small swirls are kept
     int pressureIterations = 20; // Jacobi iterations of the pressure solve, per step
+    Advection advection = SemiLagrangian;
     float ambientLapse = 0.0f;  // stratified air: how much warmer it gets per world unit of
                                 // height above the box's lowest point (0: the same everywhere);
                                 // hot gas rises until it's no warmer than the air around it

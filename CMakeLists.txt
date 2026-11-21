@@ -178,6 +178,7 @@ qt6_add_shaders(Lune "compute_shaders"
         src/engine/render/shaders/fluid_brick_unpack.comp
         src/engine/render/shaders/fluid_source.comp
         src/engine/render/shaders/fluid_advect.comp
+        src/engine/render/shaders/fluid_advect_correct.comp
         src/engine/render/shaders/fluid_forces.comp
         src/engine/render/shaders/fluid_divergence.comp
         src/engine/render/shaders/fluid_pressure.comp

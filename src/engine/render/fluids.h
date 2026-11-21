@@ -30,6 +30,8 @@ class Scene;
 //
 //   source      velocity, density  -> velocity', density'   the Fluid Sources over dt
 //   advect      velocity, density  -> velocity', density'   the fluid carries itself
+//               (MacCormack: advect into the predicted fields, then advect_correct: velocity,
+//               density, predicted -> velocity', density')
 //   forces      velocity, density  -> velocity'             buoyancy, weight, vorticity confinement
 //   divergence  velocity           -> divergence
 //   pressure    pressure, divergence -> pressure'            x FluidVolume::pressureIterations
@@ -141,6 +143,8 @@ private:
         Divergence,
         Pressure,
         Project,
+        AdvectPredict, // fluid_advect.comp into the predicted fields (MacCormack)
+        AdvectCorrect, // fluid_advect_correct.comp
         PassCount
     };
     // A volume's fields after some step: velocity, density, pressure (the formats of the pairs).
@@ -173,6 +177,8 @@ private:
         float voxelSize = 1.0f;
         std::array<std::unique_ptr<QRhiTexture>, 2> velocity, density, pressure;
         std::unique_ptr<QRhiTexture> divergence;
+        // MacCormack: the semi-Lagrangian result, before the correction (made when first used).
+        std::unique_ptr<QRhiTexture> predictedVelocity, predictedDensity;
         int v = 0, d = 0, p = 0;          // which texture of each pair holds the current field
         std::unique_ptr<QRhiBuffer> stepUniforms; // MaxStepsPerFrame FluidBufs (dynamic offsets)
         std::unique_ptr<QRhiBuffer> clearUniforms;

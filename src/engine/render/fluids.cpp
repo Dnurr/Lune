@@ -264,6 +264,8 @@ void FluidSystem::initialize(QRhi *rhi)
     m_pipes[Divergence] = compute("fluid_divergence.comp", m_passLayout.get());
     m_pipes[Pressure] = compute("fluid_pressure.comp", m_passLayout.get());
     m_pipes[Project] = compute("fluid_project.comp", m_passLayout.get());
+    m_pipes[AdvectPredict] = compute("fluid_advect.comp", m_passLayout.get());
+    m_pipes[AdvectCorrect] = compute("fluid_advect_correct.comp", m_passLayout.get());
     m_clearPipe = compute("fluid_clear.comp", m_clearLayout.get());
     m_copyPipe = compute("fluid_copy.comp", m_copyLayout.get());
     m_packPipe = compute("fluid_brick_pack.comp", m_packLayout.get());
@@ -407,6 +409,8 @@ void FluidSystem::retire(Volume &v)
         for (auto &t : *pair)
             retire(t);
     retire(v.divergence);
+    retire(v.predictedVelocity);
+    retire(v.predictedDensity);
     dropSnapshots(v);
     retire(v.stepUniforms);
     retire(v.clearUniforms);
@@ -428,7 +432,7 @@ QRhiShaderResourceBindings *FluidSystem::passBindings(Volume &v, Pass pass)
     QRhiTexture *div = v.divergence.get();
     // Inputs 1..4, outputs 5, 6: a texture is never an input and an output of the same pass.
     QRhiTexture *in[4] = { velIn, denIn, preIn, div };
-    QRhiTexture *out5 = velOut;
+    QRhiTexture *out5 = velOut, *out6 = denOut;
     switch (pass) {
     case Source:
     case Advect:
@@ -439,13 +443,21 @@ QRhiShaderResourceBindings *FluidSystem::passBindings(Volume &v, Pass pass)
         in[3] = none;
         break;
     case Pressure: out5 = preOut; break;
+    case AdvectPredict: // into the predicted fields, nothing swaps
+        out5 = v.predictedVelocity.get();
+        out6 = v.predictedDensity.get();
+        break;
+    case AdvectCorrect: // the fields as they were, and the prediction
+        in[2] = v.predictedVelocity.get();
+        in[3] = v.predictedDensity.get();
+        break;
     default: break;
     }
     std::unique_ptr<QRhiShaderResourceBindings> srb(m_rhi->newShaderResourceBindings());
     srb->setBindings({ B::uniformBufferWithDynamicOffset(0, cs, v.stepUniforms.get(), kFluidUbufSize),
                        B::sampledTexture(1, cs, in[0], m_linear.get()), B::sampledTexture(2, cs, in[1], m_linear.get()),
                        B::sampledTexture(3, cs, in[2], m_linear.get()), B::sampledTexture(4, cs, in[3], m_linear.get()),
-                       B::imageStore(5, cs, out5, 0), B::imageStore(6, cs, denOut, 0) });
+                       B::imageStore(5, cs, out5, 0), B::imageStore(6, cs, out6, 0) });
     srb->create();
     return v.srbs.emplace(key, std::move(srb)).first->second.get();
 }
@@ -760,7 +772,17 @@ void FluidSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float seco
         }
 
         // Steps due this frame, within what's left of the budget (at least one).
-        const double stepCost = double(nx) * ny * nz * (5 + f.pressureIterations);
+        const bool macCormack = f.advection == FluidVolume::MacCormack && m_pipes[AdvectCorrect];
+        if (macCormack && !v.predictedVelocity) {
+            const auto flags = QRhiTexture::ThreeDimensional | QRhiTexture::UsedWithLoadStore;
+            v.predictedVelocity.reset(m_rhi->newTexture(QRhiTexture::RGBA16F, nx, ny, nz, 1, flags));
+            v.predictedDensity.reset(m_rhi->newTexture(QRhiTexture::RGBA16F, nx, ny, nz, 1, flags));
+            for (auto *t : { v.predictedVelocity.get(), v.predictedDensity.get() }) {
+                t->create();
+                fixVolumeStorageView(m_rhi, t);
+            }
+        }
+        const double stepCost = double(nx) * ny * nz * (5 + (macCormack ? 1 : 0) + f.pressureIterations);
         const int affordable = int(qBound(1.0, budget / stepCost, double(MaxStepsPerFrame)));
         const int count = qMin(target - v.stepsDone, affordable);
         if (count <= 0)
@@ -840,7 +862,12 @@ void FluidSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float seco
             pass(Source);
             v.v ^= 1;
             v.d ^= 1;
-            pass(Advect);
+            if (macCormack) {
+                pass(AdvectPredict);
+                pass(AdvectCorrect);
+            } else {
+                pass(Advect);
+            }
             v.v ^= 1;
             v.d ^= 1;
             pass(Forces);
