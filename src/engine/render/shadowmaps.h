@@ -50,7 +50,9 @@ class QRhiTextureRenderTarget;
 //          1 / TranslucencyScale of the atlases' resolution, a region for each atlas with the
 //          same tiles. Cleared to 1; every translucent caster multiplies rgb by the light it
 //          lets through and keeps in alpha the smallest (nearest) linear depth. Fluid volumes
-//          draw into it too, through render()'s `moreTranslucent` (FluidSystem::drawShadows()).
+//          draw into it too, through render()'s `moreTranslucent` (FluidSystem::drawShadows()):
+//          in a second pass, after a copy of the map as the meshes left it (the glass map, which
+//          the volumes read: their own shadow is in the map, and they shadow themselves).
 //
 // The translucency map also holds the front depth, in two more regions at 1 / FrontDepthScale
 // (to the right of the translucency regions): the alpha of every texel is the linear depth
@@ -142,8 +144,9 @@ public:
     QList<QRhiShaderResourceBinding> casterBindings(QRhiBuffer *entityUniforms) const;
     // For other fragment shaders that test the directional shadows (fluid_volume.frag): the
     // shadow block (mesh.frag's shadowBuf) at `uniformBinding`, the directional atlas through the
-    // comparison sampler (dirShadowMap) at `mapBinding`.
-    QList<QRhiShaderResourceBinding> directionalBindings(int uniformBinding, int mapBinding) const;
+    // comparison sampler (dirShadowMap) at `mapBinding`, and the glass map (the translucency map
+    // with the meshes' translucent casters only, no fluid volumes) at `glassBinding`.
+    QList<QRhiShaderResourceBinding> directionalBindings(int uniformBinding, int mapBinding, int glassBinding) const;
     // The view of material casters (MaterialViewBinding, dynamic offset per tile).
     QRhiShaderResourceBinding materialViewBinding() const;
     // A pipeline for a material's shadow fragment shader (mesh.frag's declarations + the
@@ -165,7 +168,8 @@ public:
         QVector3D light;    // directional: where it shines (unit); point: its position
     };
     std::vector<TranslucentView> translucentViews() const;
-    QRhiRenderPassDescriptor *translucencyRenderPass() const { return m_translucencyRp.get(); }
+    // The render pass `moreTranslucent` draws in (the map kept from the first translucency pass).
+    QRhiRenderPassDescriptor *translucencyRenderPass() const { return m_translucencyKeepRp.get(); }
 
     // Picks the shadowed lights (up to MaxDirectional + MaxPoint, in order), fits their
     // views (directional: cascades of the camera's view, up to the farthest mesh; point:
@@ -175,8 +179,8 @@ public:
                  const QVector3D &boundsMin, const QVector3D &boundsMax, bool hasMeshes);
     // Records both atlas passes and the translucency pass, with the front depth (always
     // cleared, so they're valid to sample). `rub` goes with the first pass. `moreTranslucent`,
-    // if set, records more translucent casters at the end of the translucency pass (see
-    // translucentViews()).
+    // if set, records more translucent casters into the translucency map (see
+    // translucentViews()), in a pass of their own after the glass map is copied.
     void render(QRhiCommandBuffer *cb, QRhiResourceUpdateBatch *rub, const std::vector<Caster> &casters,
                 const std::function<void(QRhiCommandBuffer *)> &moreTranslucent = {});
 
@@ -215,6 +219,9 @@ private:
     std::unique_ptr<QRhiTextureRenderTarget> m_translucencyRt;
     std::unique_ptr<QRhiRenderPassDescriptor> m_translucencyRp;
     std::unique_ptr<QRhiSampler> m_translucencySampler;
+    std::unique_ptr<QRhiTextureRenderTarget> m_translucencyKeepRt; // the map again, kept (moreTranslucent)
+    std::unique_ptr<QRhiRenderPassDescriptor> m_translucencyKeepRp;
+    std::unique_ptr<QRhiTexture> m_glass; // the map before moreTranslucent (directionalBindings())
     std::unique_ptr<QRhiTexture> m_dummyDepth, m_dummyColor; // meshBindings(true)
     // OpenGL: R32F copies of the atlases, for the raw depth reads (see the top of the file).
     struct RawCopy

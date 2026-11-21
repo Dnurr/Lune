@@ -1320,7 +1320,12 @@ void Renderer::render(QRhiCommandBuffer *cb, QRhiRenderTarget *target, const Orb
         m_stats.drawCalls += 1;
     }
     m_stats.renderPasses += (particlePass ? 1 : 0) + (distancePass ? 1 : 0);
-    m_shadows.render(cb, rub, casters, [this](QRhiCommandBuffer *c) { m_fluids.drawShadows(c); });
+    // The fluid volumes' shadows in a pass of their own, only when there are some (it costs a
+    // copy of the translucency map: the glass map the volumes read).
+    std::function<void(QRhiCommandBuffer *)> fluidShadows;
+    if (m_fluids.shadowDrawCount() > 0)
+        fluidShadows = [this](QRhiCommandBuffer *c) { m_fluids.drawShadows(c); };
+    m_shadows.render(cb, rub, casters, fluidShadows);
 
     // 1. Scene (HDR, linear): environment and grid as background (no depth), opaque meshes,
     //    see-through ones far to near, selection outline

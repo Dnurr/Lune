@@ -211,9 +211,10 @@ void FluidSystem::initialize(QRhi *rhi)
     m_drawLayout->setBindings({ B::uniformBuffer(0, B::VertexStage | B::FragmentStage, m_layoutUniforms.get()),
                                 B::sampledTexture(1, B::FragmentStage, t, m_linear.get()),
                                 B::sampledTexture(2, B::FragmentStage, m_distanceStandIn.get(), m_nearest.get()),
-                                // the shadow block and the directional atlas (setShadowMaps())
+                                // the shadow block, the directional atlas, the glass map (setShadowMaps())
                                 B::uniformBuffer(3, B::FragmentStage, m_layoutUniforms.get()),
-                                B::sampledTexture(4, B::FragmentStage, m_distanceStandIn.get(), m_nearest.get()) });
+                                B::sampledTexture(4, B::FragmentStage, m_distanceStandIn.get(), m_nearest.get()),
+                                B::sampledTexture(5, B::FragmentStage, m_distanceStandIn.get(), m_nearest.get()) });
     m_drawLayout->create();
     m_shadowLayout.reset(m_rhi->newShaderResourceBindings());
     m_shadowLayout->setBindings({ B::uniformBufferWithDynamicOffset(0, B::VertexStage | B::FragmentStage, m_layoutUniforms.get(),
@@ -696,7 +697,7 @@ void FluidSystem::draw(QRhiCommandBuffer *cb, const QRhiViewport &viewport)
                 B::sampledTexture(1, B::FragmentStage, v.density[size_t(v.d)].get(), m_linear.get()),
                 B::sampledTexture(2, B::FragmentStage, m_sceneDistance ? m_sceneDistance : m_distanceStandIn.get(), m_nearest.get())
             };
-            bindings.append(m_shadowMaps->directionalBindings(3, 4));
+            bindings.append(m_shadowMaps->directionalBindings(3, 4, 5));
             srb->setBindings(bindings.cbegin(), bindings.cend());
             srb->create();
         }

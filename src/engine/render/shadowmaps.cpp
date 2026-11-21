@@ -104,12 +104,21 @@ void ShadowMaps::initialize(QRhi *rhi)
     const int atlasesHeight = DirectionalAtlasSize + MaxPoint * PointFaceSize;
     const QSize translucency(atlasesWidth / TranslucencyScale + atlasesWidth / FrontDepthScale,
                              qMax(atlasesHeight / TranslucencyScale, atlasesHeight / FrontDepthScale));
-    m_translucency.reset(m_rhi->newTexture(QRhiTexture::RGBA16F, translucency, 1, QRhiTexture::RenderTarget));
+    m_translucency.reset(m_rhi->newTexture(QRhiTexture::RGBA16F, translucency, 1,
+                                           QRhiTexture::RenderTarget | QRhiTexture::UsedAsTransferSource));
     m_translucency->create();
     m_translucencyRt.reset(m_rhi->newTextureRenderTarget({ QRhiColorAttachment(m_translucency.get()) }));
     m_translucencyRp.reset(m_translucencyRt->newCompatibleRenderPassDescriptor());
     m_translucencyRt->setRenderPassDescriptor(m_translucencyRp.get());
     m_translucencyRt->create();
+    // The same map, kept, for the casters drawn after the glass map's copy (render()).
+    m_translucencyKeepRt.reset(m_rhi->newTextureRenderTarget({ QRhiColorAttachment(m_translucency.get()) },
+                                                             QRhiTextureRenderTarget::PreserveColorContents));
+    m_translucencyKeepRp.reset(m_translucencyKeepRt->newCompatibleRenderPassDescriptor());
+    m_translucencyKeepRt->setRenderPassDescriptor(m_translucencyKeepRp.get());
+    m_translucencyKeepRt->create();
+    m_glass.reset(m_rhi->newTexture(QRhiTexture::RGBA16F, translucency));
+    m_glass->create();
     m_translucencySampler.reset(m_rhi->newSampler(QRhiSampler::Linear, QRhiSampler::Linear, QRhiSampler::None,
                                                   QRhiSampler::ClampToEdge, QRhiSampler::ClampToEdge));
     m_translucencySampler->create();
@@ -292,6 +301,9 @@ void ShadowMaps::release()
     m_directional.reset();
     m_point.reset();
     m_translucencyRt.reset();
+    m_translucencyKeepRt.reset();
+    m_translucencyKeepRp.reset();
+    m_glass.reset();
     m_translucencyRp.reset();
     m_translucency.reset();
     m_translucencySampler.reset();
@@ -582,11 +594,12 @@ void ShadowMaps::prepare(QRhiResourceUpdateBatch *rub, const std::vector<Light> 
     }
 }
 
-QList<QRhiShaderResourceBinding> ShadowMaps::directionalBindings(int uniformBinding, int mapBinding) const
+QList<QRhiShaderResourceBinding> ShadowMaps::directionalBindings(int uniformBinding, int mapBinding, int glassBinding) const
 {
     using B = QRhiShaderResourceBinding;
     return { B::uniformBuffer(uniformBinding, B::FragmentStage, m_uniforms.get()),
-             B::sampledTexture(mapBinding, B::FragmentStage, m_directional.get(), m_compareSampler.get()) };
+             B::sampledTexture(mapBinding, B::FragmentStage, m_directional.get(), m_compareSampler.get()),
+             B::sampledTexture(glassBinding, B::FragmentStage, m_glass.get(), m_translucencySampler.get()) };
 }
 
 std::vector<ShadowMaps::TranslucentView> ShadowMaps::translucentViews() const
@@ -700,7 +713,15 @@ void ShadowMaps::render(QRhiCommandBuffer *cb, QRhiResourceUpdateBatch *rub, con
             draw(c, MaterialViewBinding, viewOffset(v));
         }
     }
-    if (moreTranslucent)
-        moreTranslucent(cb);
     cb->endPass();
+
+    // More translucent casters (fluid volumes): first the glass map, the translucency map as the
+    // meshes left it, then their pass over the kept map.
+    if (moreTranslucent) {
+        QRhiResourceUpdateBatch *copy = m_rhi->nextResourceUpdateBatch();
+        copy->copyTexture(m_glass.get(), m_translucency.get());
+        cb->beginPass(m_translucencyKeepRt.get(), QColor::fromRgbF(1, 1, 1, 1), { 1.0f, 0 }, copy);
+        moreTranslucent(cb);
+        cb->endPass();
+    }
 }
