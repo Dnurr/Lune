@@ -159,7 +159,8 @@ void main()
         vec3 shadow = exp(-smoke * look.x * extinction.rgb * dl);
 
         if (max(T.r, max(T.g, T.b)) < 0.01) break;
-        L += T * (1.0 - stepT) * scatteredLight * shadow;
+        vec3 world = (model * vec4(p, 1.0)).xyz;
+        L += T * (1.0 - stepT) * scatteredLight * shadow * sunShadow(world);
         L += T * emissionColor.rgb * s.y * look.z * ds;
         T *= stepT;
     }
