@@ -1,11 +1,18 @@
 #version 440
 
-// Fluid cache (FluidSystem): a frame of a volume, as it's drawn (smoke and temperature), saved
-// sparsely. One workgroup per brick of 8^3 voxels: a brick with any smoke or heat gets a slot
-// (a counter in its frame's table, within the reservation the CPU made) and its voxels go to that
-// slot in a page of the brick pool, quantized to 16 bits per channel (two bytes each in an RGBA8
-// texel: rg16 images aren't in GLSL ES); an empty brick is left out
-// (table entry 0). fluid_brick_unpack.comp makes the dense field again.
+// Fluid cache (FluidSystem): a frame of a volume, as it's drawn, saved sparsely. One workgroup
+// per brick of 8^3 voxels: a brick with anything in it takes the next free slots of the volume's
+// brick pool (one counter for the whole pool: no gaps between frames) and its voxels go there,
+// quantized to 16 bits; an empty brick is left out (table entry 0). fluid_brick_unpack.comp makes
+// the dense field again.
+//
+// The pool: pages of 256^3 RGBA8 texels, each 65536 slots of 8 x 8 x 4 texels (4 bytes a texel:
+// rg16 images aren't in GLSL ES, so two bytes a channel). A brick takes
+//   smoke and temperature  2 slots: texel (x, y, z % 4) of slot z / 4 = (smoke, temperature)
+//   smoke only             1 slot:  texel (x, y, z / 2) = (smoke of z even, smoke of z odd)
+// Smoke only is for volumes without emission: drawing needs the temperature only for the fire.
+// The pass binds two pages (the CPU's `firstPage` and the next): slots past them are left out
+// (table entry 0xFFFFFFFF, `leftOut` set) and the frame isn't cached.
 //
 // Quantization: values of any size into 0..1, finer near 0 (where the smoke fades):
 //   smoke s >= 0:  s / (1 + s)            temperature t:  0.5 + 0.5 * t / (1 + |t|)
@@ -18,22 +25,52 @@ layout(std140, binding = 0) uniform CopyBuf {
 
 layout(binding = 1) uniform sampler3D densityIn; // x = smoke, y = temperature
 
-// The frame's table: header (filled by the CPU, `count` by this pass), then one entry per brick
-// (x fastest): 0 = empty, 0xFFFFFFFF = left out (no slot left), else 1 + the brick's slot in the
-// page (slots of a page: x fastest, 32 x 32 x 32 bricks).
-layout(std430, binding = 2) buffer FrameTable {
-    uint count;   // bricks given a slot (counted even past the reservation: the CPU checks it)
-    uint base;    // first slot of the reservation, in the page
-    uint reserve; // slots reserved for this frame
-    uint pad;
+// The volume's pool counter: slots taken so far, over all its frames.
+layout(std430, binding = 2) buffer PoolCounter {
+    uint next;
+};
+
+// The frame's table: header (from the CPU; count and leftOut by this pass), then one entry per
+// brick (x fastest): 0 = empty, 0xFFFFFFFF = left out, else 1 + its first slot in the pool.
+layout(std430, binding = 3) buffer FrameTable {
+    uint count;     // bricks of the frame (with anything in them)
+    uint leftOut;   // 1 if some had no slot
+    uint firstPage; // the page bound as pageA; pageB is the next (if `pages` is 2)
+    uint flags;     // bit 0: smoke only; bits 1..: pages bound (1 or 2)
     uint entries[];
 };
 
-layout(binding = 3, rgba8) uniform writeonly image3D page;
+layout(binding = 4, rgba8) uniform writeonly image3D pageA;
+layout(binding = 5, rgba8) uniform writeonly image3D pageB;
 
+const uint PageSlots = 65536u;
 const float Empty = 1e-4; // below this, smoke and heat count as nothing
 shared uint occupied;
-shared uint slot;
+shared uint first;
+
+// 16 bits as two bytes, in 0..1 for an RGBA8 texel.
+vec2 bytes(float q)
+{
+    uint k = uint(round(clamp(q, 0.0, 1.0) * 65535.0));
+    return vec2(float(k >> 8u), float(k & 255u)) / 255.0;
+}
+
+float quantizeSmoke(float s)
+{
+    s = max(s, 0.0);
+    return s / (1.0 + s);
+}
+
+void store(uint slot, ivec3 texel, vec4 value)
+{
+    uint rel = slot - firstPage * PageSlots;
+    uint h = rel % PageSlots;
+    ivec3 origin = ivec3(int(h % 32u), int((h / 32u) % 32u), int(h / 1024u)) * ivec3(8, 8, 4);
+    if (rel < PageSlots)
+        imageStore(pageA, origin + texel, value);
+    else
+        imageStore(pageB, origin + texel, value);
+}
 
 void main()
 {
@@ -42,11 +79,13 @@ void main()
     ivec3 cell = brick * 8 + local;
     bool inside = all(lessThan(uvec3(cell), grid.xyz));
     vec2 v = inside ? texelFetch(densityIn, cell, 0).xy : vec2(0.0);
+    bool smokeOnly = (flags & 1u) != 0u;
+    uint pages = flags >> 1u;
 
     if (gl_LocalInvocationIndex == 0u)
         occupied = 0u;
     barrier();
-    if (inside && (v.x > Empty || abs(v.y) > Empty))
+    if (inside && (v.x > Empty || (!smokeOnly && abs(v.y) > Empty)))
         atomicOr(occupied, 1u);
     barrier();
 
@@ -55,20 +94,35 @@ void main()
     if (gl_LocalInvocationIndex == 0u) {
         uint entry = 0u;
         if (occupied != 0u) {
-            uint n = atomicAdd(count, 1u);
-            entry = n < reserve ? base + n + 1u : 0xFFFFFFFFu;
+            atomicAdd(count, 1u);
+            uint size = smokeOnly ? 1u : 2u;
+            uint slot = atomicAdd(next, size);
+            // Within the bound pages (the counter only grows: never before firstPage).
+            if (slot + size <= (firstPage + pages) * PageSlots && slot >= firstPage * PageSlots) {
+                entry = slot + 1u;
+            } else {
+                entry = 0xFFFFFFFFu;
+                atomicOr(leftOut, 1u);
+            }
         }
         entries[index] = entry;
-        slot = entry;
+        first = entry;
     }
     barrier();
 
-    if (slot == 0u || slot == 0xFFFFFFFFu)
+    if (first == 0u || first == 0xFFFFFFFFu)
         return;
-    uint s = slot - 1u;
-    ivec3 origin = ivec3(int(s % 32u), int((s / 32u) % 32u), int(s / 1024u)) * 8;
-    float smoke = max(v.x, 0.0);
-    vec2 q = vec2(smoke / (1.0 + smoke), 0.5 + 0.5 * v.y / (1.0 + abs(v.y)));
-    uvec2 k = uvec2(round(clamp(q, 0.0, 1.0) * 65535.0)); // 16 bits each: high byte, low byte
-    imageStore(page, origin + local, vec4(vec2(k.x >> 8u, k.x & 255u), vec2(k.y >> 8u, k.y & 255u)) / 255.0);
+    uint slot = first - 1u;
+    if (smokeOnly) {
+        // Two voxels a texel: z even in rg, z odd in ba (the odd thread writes nothing).
+        if ((local.z & 1) != 0)
+            return;
+        float odd = inside ? texelFetch(densityIn, cell + ivec3(0, 0, 1), 0).x : 0.0;
+        if (!all(lessThan(uvec3(cell + ivec3(0, 0, 1)), grid.xyz)))
+            odd = 0.0;
+        store(slot, ivec3(local.xy, local.z / 2), vec4(bytes(quantizeSmoke(v.x)), bytes(quantizeSmoke(odd))));
+    } else {
+        vec2 q = vec2(quantizeSmoke(v.x), 0.5 + 0.5 * v.y / (1.0 + abs(v.y)));
+        store(slot + uint(local.z / 4), ivec3(local.xy, local.z % 4), vec4(bytes(q.x), bytes(q.y)));
+    }
 }

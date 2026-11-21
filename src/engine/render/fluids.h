@@ -44,16 +44,17 @@ class Scene;
 // catching up is spread over frames within FrameBudget (pending()).
 //
 // The cache, two kinds of copies within setCacheBudget() bytes per volume, dropped on an edit:
-//   frames     every frame as it's drawn (smoke and temperature), sparse, like a VDB grid: the
-//              grid in bricks of 8^3 voxels, only the bricks with something in them, quantized to
-//              16 bits per channel (fluid_brick_pack.comp), into a pool of pages (3D textures of
-//              32^3 bricks, PageBytes each) shared by the volume's frames, with a table per frame
-//              of where its bricks are. A cached frame is drawn as it is, without simulating (the
-//              simulation stays where it was): fluid_brick_unpack.comp makes it dense again in a
-//              texture of its own. Each frame reserves slots in a page from how many bricks the
-//              last frames had; the table's count, read back a frame or two later, confirms it
-//              (more bricks than reserved: the frame isn't cached) and returns the unused slots
-//              of the latest reservation. Frames get FrameShare of the budget.
+//   frames     every frame as it's drawn, sparse, like a VDB grid: the grid in bricks of 8^3
+//              voxels, only the bricks with something in them, quantized to 16 bits
+//              (fluid_brick_pack.comp), into a pool of pages (PageBytes each) shared by the
+//              volume's frames, with a table per frame of where its bricks are. The bricks take
+//              the pool's slots in order from one counter on the GPU, without gaps; the counter,
+//              read back a frame or two later, tells which pages to bind and when to make the
+//              next. Smoke and temperature take two slots a brick; without emission (no fire to
+//              draw) only the smoke is kept, one slot (changing that drops the frames). A cached
+//              frame is drawn as it is, without simulating (the simulation stays where it was):
+//              fluid_brick_unpack.comp makes it dense again in a texture of its own. Frames get
+//              FrameShare of the budget.
 //   snapshots  every `interval` steps all the fields (velocity, density, pressure,
 //              fluid_copy.comp), exact (bit for bit), in the rest of the budget (the interval
 //              grows with the timeline to fit): to simulate a frame that isn't cached, going back
@@ -84,8 +85,8 @@ public:
     static constexpr quint64 DefaultCacheBudget = 2048ull * 1024 * 1024;
     static constexpr double FrameShare = 0.75;
     static constexpr int MinSnapshotInterval = 4;
-    static constexpr int PageBricks = 32 * 32 * 32;                  // must match fluid_brick_*.comp
-    static constexpr quint64 PageBytes = quint64(PageBricks) * 512 * 4; // 4 bytes a voxel
+    static constexpr int PageSlots = 65536;                          // must match fluid_brick_*.comp
+    static constexpr quint64 PageBytes = 256ull * 256 * 256 * 4;     // a page: 256^3 RGBA8 texels
 
     void initialize(QRhi *rhi);
     // Pipelines for drawing into the scene's kept pass (Renderer::m_sceneKeepRp).
@@ -147,16 +148,15 @@ private:
     {
         std::array<std::unique_ptr<QRhiTexture>, 3> fields;
     };
-    // A frame in the brick pool: its table (header and an entry per brick) and its reservation.
+    // A frame in the brick pool: its table (header and an entry per brick).
     struct CachedFrame
     {
         std::unique_ptr<QRhiBuffer> table;
-        int page = 0;            // in Volume::pages
-        int base = 0, reserve = 0; // slots in the page
-        bool confirmed = false;  // its count read back, within the reservation: drawable
+        int page = 0;            // the first of the two pages it was packed with (Volume::pages)
+        bool confirmed = false;  // its header read back, every brick with a slot: drawable
         int bricks = 0;          // once confirmed
     };
-    // A table's count, read back after its frame was packed.
+    // Read back after a frame was packed: its table's header, or the pool counter (step -1).
     struct Readback
     {
         EntityId volume = InvalidEntity;
@@ -188,9 +188,9 @@ private:
         quint64 snapshotBytes = 0;        // one snapshot's
         std::map<int, CachedFrame> frames; // by step
         std::vector<std::unique_ptr<QRhiTexture>> pages; // the brick pool (RGBA8: 2 x 16 bits, 256^3 voxels each)
-        int nextSlot = 0;                 // where the next reservation starts (page * PageBricks + slot)
-        int recentBricks = 0;             // bricks of the latest confirmed frame
-        int unconfirmed = 0;              // frames reserved since then
+        std::unique_ptr<QRhiBuffer> counter; // the pool's slots taken (one uint, on the GPU)
+        quint32 knownSlots = 0;           // the counter as last read back (it's at least this)
+        bool smokeOnly = false;           // how the frames are kept (no emission: smoke only)
         quint64 generation = 0;           // bumped when the cache is dropped
         std::unique_ptr<QRhiTexture> unpacked; // the cached frame being drawn, dense (RGBA16F)
         int unpackedStep = -1;            // which (-1: none)
@@ -203,7 +203,8 @@ private:
     // A copy (fluid_copy.comp): from the three textures to the other three. Its binding set is
     // retired at once (it lives until the frames using it are done).
     QRhiShaderResourceBindings *copyBindings(Volume &v, QRhiTexture *const from[3], QRhiTexture *const to[3]);
-    void dropSnapshots(Volume &v);
+    void dropSnapshots(Volume &v); // and the frames
+    void dropFrames(Volume &v);
     void retire(Volume &v);
     template<typename T> void retire(std::unique_ptr<T> &resource)
     {

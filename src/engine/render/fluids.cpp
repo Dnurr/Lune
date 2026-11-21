@@ -218,11 +218,13 @@ void FluidSystem::initialize(QRhi *rhi)
     m_layoutStorage->create();
     m_packLayout.reset(m_rhi->newShaderResourceBindings());
     m_packLayout->setBindings({ B::uniformBuffer(0, cs, m_layoutUniforms.get()), B::sampledTexture(1, cs, t, m_linear.get()),
-                                B::bufferLoadStore(2, cs, m_layoutStorage.get()), B::imageStore(3, cs, t, 0) });
+                                B::bufferLoadStore(2, cs, m_layoutStorage.get()), B::bufferLoadStore(3, cs, m_layoutStorage.get()),
+                                B::imageStore(4, cs, t, 0), B::imageStore(5, cs, t, 0) });
     m_packLayout->create();
     m_unpackLayout.reset(m_rhi->newShaderResourceBindings());
     m_unpackLayout->setBindings({ B::uniformBuffer(0, cs, m_layoutUniforms.get()), B::sampledTexture(1, cs, t, m_nearest.get()),
-                                  B::bufferLoad(2, cs, m_layoutStorage.get()), B::imageStore(3, cs, t, 0) });
+                                  B::sampledTexture(2, cs, t, m_nearest.get()), B::bufferLoad(3, cs, m_layoutStorage.get()),
+                                  B::imageStore(4, cs, t, 0) });
     m_unpackLayout->create();
     m_drawLayout.reset(m_rhi->newShaderResourceBindings());
     m_drawLayout->setBindings({ B::uniformBuffer(0, B::VertexStage | B::FragmentStage, m_layoutUniforms.get()),
@@ -461,6 +463,11 @@ void FluidSystem::dropSnapshots(Volume &v)
         for (auto &t : snapshot.fields)
             retire(t);
     v.snapshots.clear();
+    dropFrames(v);
+}
+
+void FluidSystem::dropFrames(Volume &v)
+{
     for (auto &[step, frame] : v.frames)
         retire(frame.table);
     v.frames.clear();
@@ -471,9 +478,8 @@ void FluidSystem::dropSnapshots(Volume &v)
     retire(v.drawSrbs[2]); // they read `unpacked`
     retire(v.shadowSrbs[2]);
     v.unpackedStep = -1;
-    v.nextSlot = 0;
-    v.recentBricks = 0;
-    v.unconfirmed = 0;
+    retire(v.counter);
+    v.knownSlots = 0;
     v.shown = false;
     ++v.generation;
 }
@@ -545,7 +551,8 @@ void FluidSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float seco
         m_pendingUpload->release();
         m_pendingUpload = nullptr;
     }
-    // Counts of packed frames, read back since: confirm them, or drop those past their reservation.
+    // Read back since: frame headers (confirm the frame, or drop it if some bricks had no slot)
+    // and pool counters (which pages the next frames bind).
     for (auto it = m_readbacks.begin(); it != m_readbacks.end();) {
         if (!it->done) {
             ++it;
@@ -554,27 +561,20 @@ void FluidSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float seco
         auto vol = m_volumes.find(it->volume);
         if (vol != m_volumes.end() && vol->second.generation == it->generation && it->result.data.size() >= 4) {
             Volume &v = vol->second;
-            auto frame = v.frames.find(it->step);
-            if (frame != v.frames.end()) {
-                quint32 count = 0;
-                std::memcpy(&count, it->result.data.constData(), 4);
-                CachedFrame &f = frame->second;
-                const int start = f.page * PageBricks + f.base;
-                const bool latest = start + f.reserve == v.nextSlot;
-                if (int(count) <= f.reserve) {
-                    f.confirmed = true;
-                    f.bricks = int(count);
-                    v.recentBricks = int(count);
-                    if (latest) // the slots it didn't use go back
-                        v.nextSlot = start + int(count);
-                } else { // more bricks than reserved: not cached, but the next reservations know
-                    if (latest)
-                        v.nextSlot = start;
-                    v.recentBricks = qMax(v.recentBricks, int(count));
-                    retire(f.table);
+            if (it->step < 0) {
+                quint32 taken = 0; // ("slots" is a Qt keyword)
+                std::memcpy(&taken, it->result.data.constData(), 4);
+                v.knownSlots = qMax(v.knownSlots, taken);
+            } else if (auto frame = v.frames.find(it->step); frame != v.frames.end() && it->result.data.size() >= 8) {
+                quint32 header[2] = {};
+                std::memcpy(header, it->result.data.constData(), 8);
+                if (header[1] == 0) {
+                    frame->second.confirmed = true;
+                    frame->second.bricks = int(header[0]);
+                } else {
+                    retire(frame->second.table);
                     v.frames.erase(frame);
                 }
-                v.unconfirmed = qMax(0, v.unconfirmed - 1);
             }
         }
         it = m_readbacks.erase(it);
@@ -688,6 +688,12 @@ void FluidSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float seco
             rub->updateDynamicBuffer(v.clearUniforms.get(), 0, 16, grid); // clear and copy passes
         }
 
+        // Without emission the frames keep only the smoke (half the memory); switching drops them.
+        if (const bool smokeOnly = f.emission <= 0.0f; smokeOnly != v.smokeOnly) {
+            dropFrames(v);
+            v.smokeOnly = smokeOnly;
+        }
+
         // A cached frame: drawn as it is (unpacked once), the simulation stays where it was.
         v.shown = false;
         if (target != v.stepsDone && m_unpackPipe) {
@@ -707,9 +713,12 @@ void FluidSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float seco
                         const auto cs = B::ComputeStage;
                         const CachedFrame &f = cached->second;
                         std::unique_ptr<QRhiShaderResourceBindings> srb(m_rhi->newShaderResourceBindings());
+                        QRhiTexture *pageA = v.pages[size_t(f.page)].get();
+                        QRhiTexture *pageB = size_t(f.page + 1) < v.pages.size() ? v.pages[size_t(f.page + 1)].get() : pageA;
                         srb->setBindings({ B::uniformBuffer(0, cs, v.clearUniforms.get()),
-                                           B::sampledTexture(1, cs, v.pages[size_t(f.page)].get(), m_nearest.get()),
-                                           B::bufferLoad(2, cs, f.table.get()), B::imageStore(3, cs, v.unpacked.get(), 0) });
+                                           B::sampledTexture(1, cs, pageA, m_nearest.get()),
+                                           B::sampledTexture(2, cs, pageB, m_nearest.get()), B::bufferLoad(3, cs, f.table.get()),
+                                           B::imageStore(4, cs, v.unpacked.get(), 0) });
                         srb->create();
                         dispatches.push_back({ m_unpackPipe.get(), srb.get(), ~0u, gx, gy, gz });
                         retire(srb);
@@ -769,6 +778,7 @@ void FluidSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float seco
         }
 
         QByteArray data(qsizetype(count) * stride, '\0');
+        bool packed = false; // a frame went to the cache: read the pool counter back after
         for (int i = 0; i < count; ++i) {
             const int k = v.stepsDone + i;
             const Entity box = at(entity, timeline.start + k); // the volume during this step
@@ -836,65 +846,64 @@ void FluidSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float seco
             pass(Project);
             v.v ^= 1;
 
-            // This frame (k + 1 steps), sparse, for drawing it again: a reservation of slots in a
-            // page, from the bricks of the latest confirmed frame (more margin the longer since).
+            // This frame (k + 1 steps), sparse, for drawing it again: its bricks take the pool's
+            // next slots (the GPU counter). Bound: the page the known count is in and the next, so
+            // the frames since the last read-back have a page and more to go into.
             const int done = k + 1;
             const int allBricks = gx * gy * gz;
-            if (!v.frames.count(done) && m_packPipe && allBricks <= PageBricks) {
-                const double margin = 1.25 + 0.05 * double(v.unconfirmed);
-                // Before any frame is confirmed: an eighth of the grid.
-                const int recent = v.recentBricks > 0 ? v.recentBricks : allBricks / 8;
-                const int reserve = qMin(allBricks, int(double(recent + 64) * margin));
-                int page = v.nextSlot / PageBricks, base = v.nextSlot % PageBricks;
-                if (base + reserve > PageBricks) { // to the start of the next page
-                    ++page;
-                    base = 0;
-                }
-                const quint64 frameBudget = quint64(double(m_cacheBudget) * FrameShare);
-                bool room = page < int(v.pages.size());
-                if (!room && PageBytes * quint64(page + 1) <= frameBudget) {
+            const quint64 frameBudget = quint64(double(m_cacheBudget) * FrameShare);
+            const int maxPages = int(frameBudget / PageBytes);
+            const int page = int(v.knownSlots / quint32(PageSlots));
+            if (!v.frames.count(done) && m_packPipe && page < maxPages) {
+                for (int p = int(v.pages.size()); p <= qMin(page + 1, maxPages - 1); ++p) {
                     std::unique_ptr<QRhiTexture> pool(m_rhi->newTexture(QRhiTexture::RGBA8, 256, 256, 256, 1,
                                                                         QRhiTexture::ThreeDimensional
                                                                             | QRhiTexture::UsedWithLoadStore));
-                    if (pool->create()) {
-                        fixVolumeStorageView(m_rhi, pool.get());
-                        v.pages.push_back(std::move(pool));
-                        room = page < int(v.pages.size());
+                    if (!pool->create())
+                        break;
+                    fixVolumeStorageView(m_rhi, pool.get());
+                    v.pages.push_back(std::move(pool));
+                }
+                if (!v.counter) {
+                    v.counter.reset(m_rhi->newBuffer(QRhiBuffer::Immutable, QRhiBuffer::StorageBuffer, 16));
+                    if (v.counter->create()) {
+                        const quint32 zero[4] = {};
+                        rub->uploadStaticBuffer(v.counter.get(), 0, 16, zero);
+                    } else {
+                        retire(v.counter);
                     }
                 }
-                if (room) {
-                    CachedFrame frame;
-                    frame.page = page;
-                    frame.base = base;
-                    frame.reserve = reserve;
-                    frame.table.reset(m_rhi->newBuffer(QRhiBuffer::Immutable, QRhiBuffer::StorageBuffer,
-                                                       quint32(16 + 4 * allBricks)));
-                    if (frame.table->create()) {
-                        const quint32 header[4] = { 0, quint32(base), quint32(reserve), 0 };
-                        rub->uploadStaticBuffer(frame.table.get(), 0, 16, header);
-                        using B = QRhiShaderResourceBinding;
-                        const auto cs = B::ComputeStage;
-                        std::unique_ptr<QRhiShaderResourceBindings> srb(m_rhi->newShaderResourceBindings());
-                        srb->setBindings({ B::uniformBuffer(0, cs, v.clearUniforms.get()),
-                                           B::sampledTexture(1, cs, v.density[size_t(v.d)].get(), m_nearest.get()),
-                                           B::bufferLoadStore(2, cs, frame.table.get()),
-                                           B::imageStore(3, cs, v.pages[size_t(page)].get(), 0) });
-                        srb->create();
-                        dispatches.push_back({ m_packPipe.get(), srb.get(), ~0u, gx, gy, gz });
-                        retire(srb);
-                        // Its count, read back after the passes (simulate() of a later frame checks it).
-                        if (!readbacks)
-                            readbacks = m_rhi->nextResourceUpdateBatch();
-                        Readback &r = m_readbacks.emplace_back();
-                        r.volume = entity.id;
-                        r.generation = v.generation;
-                        r.step = done;
-                        r.result.completed = [&r] { r.done = true; };
-                        readbacks->readBackBuffer(frame.table.get(), 0, 4, &r.result);
-                        v.nextSlot = page * PageBricks + base + reserve;
-                        ++v.unconfirmed;
-                        v.frames.emplace(done, std::move(frame));
-                    }
+                CachedFrame frame;
+                frame.page = page;
+                frame.table.reset(m_rhi->newBuffer(QRhiBuffer::Immutable, QRhiBuffer::StorageBuffer,
+                                                   quint32(16 + 4 * allBricks)));
+                if (page < int(v.pages.size()) && v.counter && frame.table->create()) {
+                    const int bound = page + 1 < int(v.pages.size()) ? 2 : 1;
+                    const quint32 header[4] = { 0, 0, quint32(page), quint32((v.smokeOnly ? 1 : 0) | (bound << 1)) };
+                    rub->uploadStaticBuffer(frame.table.get(), 0, 16, header);
+                    QRhiTexture *pageA = v.pages[size_t(page)].get();
+                    QRhiTexture *pageB = bound == 2 ? v.pages[size_t(page + 1)].get() : pageA;
+                    using B = QRhiShaderResourceBinding;
+                    const auto cs = B::ComputeStage;
+                    std::unique_ptr<QRhiShaderResourceBindings> srb(m_rhi->newShaderResourceBindings());
+                    srb->setBindings({ B::uniformBuffer(0, cs, v.clearUniforms.get()),
+                                       B::sampledTexture(1, cs, v.density[size_t(v.d)].get(), m_nearest.get()),
+                                       B::bufferLoadStore(2, cs, v.counter.get()), B::bufferLoadStore(3, cs, frame.table.get()),
+                                       B::imageStore(4, cs, pageA, 0), B::imageStore(5, cs, pageB, 0) });
+                    srb->create();
+                    dispatches.push_back({ m_packPipe.get(), srb.get(), ~0u, gx, gy, gz });
+                    retire(srb);
+                    // Its header, read back after the passes (a later simulate() checks it).
+                    if (!readbacks)
+                        readbacks = m_rhi->nextResourceUpdateBatch();
+                    Readback &r = m_readbacks.emplace_back();
+                    r.volume = entity.id;
+                    r.generation = v.generation;
+                    r.step = done;
+                    r.result.completed = [&r] { r.done = true; };
+                    readbacks->readBackBuffer(frame.table.get(), 0, 8, &r.result);
+                    v.frames.emplace(done, std::move(frame));
+                    packed = true;
                 }
             }
 
@@ -924,6 +933,16 @@ void FluidSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float seco
         rub->updateDynamicBuffer(v.stepUniforms.get(), 0, quint32(data.size()), data.constData());
         v.stepsDone += count;
         m_stepsLastFrame += count;
+        if (packed) {
+            if (!readbacks)
+                readbacks = m_rhi->nextResourceUpdateBatch();
+            Readback &r = m_readbacks.emplace_back();
+            r.volume = entity.id;
+            r.generation = v.generation;
+            r.step = -1;
+            r.result.completed = [&r] { r.done = true; };
+            readbacks->readBackBuffer(v.counter.get(), 0, 4, &r.result);
+        }
     }
     for (auto it = m_volumes.begin(); it != m_volumes.end();) {
         if (it->second.seen) {
