@@ -193,6 +193,12 @@ void FluidSystem::initialize(QRhi *rhi)
         m_supported = false;
         return;
     }
+    // The brick pass's second page when there's only one (the same texture can't be bound twice
+    // for writing: Direct3D 11 then skips the dispatch). Never written: the pass knows it's one.
+    m_spareBrickPage.reset(m_rhi->newTexture(QRhiTexture::RGBA8, 1, 1, 1, 1,
+                                             QRhiTexture::ThreeDimensional | QRhiTexture::UsedWithLoadStore));
+    if (m_spareBrickPage->create())
+        fixVolumeStorageView(m_rhi, m_spareBrickPage.get());
     m_layoutUniforms.reset(m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, kVolumeUbufSize));
     m_layoutUniforms->create();
 
@@ -348,6 +354,7 @@ void FluidSystem::release()
     m_shadowLayout.reset();
     m_layoutUniforms.reset();
     m_layoutVolume.reset();
+    m_spareBrickPage.reset();
     if (m_pendingUpload) {
         m_pendingUpload->release();
         m_pendingUpload = nullptr;
@@ -882,7 +889,7 @@ void FluidSystem::simulate(QRhiCommandBuffer *cb, const Scene *scene, float seco
                     const quint32 header[4] = { 0, 0, quint32(page), quint32((v.smokeOnly ? 1 : 0) | (bound << 1)) };
                     rub->uploadStaticBuffer(frame.table.get(), 0, 16, header);
                     QRhiTexture *pageA = v.pages[size_t(page)].get();
-                    QRhiTexture *pageB = bound == 2 ? v.pages[size_t(page + 1)].get() : pageA;
+                    QRhiTexture *pageB = bound == 2 ? v.pages[size_t(page + 1)].get() : m_spareBrickPage.get();
                     using B = QRhiShaderResourceBinding;
                     const auto cs = B::ComputeStage;
                     std::unique_ptr<QRhiShaderResourceBindings> srb(m_rhi->newShaderResourceBindings());

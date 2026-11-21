@@ -224,6 +224,7 @@ private:
     int m_timelineStart = 0; // of the last simulate()
     std::unique_ptr<QRhiBuffer> m_layoutUniforms;
     std::unique_ptr<QRhiTexture> m_layoutVolume;    // 1x1x1, for the layouts and unused inputs
+    std::unique_ptr<QRhiTexture> m_spareBrickPage;  // 1x1x1 RGBA8: a brick pass's second page when there's one
     std::unique_ptr<QRhiTexture> m_distanceStandIn; // 1x1
     QRhiTexture *m_sceneDistance = nullptr;         // not owned
     const ShadowMaps *m_shadowMaps = nullptr;       // not owned
